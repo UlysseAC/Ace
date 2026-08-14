@@ -1,8 +1,18 @@
 import crypto from 'node:crypto';
 import db from '../db/connection.js';
 
+// Code court (sans caractères ambigus 0/O/1/I/L) : permet une saisie manuelle
+// facile en secours si le scan caméra ne fonctionne pas (ex: Safari iOS qui
+// bloque la caméra sur une page non-HTTPS/non-localhost).
+const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const CODE_LENGTH = 8;
+
 function generateHash() {
-  return crypto.randomUUID();
+  let code = '';
+  for (let i = 0; i < CODE_LENGTH; i++) {
+    code += CODE_CHARS[crypto.randomInt(CODE_CHARS.length)];
+  }
+  return code;
 }
 
 /** Génère `quantite` QR codes uniques pointant vers une mission/produit/pénalité. */
@@ -44,7 +54,8 @@ export function createQrCodesForCarte(carteCode, quantite) {
  * (WHERE statut = 'valide') est atomique — si deux scans arrivent en même
  * temps, un seul obtient `changes === 1`, l'autre est rejeté.
  */
-export function consumeQrCode(hash, joueurId) {
+export function consumeQrCode(hashRaw, joueurId) {
+  const hash = String(hashRaw).trim().toUpperCase();
   const result = db.prepare(
     `UPDATE qrcodes SET statut = 'utilise', utilise_par = ?, utilise_at = datetime('now')
      WHERE hash = ? AND statut = 'valide'`

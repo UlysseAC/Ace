@@ -47,6 +47,12 @@ npm run dev:client   # frontend Vite avec proxy vers le backend (port 5173)
 
 Le serveur sauvegarde automatiquement la base de données toutes les 5 minutes dans `server/data/backups/` (réglable via `BACKUP_INTERVAL_MIN`). En cas de plantage, arrêtez le serveur, remplacez `server/data/casino.db` par la sauvegarde la plus récente, puis relancez.
 
+## 📷 Scan caméra sur iPhone/iPad (Safari)
+
+Safari sur iOS bloque l'accès à la caméra pour les pages qui ne sont pas en HTTPS (hors `localhost`) — ce qui sera le cas ici puisque le serveur est accédé via une adresse Wi-Fi locale (`http://192.168.x.x:3000`). Sur beaucoup d'appareils, le scan caméra risque donc de ne pas fonctionner.
+
+Pour cette raison, **chaque chèque et carte physique imprime aussi un code en texte lisible sous le QR** : si la caméra ne fonctionne pas, le joueur peut taper ce code à la main dans l'interface banque automatisée (champ prévu à cet effet). Teste les deux méthodes (caméra + saisie manuelle) avant la soirée sur les appareils réels que les joueurs utiliseront.
+
 ## Procédures de secours (panne serveur)
 
 - **Banquier** : bouton "Export CSV de secours" (ouvrable dans LibreOffice Calc) pour continuer à pointer les comptes à la main.

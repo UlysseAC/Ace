@@ -35,6 +35,7 @@ export async function generateChequesPdf(itemId, quantite) {
   const isPng = template.imagePath.toLowerCase().endsWith('.png');
   const templateImage = isPng ? await pdfDoc.embedPng(templateBytes) : await pdfDoc.embedJpg(templateBytes);
   const font = await pdfDoc.embedFont('Helvetica-Bold');
+  const codeFont = await pdfDoc.embedFont('Helvetica');
 
   for (const hash of hashes) {
     const page = pdfDoc.addPage([templateImage.width, templateImage.height]);
@@ -44,11 +45,19 @@ export async function generateChequesPdf(itemId, quantite) {
     const qrBytes = Buffer.from(qrDataUrl.split(',')[1], 'base64');
     const qrImage = await pdfDoc.embedPng(qrBytes);
     const qrSize = template.qr?.size ?? 100;
-    page.drawImage(qrImage, {
-      x: template.qr?.x ?? 20,
-      y: template.qr?.y ?? 20,
-      width: qrSize,
-      height: qrSize
+    const qrX = template.qr?.x ?? 20;
+    const qrY = template.qr?.y ?? 20;
+    page.drawImage(qrImage, { x: qrX, y: qrY, width: qrSize, height: qrSize });
+
+    // Code lisible sous le QR : permet la saisie manuelle si le scan caméra
+    // ne fonctionne pas (ex: Safari iOS hors HTTPS/localhost).
+    const codeSize = 10;
+    const codeWidth = codeFont.widthOfTextAtSize(hash, codeSize);
+    page.drawText(hash, {
+      x: qrX + qrSize / 2 - codeWidth / 2,
+      y: qrY - codeSize - 4,
+      size: codeSize,
+      font: codeFont
     });
 
     page.drawText(item.nom, {

@@ -31,9 +31,14 @@ export default function Scanner({ onResult }) {
       <div id={REGION_ID} style={{ width: '100%', maxWidth: 360, margin: '0 auto', borderRadius: 12, overflow: 'hidden' }} />
       {cameraError && <div className="error-msg">{cameraError}</div>}
       <div className="field" style={{ marginTop: 16 }}>
-        <label>Ou saisis le code manuellement</label>
+        <label>Ou saisis le code imprimé sous le QR (si la caméra ne fonctionne pas)</label>
         <div className="row">
-          <input value={manuel} onChange={(e) => setManuel(e.target.value)} placeholder="Code du QR" />
+          <input
+            value={manuel}
+            onChange={(e) => setManuel(e.target.value.toUpperCase())}
+            placeholder="Ex: AB3D9F2K"
+            style={{ textTransform: 'uppercase', letterSpacing: '0.1em' }}
+          />
           <button className="btn btn-primary" onClick={() => manuel && onResult(manuel)}>Valider</button>
         </div>
       </div>

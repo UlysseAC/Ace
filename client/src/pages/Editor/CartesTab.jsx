@@ -41,7 +41,7 @@ export default function CartesTab({ role }) {
     const quantite = Number(prompt('Combien de QR codes physiques générer pour cette carte ?', '10'));
     if (!quantite) return;
     const { hashes } = await api(`/cartes/${code}/qrcodes`, { method: 'POST', role, body: { quantite } });
-    const images = await Promise.all(hashes.map((h) => QRCode.toDataURL(h, { margin: 1, width: 160 })));
+    const images = await Promise.all(hashes.map(async (h) => ({ hash: h, src: await QRCode.toDataURL(h, { margin: 1, width: 160 }) })));
     setQrByCode((s) => ({ ...s, [code]: images }));
   }
 
@@ -81,8 +81,18 @@ export default function CartesTab({ role }) {
                 <button className="btn" onClick={() => genererQr(c.code)}>Générer des QR codes physiques</button>
               </div>
               {qrByCode[c.code] && (
-                <div className="row" style={{ marginTop: 10, flexWrap: 'wrap' }}>
-                  {qrByCode[c.code].map((src, i) => <img key={i} src={src} alt="qr" width={80} height={80} />)}
+                <p className="muted" style={{ marginTop: 10 }}>
+                  Imprime le code sous chaque QR sur la carte physique (saisie manuelle possible si la caméra ne fonctionne pas) :
+                </p>
+              )}
+              {qrByCode[c.code] && (
+                <div className="row" style={{ marginTop: 4, flexWrap: 'wrap' }}>
+                  {qrByCode[c.code].map(({ hash, src }) => (
+                    <div key={hash} className="center">
+                      <img src={src} alt="qr" width={80} height={80} />
+                      <div style={{ fontFamily: 'monospace', fontSize: '0.75rem' }}>{hash}</div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
