@@ -33,6 +33,27 @@ npm run dev:server   # backend avec rechargement automatique (port 3000)
 npm run dev:client   # frontend Vite avec proxy vers le backend (port 5173)
 ```
 
+## 🧪 Tester sans laptop, depuis un iPad (GitHub Codespaces)
+
+Pas d'ordinateur sous la main pour configurer/tester en amont ? Utilise [GitHub Codespaces](https://github.com/features/codespaces), qui fait tourner tout le projet dans le cloud et te donne une URL accessible depuis Safari sur iPad :
+
+1. Sur la page GitHub du repo (branche du projet) → bouton **"Code"** → onglet **"Codespaces"** → **"Create codespace"**.
+2. **Réutilise toujours ce même Codespace** aux sessions suivantes (ne recrée pas un nouveau Codespace à chaque fois) : il se met juste en pause après inactivité, et tes données (joueurs, missions, cartes...) restent intactes quand tu le rouvres.
+3. Dans le terminal intégré : `npm install && npm run build:client && npm start`.
+4. Un pop-up "Open in Browser" apparaît pour les ports détectés — ouvre le port **3443**. Passe-le en visibilité **"Public"** (onglet "Ports" en bas) si plusieurs onglets/appareils doivent y accéder.
+5. Avantage bonus : l'URL Codespaces est déjà en HTTPS de confiance (certificat GitHub), donc **le scan caméra fonctionne directement, sans installer de certificat**.
+
+⚠️ Codespaces est uniquement pour la configuration et les tests en amont — le soir de l'événement, il faut repasser sur un vrai laptop en local (voir plus bas), pour ne pas dépendre d'internet sur place.
+
+### Transférer la configuration du Codespace vers le laptop du soir J
+
+Toute la configuration (joueurs, missions, cartes, dés, images, modèle de chèque) est stockée dans des fichiers non versionnés sur Git (exprès, car propres à chaque déploiement) : `server/data/casino.db` et le dossier `server/uploads/`. Avant l'événement, il faut les récupérer du Codespace et les mettre au même endroit sur le laptop :
+
+1. Arrête le serveur dans le Codespace (Ctrl+C dans le terminal) pour figer la base.
+2. Dans l'explorateur de fichiers du Codespace (panneau de gauche), clic droit sur `server/data/casino.db` → **Download**. Fais de même pour tout le contenu de `server/uploads/`.
+3. Sur le laptop, après avoir fait `npm install` une première fois (ce qui crée les dossiers), copie ces fichiers téléchargés aux mêmes emplacements (`server/data/casino.db`, `server/uploads/cartes/...`, `server/uploads/cheques/...`) avant de lancer `npm start`.
+4. Refais un tour rapide de chaque interface sur le laptop pour confirmer que tout est bien là (comptes joueurs, cartes, chèque...).
+
 ## ⚠️ À faire avant la soirée
 
 1. **Changer les identifiants éditeur par défaut** (`admin` / `admin`) : Éditeur → Configuration, ou directement en base.
