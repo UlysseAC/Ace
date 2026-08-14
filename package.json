@@ -11,7 +11,8 @@
     "dev:server": "npm run dev --workspace=server",
     "dev:client": "npm run dev --workspace=client",
     "start": "npm run start --workspace=server",
-    "build:client": "npm run build --workspace=client"
+    "build:client": "npm run build --workspace=client",
+    "update": "git pull && npm install && npm run build:client"
   },
   "license": "UNLICENSED"
 }

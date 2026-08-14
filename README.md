@@ -26,6 +26,18 @@ npm start             # démarre le serveur (sert aussi le frontend buildé)
 
 Le serveur affiche au démarrage les adresses IP locales à utiliser depuis les autres appareils (HTTP sur le port `3000`, HTTPS sur le port `3443` — voir la section certificat ci-dessous). Tous les appareils doivent être sur le **même réseau Wi-Fi**.
 
+`npm start` surveille automatiquement les fichiers du serveur et redémarre tout seul dès qu'ils changent (ex: après un `git pull`) — pas besoin de faire Ctrl+C manuellement.
+
+### Mettre à jour vers la dernière version
+
+Dans un **second terminal** (sans toucher à celui où `npm start` tourne) :
+
+```bash
+npm run update   # git pull + npm install + rebuild du frontend
+```
+
+Le serveur détecte le changement et redémarre tout seul (quelques secondes de coupure). Le frontend, lui, se met à jour dès qu'on recharge la page dans le navigateur — pas besoin de relancer quoi que ce soit pour lui.
+
 ### Mode développement
 
 ```bash
