@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, setToken, getToken } from '../../api/client.js';
 import JoueursTab from './JoueursTab.jsx';
 import ItemsTab from './ItemsTab.jsx';
@@ -51,7 +52,10 @@ export default function Editor() {
   if (!connecte) {
     return (
       <div className="app-shell">
-        <div className="top-bar"><h1>🛠️ Interface Éditeur</h1></div>
+        <div className="top-bar">
+          <h1>🛠️ Interface Éditeur</h1>
+          <Link className="btn" to="/">🏠 Accueil</Link>
+        </div>
         <div className="content">
           <form className="card" onSubmit={login}>
             <h2 style={{ marginTop: 0 }}>Connexion éditeur</h2>
@@ -69,7 +73,10 @@ export default function Editor() {
     <div className="app-shell wide">
       <div className="top-bar">
         <h1>🛠️ Interface Éditeur</h1>
-        <button className="btn" onClick={logout}>Se déconnecter</button>
+        <div className="row">
+          <button className="btn" onClick={logout}>Se déconnecter</button>
+          <Link className="btn" to="/">🏠 Accueil</Link>
+        </div>
       </div>
       <div className="content" style={{ maxWidth: 1100 }}>
         <div className="row" style={{ marginBottom: 18, flexWrap: 'wrap' }}>

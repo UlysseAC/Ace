@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../../api/client.js';
 
 function AmountPad({ title, boutons, onValidate, validateLabel, extraInfo, disabled }) {
@@ -107,7 +108,10 @@ export default function Croupier() {
 
   return (
     <div className="app-shell">
-      <div className="top-bar"><h1>🃏 Interface Croupier</h1></div>
+      <div className="top-bar">
+        <h1>🃏 Interface Croupier</h1>
+        <Link className="btn" to="/">🏠 Accueil</Link>
+      </div>
       <div className="content">
         <form className="card" onSubmit={chercherJoueur}>
           <div className="field">

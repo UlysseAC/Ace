@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../../api/client.js';
 
 const LABELS = { mission: 'Missions', produit: 'Produits', penalite: 'Pénalités' };
@@ -66,9 +67,12 @@ export default function Banker() {
     <div className="app-shell">
       <div className="top-bar">
         <h1>💰 Interface Banquier</h1>
-        <button className={`btn ${modeLocal ? 'btn-danger' : ''}`} onClick={toggleModeLocal}>
-          {modeLocal ? '⚠️ Mode Local ACTIF — désactiver' : 'Activer Mode Local (urgence)'}
-        </button>
+        <div className="row">
+          <button className={`btn ${modeLocal ? 'btn-danger' : ''}`} onClick={toggleModeLocal}>
+            {modeLocal ? '⚠️ Mode Local ACTIF — désactiver' : 'Activer Mode Local (urgence)'}
+          </button>
+          <Link className="btn" to="/">🏠 Accueil</Link>
+        </div>
       </div>
       <div className="content">
         {modeLocal && (

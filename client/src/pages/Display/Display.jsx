@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { getSocket } from '../../api/socket.js';
 import { api } from '../../api/client.js';
 
@@ -10,6 +11,10 @@ function fillPhrase(template, vars) {
 const COULEUR_LABEL = { rouge: 'Rouge', vert: 'Vert', don: 'Don' };
 
 export default function Display() {
+  const navigate = useNavigate();
+  const [showExit, setShowExit] = useState(false);
+  const [exitCode, setExitCode] = useState('');
+  const [exitError, setExitError] = useState('');
   const [classement, setClassement] = useState([]);
   const [habitantsParadis, setHabitantsParadis] = useState(0);
   const [config, setConfig] = useState({});
@@ -73,11 +78,36 @@ export default function Display() {
 
   const phraseHabitants = fillPhrase(config.phrase_habitants_paradis, { n: habitantsParadis });
 
+  async function tenterSortie(e) {
+    e.preventDefault();
+    setExitError('');
+    try {
+      const { ok } = await api('/auth/admin-exit', { method: 'POST', body: { code: exitCode } });
+      if (ok) navigate('/');
+      else setExitError('Code incorrect');
+    } catch (err) {
+      setExitError(err.message);
+    }
+  }
+
   return (
     <div className="app-shell wide">
       <div className="top-bar">
         <h1>📺 Écran d'affichage</h1>
+        <button className="btn" style={{ opacity: 0.5 }} onClick={() => setShowExit(true)}>⚙️</button>
       </div>
+      {showExit && (
+        <form className="card" style={{ maxWidth: 320, margin: '16px auto 0' }} onSubmit={tenterSortie}>
+          <div className="field"><label>Code admin pour revenir à l'accueil</label>
+            <input type="password" autoFocus value={exitCode} onChange={(e) => setExitCode(e.target.value)} />
+          </div>
+          {exitError && <div className="error-msg">{exitError}</div>}
+          <div className="row">
+            <button className="btn btn-primary" type="submit">Valider</button>
+            <button className="btn" type="button" onClick={() => { setShowExit(false); setExitCode(''); setExitError(''); }}>Annuler</button>
+          </div>
+        </form>
+      )}
       <div className="content" style={{ maxWidth: 1100 }}>
         {phase !== 'idle' && current && (
           <div className="card center" style={{ padding: 36 }}>
