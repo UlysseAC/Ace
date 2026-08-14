@@ -29,6 +29,17 @@ export function checkAdminExitCode(code) {
   return getConfig('code_admin_sortie') === String(code);
 }
 
+export function updateEditeurCredentials(editeurId, currentCode, newIdentifiant, newCode) {
+  const editeur = db.prepare('SELECT * FROM editeurs WHERE id = ?').get(editeurId);
+  if (!editeur || editeur.code !== String(currentCode)) return null;
+  db.prepare('UPDATE editeurs SET identifiant = ?, code = ? WHERE id = ?').run(
+    newIdentifiant || editeur.identifiant,
+    newCode || editeur.code,
+    editeurId
+  );
+  return db.prepare('SELECT id, identifiant FROM editeurs WHERE id = ?').get(editeurId);
+}
+
 export function getSession(token) {
   return sessions.get(token) || null;
 }

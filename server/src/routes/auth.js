@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { loginJoueur, loginEditeur, checkAdminExitCode, logout } from '../lib/auth.js';
+import { loginJoueur, loginEditeur, checkAdminExitCode, logout, updateEditeurCredentials, requireRole } from '../lib/auth.js';
 
 export const authRouter = Router();
 
@@ -19,6 +19,13 @@ authRouter.post('/editeur/login', (req, res) => {
 
 authRouter.post('/admin-exit', (req, res) => {
   res.json({ ok: checkAdminExitCode(req.body.code) });
+});
+
+authRouter.patch('/editeur/credentials', requireRole('editeur'), (req, res) => {
+  const { currentCode, newIdentifiant, newCode } = req.body;
+  const result = updateEditeurCredentials(req.session.id, currentCode, newIdentifiant, newCode);
+  if (!result) return res.status(401).json({ error: 'Code actuel incorrect' });
+  res.json(result);
 });
 
 authRouter.post('/logout', (req, res) => {
