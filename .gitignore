@@ -1,0 +1,14 @@
+node_modules/
+server/data/*.db
+server/data/*.db-journal
+server/data/*.db-wal
+server/data/*.db-shm
+server/data/backups/
+server/uploads/cartes/*
+!server/uploads/cartes/.gitkeep
+server/uploads/cheques/*
+!server/uploads/cheques/.gitkeep
+server/exports/
+client/dist/
+*.log
+.env
