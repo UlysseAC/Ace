@@ -4,6 +4,7 @@ server/data/*.db-journal
 server/data/*.db-wal
 server/data/*.db-shm
 server/data/backups/
+server/data/certs/
 server/uploads/cartes/*
 !server/uploads/cartes/.gitkeep
 server/uploads/cheques/*

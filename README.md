@@ -24,7 +24,7 @@ npm run build:client # build de production du frontend
 npm start             # démarre le serveur (sert aussi le frontend buildé)
 ```
 
-Le serveur affiche au démarrage l'adresse IP locale à utiliser depuis les autres appareils (ex: `http://192.168.1.42:3000`). Tous les appareils doivent être sur le **même réseau Wi-Fi**.
+Le serveur affiche au démarrage les adresses IP locales à utiliser depuis les autres appareils (HTTP sur le port `3000`, HTTPS sur le port `3443` — voir la section certificat ci-dessous). Tous les appareils doivent être sur le **même réseau Wi-Fi**.
 
 ### Mode développement
 
@@ -47,11 +47,24 @@ npm run dev:client   # frontend Vite avec proxy vers le backend (port 5173)
 
 Le serveur sauvegarde automatiquement la base de données toutes les 5 minutes dans `server/data/backups/` (réglable via `BACKUP_INTERVAL_MIN`). En cas de plantage, arrêtez le serveur, remplacez `server/data/casino.db` par la sauvegarde la plus récente, puis relancez.
 
-## 📷 Scan caméra sur iPhone/iPad (Safari)
+## 📷 Scan caméra sur les bornes iPad (Safari)
 
-Safari sur iOS bloque l'accès à la caméra pour les pages qui ne sont pas en HTTPS (hors `localhost`) — ce qui sera le cas ici puisque le serveur est accédé via une adresse Wi-Fi locale (`http://192.168.x.x:3000`). Sur beaucoup d'appareils, le scan caméra risque donc de ne pas fonctionner.
+Safari sur iOS bloque l'accès à la caméra pour les pages qui ne sont pas en HTTPS de confiance (hors `localhost`). Le serveur tourne donc en HTTPS avec un certificat local auto-signé, sur un port dédié :
 
-Pour cette raison, **chaque chèque et carte physique imprime aussi un code en texte lisible sous le QR** : si la caméra ne fonctionne pas, le joueur peut taper ce code à la main dans l'interface banque automatisée (champ prévu à cet effet). Teste les deux méthodes (caméra + saisie manuelle) avant la soirée sur les appareils réels que les joueurs utiliseront.
+- **Port `3000` (HTTP)** : sert uniquement au téléchargement du certificat, à faire une seule fois par borne.
+- **Port `3443` (HTTPS)** : l'application complète, à utiliser pour tout le reste — c'est cette adresse qu'il faut ouvrir/mettre en favori sur chaque borne.
+
+### Installer le certificat sur un iPad (une seule fois par appareil)
+
+1. Sur l'iPad, dans Safari, aller sur `http://<IP-du-serveur>:3000/cert.pem`.
+2. Safari propose de télécharger un profil : accepter, puis ouvrir **Réglages**.
+3. **Réglages → Général → VPN et gestion de l'appareil** → toucher le profil téléchargé → **Installer** (code de l'iPad demandé).
+4. Toujours dans **Réglages → Général → Informations → Paramètres de confiance des certificats**, activer la confiance totale pour **"Casino RP Local"**.
+5. Ouvrir ensuite `https://<IP-du-serveur>:3443` — le cadenas doit apparaître, et le scan caméra fonctionne.
+
+Le certificat est régénéré automatiquement si l'IP du serveur change (ex: nouveau réseau Wi-Fi) — il faudra alors refaire l'installation sur chaque borne.
+
+En secours (caméra indisponible ou certificat pas encore installé), **chaque chèque et carte physique imprime aussi un code en texte lisible sous le QR**, saisissable à la main dans l'interface banque automatisée. Teste les deux méthodes avant la soirée.
 
 ## Procédures de secours (panne serveur)
 

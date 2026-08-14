@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import http from 'node:http';
+import https from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import './db/seed.js';
 
 import { initSocket } from './realtime/socket.js';
+import { ensureCert } from './lib/certs.js';
 import { authRouter } from './routes/auth.js';
 import { joueursRouter } from './routes/joueurs.js';
 import { itemsRouter } from './routes/items.js';
@@ -43,6 +45,15 @@ app.use('/api/historique', historiqueRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
+// Téléchargement du certificat local à installer une fois par appareil (nécessaire
+// pour que Safari iOS autorise la caméra, qui exige un contexte HTTPS de confiance).
+const { key: certKey, cert: certPem } = ensureCert();
+app.get('/cert.pem', (req, res) => {
+  res.setHeader('Content-Type', 'application/x-x509-ca-cert');
+  res.setHeader('Content-Disposition', 'attachment; filename="casino-rp.pem"');
+  res.send(certPem);
+});
+
 // En production, le client React compilé (npm run build:client) est servi directement par ce serveur.
 const clientDist = path.join(__dirname, '..', '..', 'client', 'dist');
 app.use(express.static(clientDist));
@@ -58,8 +69,11 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Erreur serveur' });
 });
 
+// Le serveur HTTPS héberge l'application complète (dont le temps réel).
+// Le serveur HTTP ne sert que le téléchargement initial du certificat.
+const httpsServer = https.createServer({ key: certKey, cert: certPem }, app);
 const httpServer = http.createServer(app);
-initSocket(httpServer);
+initSocket(httpsServer);
 
 function localIPs() {
   return Object.values(os.networkInterfaces())
@@ -69,12 +83,18 @@ function localIPs() {
 }
 
 const PORT = process.env.PORT || 3000;
+const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
 const HOST = process.env.HOST || '0.0.0.0';
-httpServer.listen(PORT, HOST, () => {
-  console.log(`Serveur casino RP démarré sur le port ${PORT}`);
-  console.log('Accès depuis cette machine : http://localhost:' + PORT);
-  for (const ip of localIPs()) {
-    console.log(`Accès depuis les autres appareils du même réseau : http://${ip}:${PORT}`);
+
+httpsServer.listen(HTTPS_PORT, HOST, () => {
+  const ips = localIPs();
+  console.log(`Serveur casino RP démarré — HTTPS sur le port ${HTTPS_PORT}, HTTP (secours + certificat) sur le port ${PORT}`);
+  console.log(`Accès depuis cette machine : https://localhost:${HTTPS_PORT}`);
+  for (const ip of ips) {
+    console.log(`Accès depuis les autres appareils (une fois le certificat installé) : https://${ip}:${HTTPS_PORT}`);
   }
+  console.log(`Première connexion sur chaque appareil : installer le certificat via http://${ips[0] ?? 'localhost'}:${PORT}/cert.pem (voir README)`);
   startAutoBackup(Number(process.env.BACKUP_INTERVAL_MIN) || 5);
 });
+
+httpServer.listen(PORT, HOST);
