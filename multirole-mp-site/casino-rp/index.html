@@ -2207,19 +2207,30 @@
                               >
                                 🌴 S'isoler
                               </button>
+                            ) : c.id === "veinard" ? (
+                              // Carte passive : son effet s'applique chez le
+                              // croupier tant qu'elle est dans le deck. Pas de
+                              // bouton d'activation, qui la consommerait.
+                              <div
+                                style={{
+                                  padding: "8px",
+                                  background: "#00BCD4",
+                                  color: "#000",
+                                  borderRadius: "4px",
+                                  fontWeight: "bold",
+                                  textAlign: "center"
+                                }}
+                              >
+                                ✨ Effet actif chez le croupier
+                              </div>
                             ) : (
                               <button
                                 onClick={() => {
                                   setJoueurs((prev) =>
                                     prev.map((j) => {
                                       if (j.id === joueurActuel.id) {
-                                        let gain = 0;
-                                        if (c.id === "veinard") gain = 500;
                                         return {
                                           ...j,
-                                          solde: j.solde + gain,
-                                          argentGagneCarte:
-                                            j.argentGagneCarte + gain,
                                           deck: j.deck.filter(
                                             (card) => card.id !== c.id
                                           )
