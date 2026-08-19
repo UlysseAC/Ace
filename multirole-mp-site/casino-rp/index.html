@@ -701,6 +701,16 @@
           );
           if (!jL || !jC || !deConfig) return;
 
+          // Un champ Admin vide ou non numérique donnerait NaN, et la condition
+          // d'arrêt de l'intervalle ne serait jamais vraie : le dé tournerait
+          // sans fin. On retombe sur les valeurs par défaut dans ce cas.
+          const dureeSure = (valeur, secours) => {
+            const n = Number(valeur);
+            return Number.isFinite(n) && n >= 0 ? n : secours;
+          };
+          const secRoulement = dureeSure(configGlobale.dureeRoulement, 3);
+          const secArret = dureeSure(configGlobale.dureeArret, 2);
+
           setSousMenuBanque("animation_attente");
           const faceTiree =
             deConfig.faces[Math.floor(Math.random() * deConfig.faces.length)];
@@ -761,7 +771,7 @@
             }));
             compteur += 80;
 
-            if (compteur >= configGlobale.dureeRoulement * 1000) {
+            if (compteur >= secRoulement * 1000) {
               clearInterval(intervalle);
               setInfosAnimation((prev) => ({
                 ...prev,
@@ -834,7 +844,7 @@
 
                   setSousMenuBanque("accueil");
                 },
-                configGlobale.dureeArret * 1000 + 1000
+                secArret * 1000 + 1000
               );
             }
           }, 80);
