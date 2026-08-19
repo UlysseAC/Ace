@@ -21,6 +21,7 @@ import { croupierRouter } from './routes/croupier.js';
 import { banquierRouter } from './routes/banquier.js';
 import { chequesRouter } from './routes/cheques.js';
 import { historiqueRouter } from './routes/historique.js';
+import { systemRouter } from './routes/system.js';
 import { UPLOADS_DIR } from './lib/uploads.js';
 import { startAutoBackup } from './lib/backup.js';
 
@@ -42,6 +43,7 @@ app.use('/api/croupier', croupierRouter);
 app.use('/api/banquier', banquierRouter);
 app.use('/api/cheques', chequesRouter);
 app.use('/api/historique', historiqueRouter);
+app.use('/api/system', systemRouter);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 

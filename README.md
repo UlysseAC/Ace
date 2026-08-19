@@ -38,6 +38,8 @@ npm run update   # git pull + npm install + rebuild du frontend
 
 Le serveur détecte le changement et redémarre tout seul (quelques secondes de coupure). Le frontend, lui, se met à jour dès qu'on recharge la page dans le navigateur — pas besoin de relancer quoi que ce soit pour lui.
 
+**Bouton "Mettre à jour" dans l'interface** (test uniquement) : Éditeur → Configuration → "🔄 Mettre à jour depuis GitHub" fait exactement la même chose sans passer par le terminal — pratique pour tester depuis un iPad. Le processus de mise à jour tourne détaché du serveur, donc il continue même si le serveur redémarre en plein milieu. À ne pas garder actif le soir de l'événement (pas de raison de mettre à jour en pleine soirée, et ça évite qu'un joueur curieux tombe dessus).
+
 ### Mode développement
 
 ```bash

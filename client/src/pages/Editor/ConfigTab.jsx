@@ -1,5 +1,61 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../api/client.js';
+
+function UpdateSiteCard({ role }) {
+  const [status, setStatus] = useState('idle'); // idle | running | done | failed
+  const [log, setLog] = useState('');
+  const pollRef = useRef(null);
+
+  useEffect(() => () => clearInterval(pollRef.current), []);
+
+  function pollLog() {
+    pollRef.current = setInterval(async () => {
+      try {
+        const { log, enCours } = await api('/system/update-log', { role });
+        setLog(log);
+        if (!enCours) {
+          clearInterval(pollRef.current);
+          setStatus(log.includes('UPDATE_DONE') ? 'done' : 'failed');
+        }
+      } catch {
+        clearInterval(pollRef.current);
+        setStatus('failed');
+      }
+    }, 2000);
+  }
+
+  async function lancer() {
+    setStatus('running');
+    setLog('');
+    await api('/system/update', { method: 'POST', role });
+    pollLog();
+  }
+
+  return (
+    <div className="card">
+      <h2 style={{ marginTop: 0, color: 'var(--gold)' }}>Mise à jour du site (test uniquement)</h2>
+      <p className="muted">
+        Récupère la dernière version depuis GitHub, réinstalle les dépendances et reconstruit le site.
+        Le serveur redémarre tout seul si besoin — quelques secondes de coupure normales.
+      </p>
+      <button className="btn btn-primary" onClick={lancer} disabled={status === 'running'}>
+        {status === 'running' ? 'Mise à jour en cours…' : '🔄 Mettre à jour depuis GitHub'}
+      </button>
+      {status === 'done' && (
+        <div className="success-msg" style={{ marginTop: 10 }}>
+          Terminé ! <button className="btn" onClick={() => window.location.reload()}>Recharger la page</button>
+        </div>
+      )}
+      {status === 'failed' && <div className="error-msg" style={{ marginTop: 10 }}>La mise à jour a échoué — regarde le détail ci-dessous.</div>}
+      {log && (
+        <pre style={{
+          marginTop: 12, maxHeight: 240, overflow: 'auto', background: '#0d1a13',
+          border: '1px solid var(--border)', borderRadius: 8, padding: 12, fontSize: '0.8rem'
+        }}>{log}</pre>
+      )}
+    </div>
+  );
+}
 
 const FIELDS = [
   ['nb_joueurs_affiches', 'Nombre de joueurs affichés au classement', 'number'],
@@ -68,6 +124,8 @@ export default function ConfigTab({ role }) {
 
   return (
     <div>
+      <UpdateSiteCard role={role} />
+
       <form className="card" onSubmit={changerIdentifiants}>
         <h2 style={{ marginTop: 0, color: 'var(--gold)' }}>Identifiants éditeur</h2>
         <p className="muted">Change les identifiants par défaut (admin / admin) avant la soirée.</p>
