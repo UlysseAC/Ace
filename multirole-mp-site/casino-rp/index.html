@@ -7,6 +7,10 @@
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+    <script src="firebase-config.js"></script>
+    <script src="sync.js"></script>
     <link rel="stylesheet" href="style.css" />
     <style>
       @keyframes spinDice {
@@ -79,7 +83,7 @@
         const [interfaceActive, setInterfaceActive] = React.useState("menu");
 
         // --- TABLE 4 : CONFIGURATION GLOBALE ---
-        const [configGlobale, setConfigGlobale] = React.useState({
+        const [configGlobale, setConfigGlobale] = useEtatPartage("configGlobale", {
           codeAdmin: "26",
           limitTop: 3,
           dureeParadisFiscalMin: 15,
@@ -98,18 +102,18 @@
         });
 
         // --- TABLE 2 : MISSIONS, PRODUITS & PÉNALITÉS ---
-        const [missions, setMissions] = React.useState([
+        const [missions, setMissions] = useEtatPartage("missions", [
           { id: 1, nom: "Mission Braquage", montant: 1000, type: "mission" },
           { id: 2, nom: "Mission Livraison", montant: 500, type: "mission" }
         ]);
-        const [produits, setProduits] = React.useState([
+        const [produits, setProduits] = useEtatPartage("produits", [
           { id: 1, nom: "VIP Pass", montant: 2000, type: "produit" },
           { id: 2, nom: "Boisson Luxe", montant: 150, type: "produit" }
         ]);
-        const [penalites, setPenalites] = React.useState([
+        const [penalites, setPenalites] = useEtatPartage("penalites", [
           { id: 1, nom: "Infraction Règle", montant: 300, type: "penalite" }
         ]);
-        const [cartesJeu, setCartesJeu] = React.useState([
+        const [cartesJeu, setCartesJeu] = useEtatPartage("cartesJeu", [
           {
             id: "veinard",
             nom: "Le Veinard",
@@ -132,7 +136,7 @@
         ]);
 
         // --- TABLE 6 : CONFIGURATION DES 3 DÉS (6 FACES CHACUN) ---
-        const [desConfig, setDesConfig] = React.useState([
+        const [desConfig, setDesConfig] = useEtatPartage("desConfig", [
           {
             id: 1,
             nom: "Dé Prudent",
@@ -172,7 +176,7 @@
         ]);
 
         // --- TABLE 1 : COMPTE DES JOUEURS ---
-        const [joueurs, setJoueurs] = React.useState([
+        const [joueurs, setJoueurs] = useEtatPartage("joueurs", [
           {
             id: "steph",
             code: "1234",
@@ -256,9 +260,9 @@
         ]);
 
         // --- TABLE 3 : REGISTRE DES QR CODES ---
-        const [qrCodesRegistre, setQrCodesRegistre] = React.useState([]);
+        const [qrCodesRegistre, setQrCodesRegistre] = useEtatPartage("qrCodesRegistre", []);
         // --- TABLE 5 : HISTORIQUE CONTRÔLES FISCAUX ---
-        const [historiqueFiscal, setHistoriqueFiscal] = React.useState([]);
+        const [historiqueFiscal, setHistoriqueFiscal] = useEtatPartage("historiqueFiscal", []);
 
         // États Banque Joueur
         const [idSaisi, setIdSaisi] = React.useState("");
@@ -295,7 +299,7 @@
         });
         const [estEnRoulementFiscal, setEstEnRoulementFiscal] =
           React.useState(true);
-        const [historiqueAffichage, setHistoriqueAffichage] = React.useState([
+        const [historiqueAffichage, setHistoriqueAffichage] = useEtatPartage("historiqueAffichage", [
           configGlobale.phraseAucunHistorique
         ]);
 
@@ -687,6 +691,52 @@
         };
 
         // ================= LOGIQUE CONTRÔLE FISCAL (ANIMATION GLOBALE & BANQUE) =================
+        // Joue l'animation du dé, sans toucher aux comptes. Tous les appareils
+        // l'exécutent en recevant l'événement diffusé, pour que la salle voie
+        // le même tirage au même moment.
+        const jouerAnimation = React.useCallback((ev) => {
+          const faces = ev.faces && ev.faces.length ? ev.faces : [ev.facePct];
+          setInfosAnimation({
+            phraseAction: ev.phraseAction,
+            face: `${ev.facePct}%`,
+            couleur: ev.couleur,
+            phraseResultat: ev.phraseResultat
+          });
+          setAnimationActive(true);
+          setEstEnRoulementFiscal(true);
+
+          let compteur = 0;
+          const intervalle = setInterval(() => {
+            setInfosAnimation((prev) => ({
+              ...prev,
+              face: `${faces[Math.floor(Math.random() * faces.length)]}%`
+            }));
+            compteur += 80;
+
+            if (compteur >= ev.secRoulement * 1000) {
+              clearInterval(intervalle);
+              setInfosAnimation((prev) => ({ ...prev, face: `${ev.facePct}%` }));
+              setEstEnRoulementFiscal(false);
+              setTimeout(
+                () => setAnimationActive(false),
+                ev.secArret * 1000 + 1000
+              );
+            }
+          }, 80);
+        }, []);
+
+        // Écoute les tirages lancés depuis les autres appareils.
+        React.useEffect(() => {
+          if (!Sync.actif) return;
+          // Un tirage déjà en base ne doit pas rejouer à chaque connexion.
+          let dernierVu = Date.now();
+          return Sync.ecouter("evenement", (ev) => {
+            if (!ev || !ev.ts || ev.ts <= dernierVu) return;
+            dernierVu = ev.ts;
+            jouerAnimation(ev);
+          });
+        }, [jouerAnimation]);
+
         const lancerControleFiscal = () => {
           if (!cibleFiscaleSelectionnee) {
             alert("Choisissez une cible.");
@@ -754,40 +804,29 @@
             .replace("{LANCEUR}", jL.nom)
             .replace("{DE}", deConfig.nom)
             .replace("{CIBLE}", jC.nom);
-          setInfosAnimation({
+          const evenement = {
             phraseAction: phraseInitiale,
-            face: `${faceTiree.pct}%`,
+            facePct: faceTiree.pct,
             couleur: couleurs[faceTiree.type],
-            phraseResultat: texteResultat
-          });
-          setAnimationActive(true);
-          setEstEnRoulementFiscal(true);
+            phraseResultat: texteResultat,
+            faces: deConfig.faces.map((f) => f.pct),
+            secRoulement,
+            secArret
+          };
+          // Hors ligne, aucun appareil ne recevra la diffusion : on joue ici.
+          if (Sync.actif) Sync.diffuser(evenement);
+          else jouerAnimation(evenement);
 
-          let compteur = 0;
-          const intervalle = setInterval(() => {
-            setInfosAnimation((prev) => ({
-              ...prev,
-              face: `${deConfig.faces[Math.floor(Math.random() * deConfig.faces.length)].pct}%`
-            }));
-            compteur += 80;
-
-            if (compteur >= secRoulement * 1000) {
-              clearInterval(intervalle);
-              setInfosAnimation((prev) => ({
-                ...prev,
-                face: `${faceTiree.pct}%`
-              }));
-              setEstEnRoulementFiscal(false);
-
-              setTimeout(
+          // Seul l'appareil lanceur touche aux comptes, sinon les huit
+          // appareils appliqueraient chacun le même transfert.
+          setTimeout(
                 () => {
-                  setAnimationActive(false);
-
                   setJoueurs((prev) =>
                     prev.map((item) => {
                       let nSolde = item.solde;
                       let nHist = [...item.historique];
                       let nVole = item.argentVole || 0;
+                      let nDeck = item.deck;
 
                       if (item.id === jL.id) {
                         nSolde += valeurReelleAttaquant;
@@ -796,9 +835,8 @@
                         nHist.unshift(
                           `Contrôle lancé : ${valeurReelleAttaquant}$`
                         );
-                        item.deck = item.deck.filter(
-                          (c) => c.id !== "controle_fiscal"
-                        ); // Retrait carte
+                        // La carte est consommée par le tirage.
+                        nDeck = nDeck.filter((c) => c.id !== "controle_fiscal");
                       }
                       if (item.id === jC.id) {
                         nSolde += valeurReelleCible;
@@ -817,7 +855,8 @@
                         ...item,
                         solde: Math.max(0, nSolde),
                         historique: nHist,
-                        argentVole: nVole
+                        argentVole: nVole,
+                        deck: nDeck
                       };
                     })
                   );
@@ -844,10 +883,8 @@
 
                   setSousMenuBanque("accueil");
                 },
-                secArret * 1000 + 1000
-              );
-            }
-          }, 80);
+            (secRoulement + secArret) * 1000 + 1000
+          );
         };
 
         // ========================================================
