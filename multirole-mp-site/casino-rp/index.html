@@ -1,0 +1,4287 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Casino RP - Système Intégral Stable</title>
+    <!-- Librairies servies depuis le dossier vendor/ et non depuis un CDN :
+         le site doit démarrer même si le réseau de la salle est lent,
+         filtré, ou momentanément coupé. Voir vendor/LISEZMOI.md -->
+    <script src="vendor/react.js"></script>
+    <script src="vendor/react-dom.js"></script>
+    <script src="vendor/babel.js"></script>
+    <script src="vendor/supabase.js"></script>
+    <script src="vendor/xlsx.js"></script>
+    <script src="supabase-config.js"></script>
+    <script src="sync.js"></script>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+      function App() {
+        const [interfaceActive, setInterfaceActive] = React.useState("menu");
+
+        // --- TABLE 4 : CONFIGURATION GLOBALE ---
+        const [configGlobale, setConfigGlobale] = useEtatPartage("configGlobale", {
+          codeAdmin: "26",
+          limitTop: 3,
+          dureeParadisFiscalMin: 15,
+          limiteRetraitCroupier: 5000,
+          dureeRoulement: 3,
+          dureeArret: 2,
+          dureeInactiviteSec: 120,
+          raccourcisTactiles: [100, 500, 1000, 5000],
+          modeLocal: false,
+          bonusVeinardGain: 5,
+          bonusVeinardPertes: 50,
+          phraseParadisFiscal: "Nombre d'habitants d'un paradis fiscal :",
+          phraseAttaqueCible:
+            "Le joueur {LANCEUR} utilise contrôle fiscal avec le dé {DE} sur le joueur {CIBLE}.",
+          phraseAucunHistorique: "Aucun historique pour le moment.",
+          phraseLimiteCroupier: "Solde supérieur à la limite autorisée."
+        });
+
+        // --- TABLE 2 : MISSIONS, PRODUITS & PÉNALITÉS ---
+        const [missions, setMissions] = useEtatPartage("missions", [
+          { id: 1, nom: "Mission Braquage", montant: 1000, type: "mission" },
+          { id: 2, nom: "Mission Livraison", montant: 500, type: "mission" }
+        ]);
+        const [produits, setProduits] = useEtatPartage("produits", [
+          { id: 1, nom: "VIP Pass", montant: 2000, type: "produit" },
+          { id: 2, nom: "Boisson Luxe", montant: 150, type: "produit" }
+        ]);
+        const [penalites, setPenalites] = useEtatPartage("penalites", [
+          { id: 1, nom: "Infraction Règle", montant: 300, type: "penalite" }
+        ]);
+        const [cartesJeu, setCartesJeu] = useEtatPartage("cartesJeu", [
+          {
+            id: "veinard",
+            nom: "Le Veinard",
+            definition:
+              "Usage unique : quand vous rendez vos jetons au croupier, réduit votre perte de 50% ou augmente votre gain de 5%.",
+            phraseAnim: "La chance sourit !"
+          },
+          {
+            id: "paradis_fiscal",
+            nom: "Paradis Fiscal",
+            definition: "Masque votre position du classement.",
+            phraseAnim: "Disparition dans les îles..."
+          },
+          {
+            id: "controle_fiscal",
+            nom: "Contrôle Fiscal",
+            definition: "Saisit des fonds selon le lancer de dé.",
+            phraseAnim: "Le fisc frappe à la porte !"
+          }
+        ]);
+
+        // --- TABLE 6 : CONFIGURATION DES 3 DÉS (6 FACES CHACUN) ---
+        const [desConfig, setDesConfig] = useEtatPartage("desConfig", [
+          {
+            id: 1,
+            nom: "Dé Prudent",
+            faces: [
+              { type: "Rouge", pct: 10 },
+              { type: "Vert", pct: 15 },
+              { type: "Don", pct: 5 },
+              { type: "Vert", pct: 10 },
+              { type: "Rouge", pct: 5 },
+              { type: "Vert", pct: 20 }
+            ]
+          },
+          {
+            id: 2,
+            nom: "Dé Agressif",
+            faces: [
+              { type: "Rouge", pct: 50 },
+              { type: "Rouge", pct: 30 },
+              { type: "Vert", pct: 10 },
+              { type: "Rouge", pct: 40 },
+              { type: "Don", pct: 20 },
+              { type: "Rouge", pct: 60 }
+            ]
+          },
+          {
+            id: 3,
+            nom: "Dé Solidaire",
+            faces: [
+              { type: "Don", pct: 30 },
+              { type: "Don", pct: 40 },
+              { type: "Vert", pct: 10 },
+              { type: "Rouge", pct: 10 },
+              { type: "Don", pct: 50 },
+              { type: "Don", pct: 25 }
+            ]
+          }
+        ]);
+
+        // --- TABLE 1 : COMPTE DES JOUEURS ---
+        const [joueurs, setJoueurs] = useEtatPartage("joueurs", [
+          {
+            id: "steph",
+            code: "1234",
+            nom: "Steph",
+            solde: 5000,
+            totalMissions: 2000,
+            totalJeux: 3000,
+            nbPenalites: 0,
+            totalPenalites: 0,
+            jetonsEnJeu: 0,
+            veinardActif: false,
+            achatsBoutique: 0,
+            argentVole: 0,
+            argentGagneCarte: 0,
+            paradisFiscal: false,
+            finParadis: 0,
+            deck: [],
+            historique: [],
+            qrCodesUtilises: [],
+            missionsFaites: [],
+            produitsAchetes: [],
+            penalitesSubies: []
+          },
+          {
+            id: "1",
+            code: "1111",
+            nom: "Alex",
+            solde: 5400,
+            totalMissions: 1000,
+            totalJeux: 4400,
+            nbPenalites: 0,
+            totalPenalites: 0,
+            jetonsEnJeu: 0,
+            veinardActif: false,
+            achatsBoutique: 0,
+            argentVole: 0,
+            argentGagneCarte: 0,
+            paradisFiscal: false,
+            finParadis: 0,
+            deck: [],
+            historique: [],
+            qrCodesUtilises: [],
+            missionsFaites: [],
+            produitsAchetes: [],
+            penalitesSubies: []
+          },
+          {
+            id: "2",
+            code: "2222",
+            nom: "Sarah",
+            solde: 3850,
+            totalMissions: 1500,
+            totalJeux: 2350,
+            nbPenalites: 0,
+            totalPenalites: 0,
+            jetonsEnJeu: 0,
+            veinardActif: false,
+            achatsBoutique: 0,
+            argentVole: 0,
+            argentGagneCarte: 0,
+            paradisFiscal: false,
+            finParadis: 0,
+            deck: [],
+            historique: [],
+            qrCodesUtilises: [],
+            missionsFaites: [],
+            produitsAchetes: [],
+            penalitesSubies: []
+          },
+          {
+            id: "3",
+            code: "3333",
+            nom: "Marc",
+            solde: 2100,
+            totalMissions: 800,
+            totalJeux: 1300,
+            nbPenalites: 0,
+            totalPenalites: 0,
+            jetonsEnJeu: 0,
+            veinardActif: false,
+            achatsBoutique: 0,
+            argentVole: 0,
+            argentGagneCarte: 0,
+            paradisFiscal: false,
+            finParadis: 0,
+            deck: [],
+            historique: [],
+            qrCodesUtilises: [],
+            missionsFaites: [],
+            produitsAchetes: [],
+            penalitesSubies: []
+          }
+        ]);
+
+        // --- TABLE 3 : REGISTRE DES QR CODES ---
+        const [qrCodesRegistre, setQrCodesRegistre] = useEtatPartage("qrCodesRegistre", []);
+        // --- TABLE 5 : HISTORIQUE CONTRÔLES FISCAUX ---
+        const [historiqueFiscal, setHistoriqueFiscal] = useEtatPartage("historiqueFiscal", []);
+
+        // États Banque Joueur
+        const [idSaisi, setIdSaisi] = React.useState("");
+        const [codeSaisi, setCodeSaisi] = React.useState("");
+        const [joueurConnecteId, setJoueurConnecteId] = React.useState(null);
+        const [sousMenuBanque, setSousMenuBanque] = React.useState("accueil");
+        const [modalAdminOuvert, setModalAdminOuvert] = React.useState(false);
+        const [saisieCodeAdmin, setSaisieCodeAdmin] = React.useState("");
+        const [erreurCodeAdmin, setErreurCodeAdmin] = React.useState("");
+
+        // États Activation Contrôle Fiscal (Banque)
+        const [cibleFiscaleSelectionnee, setCibleFiscaleSelectionnee] =
+          React.useState("");
+        const [deFiscalSelectionne, setDeFiscalSelectionne] = React.useState(1);
+
+        // États Croupier
+        const [tableCroupier, setTableCroupier] = React.useState("Roulette");
+        const [joueurCroupierId, setJoueurCroupierId] = React.useState("steph");
+        const [saisieCroupierManuelle, setSaisieCroupierManuelle] =
+          React.useState("");
+        const [croupierStack, setCroupierStack] = React.useState([]);
+
+        // États Banquier & Boutique
+        const [joueurASupprimer, setJoueurASupprimer] = React.useState(null);
+        const [joueurBanquierId, setJoueurBanquierId] = React.useState("steph");
+        const [rechercheBanquier, setRechercheBanquier] = React.useState("");
+        const [selectionBanquier, setSelectionBanquier] = React.useState([]);
+
+        // États Affichage Public & Animation Globale
+        const [animationActive, setAnimationActive] = React.useState(false);
+        const [infosAnimation, setInfosAnimation] = React.useState({
+          phraseAction: "",
+          face: "",
+          couleur: "#555",
+          phraseResultat: ""
+        });
+        const [estEnRoulementFiscal, setEstEnRoulementFiscal] =
+          React.useState(true);
+        const [historiqueAffichage, setHistoriqueAffichage] = useEtatPartage("historiqueAffichage", [
+          configGlobale.phraseAucunHistorique
+        ]);
+
+        // États Imprimerie (PDF)
+        const [imprMissionId, setImprMissionId] = React.useState(1);
+        const [imprImgFond, setImprImgFond] = React.useState("");
+        const [qteImpr, setQteImpr] = React.useState(5);
+        const [chequesImprimerie, setChequesImprimerie] = React.useState([]);
+
+        // Calculs globaux & Check Statuts
+        const timeNow = Date.now();
+        const joueursActifs = joueurs.map((j) => ({
+          ...j,
+          paradisActif: j.paradisFiscal && j.finParadis > timeNow
+        }));
+        const joueursVisibles = joueursActifs.filter((j) => !j.paradisActif);
+        const classementActuel = [...joueursVisibles].sort(
+          (a, b) => b.solde - a.solde
+        );
+        const classementAffiche = classementActuel.slice(
+          0,
+          configGlobale.limitTop
+        );
+        const nbParadisActifs = joueursActifs.filter(
+          (j) => j.paradisActif
+        ).length;
+        const joueurActuel = joueursActifs.find(
+          (j) => j.id === joueurConnecteId
+        );
+
+        // ================= LOGIQUE EXPORT CSV (STYLE EXCEL) =================
+        // Reproduit la feuille de suivi : une ligne par élément, une colonne
+        // par joueur, une case à cocher à l'intersection. Les cases déjà
+        // validées dans le jeu arrivent cochées, et les totaux se recalculent
+        // dès qu'on en coche une de plus.
+        const exporterBaseExcel = () => {
+          if (typeof XLSX === "undefined") {
+            alert(
+              "La librairie tableur n'est pas chargée (vendor/xlsx.js).\n" +
+                "L'export Excel est indisponible sur cet aperçu."
+            );
+            return;
+          }
+          const lignes = [];
+          const joueursExport = joueursActifs;
+          const COL0 = 0; // libellés
+          const COL_MONTANT = 1; // montant de l'élément
+          const COL_J0 = 2; // première colonne joueur
+
+          const ligne = (libelle, montant, valeurs) => {
+            const l = [libelle, montant];
+            valeurs.forEach((v) => l.push(v));
+            lignes.push(l);
+            return lignes.length; // numéro de ligne (1-indexé)
+          };
+
+          const colonne = (i) => XLSX.utils.encode_col(COL_J0 + i);
+
+          ligne("Numéro", "", joueursExport.map((j) => j.id));
+          ligne("Participants", "Montant:", joueursExport.map((j) => j.nom));
+          const ligneSolde = ligne(
+            "Compte en banque",
+            "",
+            joueursExport.map((j) => j.solde)
+          );
+          ligne("Jeu", "", joueursExport.map((j) => j.totalJeux));
+          ligne("Missions", "", joueursExport.map((j) => j.totalMissions));
+          ligne("Achats boutique", "", joueursExport.map((j) => j.achatsBoutique));
+          ligne("", "", []);
+
+          // Les trois catégories, chacune avec ses cases à cocher
+          const sections = [
+            ["MISSIONS (à cocher = crédit)", missions, "missionsFaites"],
+            ["PRODUITS (à cocher = débit)", produits, "produitsAchetes"],
+            ["PÉNALITÉS (à cocher = débit)", penalites, "penalitesSubies"]
+          ];
+          const plages = [];
+
+          sections.forEach(([titre, elements, champ]) => {
+            ligne(titre, "", []);
+            const premiere = lignes.length + 1;
+            elements.forEach((el) => {
+              ligne(
+                el.nom,
+                el.montant,
+                joueursExport.map((j) => (j[champ] || []).includes(el.id))
+              );
+            });
+            const derniere = lignes.length;
+            if (derniere >= premiere) plages.push([premiere, derniere]);
+            ligne("", "", []);
+          });
+
+          // Ce que les cases déjà cochées représentent : ces éléments ont
+          // déjà été portés au compte du joueur dans le jeu. Sans cette
+          // soustraction, le total les compterait une seconde fois.
+          const dejaApplique = (j) => {
+            const somme = (elements, champ, signe) =>
+              elements.reduce(
+                (t, el) =>
+                  (j[champ] || []).includes(el.id) ? t + signe * el.montant : t,
+                0
+              );
+            return (
+              somme(missions, "missionsFaites", 1) +
+              somme(produits, "produitsAchetes", -1) +
+              somme(penalites, "penalitesSubies", -1)
+            );
+          };
+
+          const ligneDeja = ligne(
+            "Déjà porté au compte",
+            "",
+            joueursExport.map(dejaApplique)
+          );
+
+          // Total : tout ce qui est coché, moins ce qui l'était déjà. Au
+          // moment de l'export il vaut donc zéro, et il grandit à mesure que
+          // de nouvelles cases sont cochées.
+          const [mis, pro, pen] = plages;
+          const totalPour = (i) => {
+            const c = colonne(i);
+            const M = XLSX.utils.encode_col(COL_MONTANT);
+            const bloc = (p, signe) =>
+              p
+                ? `${signe}SUMPRODUCT(--${c}${p[0]}:${c}${p[1]},${M}${p[0]}:${M}${p[1]})`
+                : "";
+            const coche = (bloc(mis, "") + bloc(pro, "-") + bloc(pen, "-"))
+              .replace(/^\+/, "");
+            return `${coche}-${c}${ligneDeja}`;
+          };
+
+          const ligneTotal = lignes.length + 1;
+          const l = ["TOTAL À APPLIQUER (nouvelles coches)", ""];
+          joueursExport.forEach((_, i) => l.push({ f: totalPour(i) }));
+          lignes.push(l);
+
+          const l2 = ["Solde après application", ""];
+          joueursExport.forEach((_, i) => {
+            const c = colonne(i);
+            l2.push({ f: `${c}${ligneSolde}+${c}${ligneTotal}` });
+          });
+          lignes.push(l2);
+
+          const feuille = XLSX.utils.aoa_to_sheet(lignes);
+          feuille["!cols"] = [{ wch: 34 }, { wch: 10 }].concat(
+            joueursExport.map(() => ({ wch: 11 }))
+          );
+
+          const classeur = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(classeur, feuille, "Suivi");
+          const horodatage = new Date()
+            .toISOString()
+            .slice(0, 16)
+            .replace(/[:T]/g, "-");
+          XLSX.writeFile(classeur, `casino-rp-suivi-${horodatage}.xlsx`);
+        };
+
+        const validerCodeAdmin = () => {
+          if (saisieCodeAdmin !== configGlobale.codeAdmin) {
+            setErreurCodeAdmin("Code incorrect.");
+            return;
+          }
+          setInterfaceActive("menu");
+          setModalAdminOuvert(false);
+          setSaisieCodeAdmin("");
+          setErreurCodeAdmin("");
+          fermerSessionJoueur();
+        };
+
+        // Ferme la session du joueur et efface toute trace de sa saisie :
+        // la borne suivante ne doit rien conserver de lui.
+        const fermerSessionJoueur = React.useCallback(() => {
+          setJoueurConnecteId(null);
+          setSousMenuBanque("accueil");
+          setIdSaisi("");
+          setCodeSaisi("");
+        }, []);
+
+        // ================= DÉCONNEXION AUTOMATIQUE =================
+        // Les 3 bornes sont partagées par tous les joueurs : un joueur qui
+        // s'éloigne sans se déconnecter laisserait son compte ouvert au
+        // suivant. On revient donc à l'écran de connexion après un silence.
+        React.useEffect(() => {
+          if (!joueurConnecteId) return;
+          const delai =
+            (Number(configGlobale.dureeInactiviteSec) > 0
+              ? Number(configGlobale.dureeInactiviteSec)
+              : 120) * 1000;
+
+          let minuteur;
+          const relancer = () => {
+            clearTimeout(minuteur);
+            minuteur = setTimeout(fermerSessionJoueur, delai);
+          };
+
+          const evenements = ["pointerdown", "keydown", "wheel", "touchstart"];
+          evenements.forEach((e) =>
+            window.addEventListener(e, relancer, { passive: true })
+          );
+          relancer();
+
+          return () => {
+            clearTimeout(minuteur);
+            evenements.forEach((e) => window.removeEventListener(e, relancer));
+          };
+        }, [joueurConnecteId, configGlobale.dureeInactiviteSec, fermerSessionJoueur]);
+
+        // ================= SAUVEGARDE & RESTAURATION =================
+        // Filet de sécurité indépendant de la base : la partie entière peut
+        // être exportée dans un fichier, et rechargée depuis n'importe quel
+        // appareil. Une copie automatique est gardée sur chaque appareil.
+
+        const CLE_SAUVEGARDE_LOCALE = "casino-rp-sauvegarde";
+
+        const donneesPartie = () => ({
+          version: 1,
+          date: new Date().toISOString(),
+          configGlobale,
+          missions,
+          produits,
+          penalites,
+          cartesJeu,
+          desConfig,
+          joueurs,
+          qrCodesRegistre,
+          historiqueFiscal,
+          historiqueAffichage
+        });
+
+        // Copie automatique sur l'appareil, toutes les 30 secondes. Chaque
+        // appareil garde ainsi de quoi relancer la partie si la base devient
+        // inaccessible.
+        const [dateSauvegardeLocale, setDateSauvegardeLocale] =
+          React.useState(null);
+
+        const refDonnees = React.useRef(donneesPartie);
+        refDonnees.current = donneesPartie;
+
+        React.useEffect(() => {
+          const enregistrer = () => {
+            try {
+              const donnees = refDonnees.current();
+              localStorage.setItem(
+                CLE_SAUVEGARDE_LOCALE,
+                JSON.stringify(donnees)
+              );
+              setDateSauvegardeLocale(donnees.date);
+            } catch (e) {
+              // Stockage plein ou navigation privée : la sauvegarde manuelle
+              // reste disponible, on ne bloque pas la partie pour autant.
+            }
+          };
+          enregistrer();
+          const minuteur = setInterval(enregistrer, 30000);
+          return () => clearInterval(minuteur);
+        }, []);
+
+        React.useEffect(() => {
+          try {
+            const brut = localStorage.getItem(CLE_SAUVEGARDE_LOCALE);
+            if (brut) setDateSauvegardeLocale(JSON.parse(brut).date);
+          } catch (e) {}
+        }, []);
+
+        const telechargerSauvegarde = () => {
+          const contenu = JSON.stringify(donneesPartie(), null, 2);
+          const horodatage = new Date()
+            .toISOString()
+            .slice(0, 16)
+            .replace(/[:T]/g, "-");
+          const lien = document.createElement("a");
+          lien.href = URL.createObjectURL(
+            new Blob([contenu], { type: "application/json" })
+          );
+          lien.download = `casino-rp-${horodatage}.json`;
+          document.body.appendChild(lien);
+          lien.click();
+          document.body.removeChild(lien);
+          URL.revokeObjectURL(lien.href);
+        };
+
+        const appliquerSauvegarde = (donnees) => {
+          // Les setters passent par useEtatPartage : en mode synchronisé, la
+          // restauration se propage d'elle-même à tous les appareils.
+          if (donnees.configGlobale) setConfigGlobale(donnees.configGlobale);
+          if (donnees.missions) setMissions(donnees.missions);
+          if (donnees.produits) setProduits(donnees.produits);
+          if (donnees.penalites) setPenalites(donnees.penalites);
+          if (donnees.cartesJeu) setCartesJeu(donnees.cartesJeu);
+          if (donnees.desConfig) setDesConfig(donnees.desConfig);
+          if (donnees.joueurs) setJoueurs(donnees.joueurs);
+          if (donnees.qrCodesRegistre)
+            setQrCodesRegistre(donnees.qrCodesRegistre);
+          if (donnees.historiqueFiscal)
+            setHistoriqueFiscal(donnees.historiqueFiscal);
+          if (donnees.historiqueAffichage)
+            setHistoriqueAffichage(donnees.historiqueAffichage);
+        };
+
+        // La confirmation s'affiche dans la page : une fenêtre du navigateur
+        // peut être bloquée, et la restauration serait alors annulée sans que
+        // rien ne l'indique.
+        const [restaurationEnAttente, setRestaurationEnAttente] =
+          React.useState(null);
+
+        const restaurerDepuisFichier = (fichier) => {
+          if (!fichier) return;
+          const lecteur = new FileReader();
+          lecteur.onload = () => {
+            try {
+              const donnees = JSON.parse(lecteur.result);
+              if (!donnees.joueurs) {
+                setRestaurationEnAttente({
+                  erreur: "Ce fichier ne contient pas de partie."
+                });
+                return;
+              }
+              setRestaurationEnAttente({
+                donnees,
+                source: "le fichier " + fichier.name,
+                quand: donnees.date
+                  ? new Date(donnees.date).toLocaleString()
+                  : "date inconnue"
+              });
+            } catch (e) {
+              setRestaurationEnAttente({
+                erreur: "Fichier illisible : " + e.message
+              });
+            }
+          };
+          lecteur.readAsText(fichier);
+        };
+
+        const restaurerDepuisAppareil = () => {
+          try {
+            const brut = localStorage.getItem(CLE_SAUVEGARDE_LOCALE);
+            if (!brut) {
+              setRestaurationEnAttente({
+                erreur: "Aucune copie automatique sur cet appareil."
+              });
+              return;
+            }
+            const donnees = JSON.parse(brut);
+            setRestaurationEnAttente({
+              donnees,
+              source: "la copie automatique de cet appareil",
+              quand: new Date(donnees.date).toLocaleString()
+            });
+          } catch (e) {
+            setRestaurationEnAttente({
+              erreur: "Copie automatique illisible : " + e.message
+            });
+          }
+        };
+
+        // ================= LOGIQUE IMPRIMERIE =================
+        const genererChequesPdf = () => {
+          const mObj =
+            missions.find((m) => m.id === Number(imprMissionId)) || missions[0];
+          if (!mObj) return;
+          const nouveaux = [];
+          const nouveauRegistre = [...qrCodesRegistre];
+
+          for (let i = 0; i < Number(qteImpr); i++) {
+            const hashUnique =
+              "QR_" + Math.random().toString(36).substring(2, 12).toUpperCase();
+            nouveaux.push({
+              hash: hashUnique,
+              nom: mObj.nom,
+              montant: mObj.montant,
+              img: imprImgFond
+            });
+            nouveauRegistre.push({
+              hash: hashUnique,
+              statut: "Valide",
+              type: "Mission"
+            });
+          }
+          setChequesImprimerie(nouveaux);
+          setQrCodesRegistre(nouveauRegistre);
+        };
+
+        // ================= LOGIQUE SCANNER QR & DEFAUSSE =================
+        const scannerQrCodeSimule = (type, objetDonnee) => {
+          if (!joueurActuel) return;
+          if (configGlobale.modeLocal && type === "carte") {
+            alert(
+              "Mode Local activé : Le scan des cartes physiques est temporairement bloqué !"
+            );
+            return;
+          }
+
+          const hashSimule =
+            "QR_" +
+            type.toUpperCase() +
+            "_" +
+            Math.random().toString(36).substring(2, 8);
+
+          setJoueurs((prev) =>
+            prev.map((j) => {
+              if (j.id === joueurActuel.id) {
+                let soldeNv = j.solde;
+                let missionsNv = j.totalMissions;
+                let deckNv = [...j.deck];
+                let histNv = [...j.historique];
+                let qrsNv = [...j.qrCodesUtilises, hashSimule];
+                let listMissionsFaites = [...j.missionsFaites];
+
+                if (type === "mission") {
+                  soldeNv += objetDonnee.montant;
+                  missionsNv += objetDonnee.montant;
+                  histNv.unshift(
+                    `Mission validée [${objetDonnee.nom}] : +${objetDonnee.montant}$`
+                  );
+                  listMissionsFaites.push(objetDonnee.id);
+                } else if (type === "carte") {
+                  deckNv.push(objetDonnee);
+                  histNv.unshift(`Carte récupérée : ${objetDonnee.nom}`);
+                }
+
+                return {
+                  ...j,
+                  solde: soldeNv,
+                  totalMissions: missionsNv,
+                  deck: deckNv,
+                  historique: histNv,
+                  qrCodesUtilises: qrsNv,
+                  missionsFaites: listMissionsFaites
+                };
+              }
+              return j;
+            })
+          );
+
+          alert(
+            type === "mission"
+              ? `Mission validée ! +${objetDonnee.montant}$`
+              : `Carte "${objetDonnee.nom}" ajoutée dans votre deck !`
+          );
+          setSousMenuBanque("scanner_choix");
+        };
+
+        const defausserCarte = (carteId) => {
+          setJoueurs((prev) =>
+            prev.map((j) =>
+              j.id === joueurActuel.id
+                ? {
+                    ...j,
+                    deck: j.deck.filter((c) => c.id !== carteId),
+                    veinardActif:
+                      carteId === "veinard" ? false : j.veinardActif,
+                    historique: [`Carte défaussée`, ...j.historique]
+                  }
+                : j
+            )
+          );
+          alert("Carte défaussée avec succès.");
+        };
+
+        // ================= LOGIQUE CROUPIER =================
+        const totalCroupier =
+          croupierStack.reduce((a, b) => a + b, 0) +
+          Number(saisieCroupierManuelle || 0);
+
+        // Deux temps distincts à la table :
+        //  - l'achat de jetons n'est qu'une conversion, le joueur n'a encore
+        //    rien gagné ni perdu : aucune carte ne s'y applique ;
+        //  - le retour des jetons révèle le résultat, et c'est là que
+        //    Le Veinard adoucit la perte ou gonfle le gain.
+        const actionCroupierCalcul = (typeOp) => {
+          const jC = joueurs.find((j) => j.id === joueurCroupierId);
+          if (!jC) return;
+          const montant = totalCroupier;
+
+          if (montant <= 0) {
+            alert("Veuillez saisir un montant.");
+            return;
+          }
+
+          // La carte n'agit que si le joueur l'a lui-meme activee.
+          const aLeVeinard =
+            !!jC.veinardActif && jC.deck.some((c) => c.id === "veinard");
+          const jetonsAvant = jC.jetonsEnJeu || 0;
+
+          if (typeOp === "retrait") {
+            if (montant > jC.solde) {
+              alert("Montant insuffisant !");
+              return;
+            }
+            if (montant > configGlobale.limiteRetraitCroupier) {
+              alert(configGlobale.phraseLimiteCroupier);
+              return;
+            }
+            setJoueurs((prev) =>
+              prev.map((j) =>
+                j.id === jC.id
+                  ? {
+                      ...j,
+                      solde: Math.max(0, j.solde - montant),
+                      totalJeux: j.totalJeux - montant,
+                      jetonsEnJeu: jetonsAvant + montant,
+                      historique: [
+                        `Croupier [${tableCroupier}] : achat de ${montant}$ de jetons`,
+                        ...j.historique
+                      ]
+                    }
+                  : j
+              )
+            );
+            setCroupierStack([]);
+            setSaisieCroupierManuelle("");
+            return;
+          }
+
+          // Retour des jetons : le résultat de la partie est la différence
+          // entre ce que le joueur rapporte et ce qu'il avait pris.
+          const resultat = montant - jetonsAvant;
+          let bonus = 0;
+          if (aLeVeinard && resultat < 0) {
+            bonus = Math.round(
+              (-resultat * configGlobale.bonusVeinardPertes) / 100
+            );
+          } else if (aLeVeinard && resultat > 0) {
+            bonus = Math.round(
+              (resultat * configGlobale.bonusVeinardGain) / 100
+            );
+          }
+          const credite = montant + bonus;
+
+          if (bonus > 0) {
+            alert(
+              resultat < 0
+                ? `Effet [Le Veinard] : perte de ${-resultat}$ réduite à ${-resultat - bonus}$. Crédit : ${credite}$`
+                : `Effet [Le Veinard] : gain de ${resultat}$ porté à ${resultat + bonus}$. Crédit : ${credite}$`
+            );
+          }
+
+          setJoueurs((prev) =>
+            prev.map((j) => {
+              if (j.id !== jC.id) return j;
+              const bilan =
+                resultat === 0
+                  ? "à l'équilibre"
+                  : resultat > 0
+                    ? `gain de ${resultat + bonus}$`
+                    : `perte de ${-resultat - bonus}$`;
+              const nvHist = [
+                `Croupier [${tableCroupier}] : retour de ${montant}$ de jetons, ${bilan}`,
+                ...j.historique
+              ];
+              // La carte n'est consommée que si elle a réellement joué.
+              if (bonus > 0) nvHist.unshift("Carte [Le Veinard] consommée");
+              return {
+                ...j,
+                solde: Math.max(0, j.solde + credite),
+                totalJeux: j.totalJeux + credite,
+                jetonsEnJeu: 0,
+            veinardActif: false,
+                deck:
+                  bonus > 0
+                    ? j.deck.filter((c) => c.id !== "veinard")
+                    : j.deck,
+                historique: nvHist
+              };
+            })
+          );
+
+          setCroupierStack([]);
+          setSaisieCroupierManuelle("");
+        };
+
+        // ================= LOGIQUE BANQUIER (CHECKBOXES & MODE LOCAL) =================
+        const toggleSelectionBanquier = (item) => {
+          if (
+            selectionBanquier.find(
+              (i) => i.id === item.id && i.type === item.type
+            )
+          ) {
+            setSelectionBanquier(
+              selectionBanquier.filter(
+                (i) => !(i.id === item.id && i.type === item.type)
+              )
+            );
+          } else {
+            setSelectionBanquier([...selectionBanquier, item]);
+          }
+        };
+
+        const validerPanierBanquier = () => {
+          if (selectionBanquier.length === 0) return;
+          const jB = joueurs.find((j) => j.id === joueurBanquierId);
+          if (!jB) return;
+
+          let coutTotal = 0,
+            gainsTotal = 0,
+            penalitesTotal = 0;
+          const details = [],
+            missionsN = [],
+            produitsN = [],
+            penalitesN = [];
+
+          selectionBanquier.forEach((item) => {
+            if (item.type === "produit") {
+              coutTotal += item.montant;
+              details.push(`Achat ${item.nom}`);
+              produitsN.push(item.id);
+            }
+            if (item.type === "penalite") {
+              penalitesTotal += item.montant;
+              coutTotal += item.montant;
+              details.push(`Pénalité ${item.nom}`);
+              penalitesN.push(item.id);
+            }
+            if (item.type === "mission") {
+              gainsTotal += item.montant;
+              details.push(`Mission ${item.nom}`);
+              missionsN.push(item.id);
+            }
+          });
+
+          if (jB.solde + gainsTotal < coutTotal) {
+            alert("Solde insuffisant pour régler l'ensemble du panier !");
+            return;
+          }
+
+          setJoueurs((prev) =>
+            prev.map((j) => {
+              if (j.id === jB.id) {
+                return {
+                  ...j,
+                  solde: j.solde + gainsTotal - coutTotal,
+                  totalMissions: j.totalMissions + gainsTotal,
+                  achatsBoutique:
+                    j.achatsBoutique + (coutTotal - penalitesTotal),
+                  nbPenalites: j.nbPenalites + (penalitesTotal > 0 ? 1 : 0),
+                  totalPenalites: (j.totalPenalites || 0) + penalitesTotal,
+                  missionsFaites: [...j.missionsFaites, ...missionsN],
+                  produitsAchetes: [...j.produitsAchetes, ...produitsN],
+                  penalitesSubies: [...j.penalitesSubies, ...penalitesN],
+                  historique: [
+                    `Guichet : ${details.join(", ")}`,
+                    ...j.historique
+                  ]
+                };
+              }
+              return j;
+            })
+          );
+
+          alert("Panier validé avec succès !");
+          setSelectionBanquier([]);
+        };
+
+        // ================= LOGIQUE CONTRÔLE FISCAL (ANIMATION GLOBALE & BANQUE) =================
+        // Joue l'animation du dé, sans toucher aux comptes. Tous les appareils
+        // l'exécutent en recevant l'événement diffusé, pour que la salle voie
+        // le même tirage au même moment.
+        const jouerAnimation = React.useCallback((ev) => {
+          const faces = ev.faces && ev.faces.length ? ev.faces : [ev.facePct];
+          setInfosAnimation({
+            phraseAction: ev.phraseAction,
+            face: `${ev.facePct}%`,
+            couleur: ev.couleur,
+            phraseResultat: ev.phraseResultat
+          });
+          setAnimationActive(true);
+          setEstEnRoulementFiscal(true);
+
+          let compteur = 0;
+          const intervalle = setInterval(() => {
+            setInfosAnimation((prev) => ({
+              ...prev,
+              face: `${faces[Math.floor(Math.random() * faces.length)]}%`
+            }));
+            compteur += 80;
+
+            if (compteur >= ev.secRoulement * 1000) {
+              clearInterval(intervalle);
+              setInfosAnimation((prev) => ({ ...prev, face: `${ev.facePct}%` }));
+              setEstEnRoulementFiscal(false);
+              setTimeout(
+                () => setAnimationActive(false),
+                ev.secArret * 1000 + 1000
+              );
+            }
+          }, 80);
+        }, []);
+
+        // Écoute les tirages lancés depuis les autres appareils.
+        React.useEffect(() => {
+          if (!Sync.actif) return;
+          // Un tirage déjà en base ne doit pas rejouer à chaque connexion.
+          let dernierVu = Date.now();
+          return Sync.ecouter("evenement", (ev) => {
+            if (!ev || !ev.ts || ev.ts <= dernierVu) return;
+            dernierVu = ev.ts;
+            jouerAnimation(ev);
+          });
+        }, [jouerAnimation]);
+
+        const lancerControleFiscal = () => {
+          if (!cibleFiscaleSelectionnee) {
+            alert("Choisissez une cible.");
+            return;
+          }
+          const jL = joueurActuel;
+          const jC = joueursActifs.find(
+            (j) => j.id === cibleFiscaleSelectionnee
+          );
+          const deConfig = desConfig.find(
+            (d) => d.id === Number(deFiscalSelectionne)
+          );
+          if (!jL || !jC || !deConfig) return;
+
+          // Un champ Admin vide ou non numérique donnerait NaN, et la condition
+          // d'arrêt de l'intervalle ne serait jamais vraie : le dé tournerait
+          // sans fin. On retombe sur les valeurs par défaut dans ce cas.
+          const dureeSure = (valeur, secours) => {
+            const n = Number(valeur);
+            return Number.isFinite(n) && n >= 0 ? n : secours;
+          };
+          const secRoulement = dureeSure(configGlobale.dureeRoulement, 3);
+          const secArret = dureeSure(configGlobale.dureeArret, 2);
+
+          setSousMenuBanque("animation_attente");
+          const faceTiree =
+            deConfig.faces[Math.floor(Math.random() * deConfig.faces.length)];
+          const couleurs = {
+            Rouge: "#f44336",
+            Vert: "#4CAF50",
+            Don: "#2196F3",
+            Zéro: "#9C27B0"
+          };
+
+          let texteResultat = "";
+          let valeurReelleAttaquant = 0;
+          let valeurReelleCible = 0;
+          let donsDistribues = [];
+
+          if (faceTiree.type === "Rouge") {
+            const val = Math.round(jL.solde * (faceTiree.pct / 100));
+            valeurReelleAttaquant = -val;
+            valeurReelleCible = val;
+            texteResultat = `Échec de l'attaque ! L'attaquant perd ${val}$ transférés à la cible.`;
+          } else if (faceTiree.type === "Vert") {
+            const val = Math.round(jC.solde * (faceTiree.pct / 100));
+            valeurReelleCible = -val;
+            valeurReelleAttaquant = val;
+            texteResultat = `Attaque réussie ! La cible perd ${val}$ saisis par l'attaquant.`;
+          } else if (faceTiree.type === "Don") {
+            const valL = Math.round(jL.solde * (faceTiree.pct / 100));
+            const valC = Math.round(jC.solde * (faceTiree.pct / 100));
+            const cagnotte = valL + valC;
+            valeurReelleAttaquant = -valL;
+            valeurReelleCible = -valC;
+
+            const minSolde = Math.min(...joueursActifs.map((j) => j.solde));
+            const pauvres = joueursActifs.filter((j) => j.solde === minSolde);
+            const part = Math.round(cagnotte / pauvres.length);
+            donsDistribues = pauvres.map((p) => ({ id: p.id, montant: part }));
+            texteResultat = `Solidarité ! ${cagnotte}$ saisis et redistribués aux plus démunis.`;
+          }
+
+          const phraseInitiale = configGlobale.phraseAttaqueCible
+            .replace("{LANCEUR}", jL.nom)
+            .replace("{DE}", deConfig.nom)
+            .replace("{CIBLE}", jC.nom);
+          const evenement = {
+            phraseAction: phraseInitiale,
+            facePct: faceTiree.pct,
+            couleur: couleurs[faceTiree.type],
+            phraseResultat: texteResultat,
+            faces: deConfig.faces.map((f) => f.pct),
+            secRoulement,
+            secArret
+          };
+          // Hors ligne, aucun appareil ne recevra la diffusion : on joue ici.
+          if (Sync.actif) Sync.diffuser(evenement);
+          else jouerAnimation(evenement);
+
+          // Seul l'appareil lanceur touche aux comptes, sinon les huit
+          // appareils appliqueraient chacun le même transfert.
+          setTimeout(
+                () => {
+                  setJoueurs((prev) =>
+                    prev.map((item) => {
+                      let nSolde = item.solde;
+                      let nHist = [...item.historique];
+                      let nVole = item.argentVole || 0;
+                      let nDeck = item.deck;
+
+                      if (item.id === jL.id) {
+                        nSolde += valeurReelleAttaquant;
+                        if (valeurReelleAttaquant > 0)
+                          nVole += valeurReelleAttaquant;
+                        nHist.unshift(
+                          `Contrôle lancé : ${valeurReelleAttaquant}$`
+                        );
+                        // La carte est consommée par le tirage.
+                        nDeck = nDeck.filter((c) => c.id !== "controle_fiscal");
+                      }
+                      if (item.id === jC.id) {
+                        nSolde += valeurReelleCible;
+                        nHist.unshift(`Subi Contrôle : ${valeurReelleCible}$`);
+                      }
+                      const partDon = donsDistribues.find(
+                        (d) => d.id === item.id
+                      );
+                      if (partDon) {
+                        nSolde += partDon.montant;
+                        nHist.unshift(
+                          `Don de solidarité reçu : +${partDon.montant}$`
+                        );
+                      }
+                      return {
+                        ...item,
+                        solde: Math.max(0, nSolde),
+                        historique: nHist,
+                        argentVole: nVole,
+                        deck: nDeck
+                      };
+                    })
+                  );
+
+                  const histEntry = `${jL.nom} vs ${jC.nom} [${deConfig.nom}] -> Face ${faceTiree.type} (${faceTiree.pct}%) : ${texteResultat}`;
+                  setHistoriqueFiscal((prev) => [
+                    {
+                      lanceur: jL.nom,
+                      cible: jC.nom,
+                      de: deConfig.nom,
+                      details: histEntry,
+                      date: new Date().toLocaleTimeString()
+                    },
+                    ...prev
+                  ]);
+                  setHistoriqueAffichage((prev) =>
+                    [
+                      histEntry,
+                      prev[0] === configGlobale.phraseAucunHistorique
+                        ? null
+                        : prev[0]
+                    ].filter(Boolean)
+                  );
+
+                  setSousMenuBanque("accueil");
+                },
+            (secRoulement + secArret) * 1000 + 1000
+          );
+        };
+
+        // Fenêtre de code administrateur, partagée par les écrans installés
+        // sur un appareil dédié : on ne doit pas pouvoir en sortir vers
+        // l'Admin sans le code.
+        const rendreModalAdmin = () =>
+          modalAdminOuvert ? (
+            <div
+              style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                width: "100vw",
+                height: "100vh",
+                background: "rgba(0,0,0,0.9)",
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+                zIndex: 2000
+              }}
+            >
+              <div
+                style={{
+                  background: "#222",
+                  padding: "30px",
+                  borderRadius: "12px",
+                  textAlign: "center",
+                  minWidth: "280px"
+                }}
+              >
+                <h3 style={{ marginTop: 0 }}>🔒 Code Administrateur</h3>
+                <input
+                  type="password"
+                  value={saisieCodeAdmin}
+                  autoFocus
+                  onChange={(e) => {
+                    setSaisieCodeAdmin(e.target.value);
+                    setErreurCodeAdmin("");
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") validerCodeAdmin();
+                  }}
+                  style={{
+                    padding: "10px",
+                    width: "80%",
+                    background: "#333",
+                    color: "#fff",
+                    border: "1px solid #555",
+                    borderRadius: "4px"
+                  }}
+                />
+                {/* Message dans la page : une alerte du navigateur peut être
+                    bloquée, et l'erreur passerait alors inaperçue. */}
+                <p
+                  style={{
+                    color: "#f44336",
+                    minHeight: "1.4em",
+                    margin: "8px 0 12px 0",
+                    fontSize: "0.9rem"
+                  }}
+                >
+                  {erreurCodeAdmin}
+                </p>
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <button
+                    onClick={validerCodeAdmin}
+                    style={{
+                      flex: 1,
+                      padding: "10px",
+                      background: "#4CAF50",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer"
+                    }}
+                  >
+                    Valider
+                  </button>
+                  <button
+                    onClick={() => {
+                      setModalAdminOuvert(false);
+                      setSaisieCodeAdmin("");
+                      setErreurCodeAdmin("");
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: "10px",
+                      background: "#555",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer"
+                    }}
+                  >
+                    Annuler
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null;
+
+        // ========================================================
+        // ================= RENDU DES INTERFACES =================
+        // ========================================================
+
+        if (interfaceActive === "menu") {
+          return (
+            <div
+              style={{
+                textAlign: "center",
+                padding: "40px",
+                maxWidth: "400px",
+                margin: "0 auto"
+              }}
+            >
+              <h1>🎰 Casino RP - Menu</h1>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "15px"
+                }}
+              >
+                <button
+                  onClick={() => setInterfaceActive("admin")}
+                  className="checkbox-btn"
+                  style={{ background: "#333" }}
+                >
+                  🛠️ Admin & Config
+                </button>
+                <button
+                  onClick={() => setInterfaceActive("affichage")}
+                  className="checkbox-btn"
+                  style={{ background: "#2196F3" }}
+                >
+                  📺 Écran d'affichage
+                </button>
+                <button
+                  onClick={() => setInterfaceActive("banque")}
+                  className="checkbox-btn"
+                  style={{ background: "#4CAF50" }}
+                >
+                  📱 Banque Automatisée
+                </button>
+                <button
+                  onClick={() => setInterfaceActive("croupier")}
+                  className="checkbox-btn"
+                  style={{ background: "#9C27B0" }}
+                >
+                  🎲 Croupier
+                </button>
+                <button
+                  onClick={() => setInterfaceActive("banquier")}
+                  className="checkbox-btn"
+                  style={{ background: "#FF9800" }}
+                >
+                  🏦 Banquier & Boutique
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        // --- 2. INTERFACE ADMIN ---
+        if (interfaceActive === "admin") {
+          return (
+            <div
+              style={{ padding: "30px", maxWidth: "900px", margin: "0 auto" }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: "10px"
+                }}
+              >
+                <h1 style={{ color: "#FF9800", margin: 0 }}>
+                  🛠️ Interface Admin
+                </h1>
+                <button
+                  onClick={() => setInterfaceActive("base")}
+                  style={{
+                    padding: "10px 18px",
+                    background: "#2196F3",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "6px",
+                    fontWeight: "bold",
+                    cursor: "pointer"
+                  }}
+                >
+                  🗄️ Voir la base de données
+                </button>
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "20px"
+                }}
+              >
+                {/* Table 4 */}
+                <div
+                  style={{
+                    background: "#222",
+                    padding: "20px",
+                    borderRadius: "12px"
+                  }}
+                >
+                  <h3 style={{ color: "#4CAF50", margin: "0 0 15px 0" }}>
+                    Table 4 : Configuration Globale
+                  </h3>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: "10px"
+                    }}
+                  >
+                    <label>
+                      Code Admin :{" "}
+                      <input
+                        type="text"
+                        value={configGlobale.codeAdmin}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            codeAdmin: e.target.value
+                          })
+                        }
+                        style={{ width: "100%", padding: "5px" }}
+                      />
+                    </label>
+                    <label>
+                      Taille du Top :{" "}
+                      <input
+                        type="number"
+                        value={configGlobale.limitTop}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            limitTop: Number(e.target.value)
+                          })
+                        }
+                        style={{ width: "100%", padding: "5px" }}
+                      />
+                    </label>
+                    <label>
+                      Durée Paradis Fiscal (Min) :{" "}
+                      <input
+                        type="number"
+                        value={configGlobale.dureeParadisFiscalMin}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            dureeParadisFiscalMin: Number(e.target.value)
+                          })
+                        }
+                        style={{ width: "100%", padding: "5px" }}
+                      />
+                    </label>
+                    <label>
+                      Limite Retrait Croupier :{" "}
+                      <input
+                        type="number"
+                        value={configGlobale.limiteRetraitCroupier}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            limiteRetraitCroupier: Number(e.target.value)
+                          })
+                        }
+                        style={{ width: "100%", padding: "5px" }}
+                      />
+                    </label>
+
+                    {/* AJOUT DES RÉGLAGES DE TEMPS POUR LE DÉ */}
+                    <label>
+                      Durée roulement dé (s) :{" "}
+                      <input
+                        type="number"
+                        value={configGlobale.dureeRoulement}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            dureeRoulement: Number(e.target.value)
+                          })
+                        }
+                        style={{ width: "100%", padding: "5px" }}
+                      />
+                    </label>
+                    <label>
+                      Durée arrêt image (s) :{" "}
+                      <input
+                        type="number"
+                        value={configGlobale.dureeArret}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            dureeArret: Number(e.target.value)
+                          })
+                        }
+                        style={{ width: "100%", padding: "5px" }}
+                      />
+                    </label>
+
+                    <label>
+                      Déconnexion borne après (s) :{" "}
+                      <input
+                        type="number"
+                        value={configGlobale.dureeInactiviteSec}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            dureeInactiviteSec: Number(e.target.value)
+                          })
+                        }
+                        style={{ width: "100%", padding: "5px" }}
+                      />
+                    </label>
+
+                    <label style={{ gridColumn: "span 2" }}>
+                      Phrase Limite Croupier :{" "}
+                      <input
+                        type="text"
+                        value={configGlobale.phraseLimiteCroupier}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            phraseLimiteCroupier: e.target.value
+                          })
+                        }
+                        style={{ width: "100%", padding: "5px" }}
+                      />
+                    </label>
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: "15px",
+                      padding: "10px",
+                      background: configGlobale.modeLocal
+                        ? "#d32f2f"
+                        : "#4CAF50",
+                      borderRadius: "6px"
+                    }}
+                  >
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        cursor: "pointer",
+                        fontWeight: "bold"
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={configGlobale.modeLocal}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            modeLocal: e.target.checked
+                          })
+                        }
+                        style={{ width: "20px", height: "20px" }}
+                      />
+                      MODE LOCAL (Bloque le scan des cartes physiques / Secours)
+                    </label>
+                  </div>
+                  <div style={{ marginTop: "15px" }}>
+                    <label>
+                      Phrase Affichage Contrôle :{" "}
+                      <input
+                        type="text"
+                        value={configGlobale.phraseAttaqueCible}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            phraseAttaqueCible: e.target.value
+                          })
+                        }
+                        style={{ width: "100%", padding: "5px" }}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                {/* Table 6 : Les 3 Dés */}
+                <div
+                  style={{
+                    background: "#222",
+                    padding: "20px",
+                    borderRadius: "12px"
+                  }}
+                >
+                  <h3 style={{ color: "#2196F3", margin: "0 0 15px 0" }}>
+                    Table 6 : Éditeur des 3 Dés (6 faces par dé)
+                  </h3>
+                  {desConfig.map((de, dIndex) => (
+                    <div
+                      key={de.id}
+                      style={{
+                        marginBottom: "15px",
+                        padding: "10px",
+                        border: "1px solid #555",
+                        borderRadius: "8px"
+                      }}
+                    >
+                      <input
+                        type="text"
+                        value={de.nom}
+                        onChange={(e) => {
+                          let nD = [...desConfig];
+                          nD[dIndex].nom = e.target.value;
+                          setDesConfig(nD);
+                        }}
+                        style={{
+                          fontWeight: "bold",
+                          background: "transparent",
+                          color: "#2196F3",
+                          border: "none",
+                          fontSize: "1.1rem",
+                          marginBottom: "10px"
+                        }}
+                      />
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "1fr 1fr 1fr",
+                          gap: "10px"
+                        }}
+                      >
+                        {de.faces.map((face, fIndex) => (
+                          <div
+                            key={fIndex}
+                            style={{
+                              display: "flex",
+                              gap: "5px",
+                              alignItems: "center",
+                              background: "#333",
+                              padding: "5px",
+                              borderRadius: "4px"
+                            }}
+                          >
+                            <span>F{fIndex + 1}</span>
+                            <select
+                              value={face.type}
+                              onChange={(e) => {
+                                let nD = [...desConfig];
+                                nD[dIndex].faces[fIndex].type = e.target.value;
+                                setDesConfig(nD);
+                              }}
+                              style={{
+                                padding: "4px",
+                                background: "#222",
+                                color: "#fff",
+                                border: "1px solid #555"
+                              }}
+                            >
+                              <option value="Rouge">Rouge (- Att)</option>
+                              <option value="Vert">Vert (- Cib)</option>
+                              <option value="Don">Don (Solidarité)</option>
+                            </select>
+                            <input
+                              type="number"
+                              value={face.pct}
+                              onChange={(e) => {
+                                let nD = [...desConfig];
+                                nD[dIndex].faces[fIndex].pct = Number(
+                                  e.target.value
+                                );
+                                setDesConfig(nD);
+                              }}
+                              style={{
+                                width: "50px",
+                                padding: "4px",
+                                background: "#222",
+                                color: "#fff",
+                                border: "1px solid #555"
+                              }}
+                            />{" "}
+                            %
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Table 2 : Missions, Produits, Pénalités */}
+                <div
+                  style={{
+                    background: "#222",
+                    padding: "20px",
+                    borderRadius: "12px"
+                  }}
+                >
+                  <h3 style={{ color: "#FF9800", margin: "0 0 15px 0" }}>
+                    Table 2 : Missions, Produits & Pénalités
+                  </h3>
+
+                  {/* Missions */}
+                  <h4 style={{ color: "#4CAF50" }}>Missions</h4>
+                  {missions.map((m, idx) => (
+                    <div
+                      key={m.id}
+                      style={{
+                        display: "flex",
+                        gap: "10px",
+                        marginBottom: "5px"
+                      }}
+                    >
+                      <input
+                        type="text"
+                        value={m.nom}
+                        onChange={(e) => {
+                          let n = [...missions];
+                          n[idx].nom = e.target.value;
+                          setMissions(n);
+                        }}
+                        style={{ flex: 2, padding: "5px" }}
+                      />
+                      <input
+                        type="number"
+                        value={m.montant}
+                        onChange={(e) => {
+                          let n = [...missions];
+                          n[idx].montant = Number(e.target.value);
+                          setMissions(n);
+                        }}
+                        style={{ flex: 1, padding: "5px" }}
+                      />
+                      <button
+                        onClick={() =>
+                          setMissions(
+                            missions.filter((item) => item.id !== m.id)
+                          )
+                        }
+                        style={{
+                          background: "#f44336",
+                          color: "#fff",
+                          border: "none",
+                          padding: "5px 10px",
+                          cursor: "pointer"
+                        }}
+                      >
+                        X
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    onClick={() =>
+                      setMissions([
+                        ...missions,
+                        {
+                          id: Date.now(),
+                          nom: "Nouvelle Mission",
+                          montant: 500,
+                          type: "mission"
+                        }
+                      ])
+                    }
+                    style={{
+                      background: "#4CAF50",
+                      color: "#fff",
+                      border: "none",
+                      padding: "5px 10px",
+                      marginBottom: "15px"
+                    }}
+                  >
+                    + Mission
+                  </button>
+
+                  {/* Produits */}
+                  <h4 style={{ color: "#FF9800" }}>Produits Boutique</h4>
+                  {produits.map((p, idx) => (
+                    <div
+                      key={p.id}
+                      style={{
+                        display: "flex",
+                        gap: "10px",
+                        marginBottom: "5px"
+                      }}
+                    >
+                      <input
+                        type="text"
+                        value={p.nom}
+                        onChange={(e) => {
+                          let n = [...produits];
+                          n[idx].nom = e.target.value;
+                          setProduits(n);
+                        }}
+                        style={{ flex: 2, padding: "5px" }}
+                      />
+                      <input
+                        type="number"
+                        value={p.montant}
+                        onChange={(e) => {
+                          let n = [...produits];
+                          n[idx].montant = Number(e.target.value);
+                          setProduits(n);
+                        }}
+                        style={{ flex: 1, padding: "5px" }}
+                      />
+                      <button
+                        onClick={() =>
+                          setProduits(
+                            produits.filter((item) => item.id !== p.id)
+                          )
+                        }
+                        style={{
+                          background: "#f44336",
+                          color: "#fff",
+                          border: "none",
+                          padding: "5px 10px",
+                          cursor: "pointer"
+                        }}
+                      >
+                        X
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    onClick={() =>
+                      setProduits([
+                        ...produits,
+                        {
+                          id: Date.now(),
+                          nom: "Nouveau Produit",
+                          montant: 200,
+                          type: "produit"
+                        }
+                      ])
+                    }
+                    style={{
+                      background: "#FF9800",
+                      color: "#fff",
+                      border: "none",
+                      padding: "5px 10px",
+                      marginBottom: "15px"
+                    }}
+                  >
+                    + Produit
+                  </button>
+
+                  {/* Pénalités */}
+                  <h4 style={{ color: "#f44336" }}>Pénalités</h4>
+                  {penalites.map((p, idx) => (
+                    <div
+                      key={p.id}
+                      style={{
+                        display: "flex",
+                        gap: "10px",
+                        marginBottom: "5px"
+                      }}
+                    >
+                      <input
+                        type="text"
+                        value={p.nom}
+                        onChange={(e) => {
+                          let n = [...penalites];
+                          n[idx].nom = e.target.value;
+                          setPenalites(n);
+                        }}
+                        style={{ flex: 2, padding: "5px" }}
+                      />
+                      <input
+                        type="number"
+                        value={p.montant}
+                        onChange={(e) => {
+                          let n = [...penalites];
+                          n[idx].montant = Number(e.target.value);
+                          setPenalites(n);
+                        }}
+                        style={{ flex: 1, padding: "5px" }}
+                      />
+                      <button
+                        onClick={() =>
+                          setPenalites(
+                            penalites.filter((item) => item.id !== p.id)
+                          )
+                        }
+                        style={{
+                          background: "#f44336",
+                          color: "#fff",
+                          border: "none",
+                          padding: "5px 10px",
+                          cursor: "pointer"
+                        }}
+                      >
+                        X
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    onClick={() =>
+                      setPenalites([
+                        ...penalites,
+                        {
+                          id: Date.now(),
+                          nom: "Nouvelle Pénalité",
+                          montant: 100,
+                          type: "penalite"
+                        }
+                      ])
+                    }
+                    style={{
+                      background: "#f44336",
+                      color: "#fff",
+                      border: "none",
+                      padding: "5px 10px"
+                    }}
+                  >
+                    + Pénalité
+                  </button>
+                </div>
+
+                {/* Éditeur de Cartes de Jeu */}
+                <div
+                  style={{
+                    background: "#222",
+                    padding: "20px",
+                    borderRadius: "12px"
+                  }}
+                >
+                  <h3 style={{ color: "#9C27B0", margin: "0 0 15px 0" }}>
+                    🃏 Cartes du Jeu & Phrases Affichage
+                  </h3>
+                  {cartesJeu.map((c, idx) => (
+                    <div
+                      key={c.id}
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "5px",
+                        marginBottom: "15px",
+                        background: "#333",
+                        padding: "10px",
+                        borderRadius: "6px"
+                      }}
+                    >
+                      <div style={{ display: "flex", gap: "10px" }}>
+                        <input
+                          type="text"
+                          value={c.nom}
+                          onChange={(e) => {
+                            let n = [...cartesJeu];
+                            n[idx].nom = e.target.value;
+                            setCartesJeu(n);
+                          }}
+                          style={{ flex: 1, padding: "5px" }}
+                        />
+                        <button
+                          onClick={() =>
+                            setCartesJeu(
+                              cartesJeu.filter((item) => item.id !== c.id)
+                            )
+                          }
+                          style={{
+                            background: "#f44336",
+                            color: "#fff",
+                            border: "none",
+                            padding: "5px 10px",
+                            cursor: "pointer"
+                          }}
+                        >
+                          Supprimer
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="Définition"
+                        value={c.definition}
+                        onChange={(e) => {
+                          let n = [...cartesJeu];
+                          n[idx].definition = e.target.value;
+                          setCartesJeu(n);
+                        }}
+                        style={{ padding: "5px" }}
+                      />
+                      <input
+                        type="text"
+                        placeholder="Phrase pour l'écran d'affichage"
+                        value={c.phraseAnim}
+                        onChange={(e) => {
+                          let n = [...cartesJeu];
+                          n[idx].phraseAnim = e.target.value;
+                          setCartesJeu(n);
+                        }}
+                        style={{
+                          padding: "5px",
+                          borderLeft: "3px solid #2196F3"
+                        }}
+                      />
+                    </div>
+                  ))}
+                  <button
+                    onClick={() =>
+                      setCartesJeu([
+                        ...cartesJeu,
+                        {
+                          id: "c_" + Date.now(),
+                          nom: "Nouvelle Carte",
+                          definition: "...",
+                          phraseAnim: "Effet mystère !"
+                        }
+                      ])
+                    }
+                    style={{
+                      background: "#9C27B0",
+                      color: "#fff",
+                      border: "none",
+                      padding: "8px 15px",
+                      borderRadius: "4px"
+                    }}
+                  >
+                    + Ajouter une Carte
+                  </button>
+                </div>
+
+                {/* Table 1 : les joueurs */}
+                <div
+                  style={{
+                    background: "#222",
+                    padding: "20px",
+                    borderRadius: "12px"
+                  }}
+                >
+                  <h3 style={{ color: "#4CAF50", margin: "0 0 5px 0" }}>
+                    Table 1 : Joueurs ({joueurs.length})
+                  </h3>
+                  <p
+                    style={{
+                      margin: "0 0 15px 0",
+                      fontSize: "0.85rem",
+                      color: "#aaa"
+                    }}
+                  >
+                    L'ID et le code sont ce que le joueur saisit sur la borne.
+                    Deux joueurs ne peuvent pas avoir le même ID.
+                  </p>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1.6fr 1fr 1fr 1fr auto",
+                      gap: "8px",
+                      fontSize: "0.8rem",
+                      color: "#888",
+                      marginBottom: "6px",
+                      textTransform: "uppercase"
+                    }}
+                  >
+                    <span>Nom</span>
+                    <span>ID</span>
+                    <span>Code</span>
+                    <span>Solde</span>
+                    <span />
+                  </div>
+
+                  <div style={{ maxHeight: "420px", overflowY: "auto" }}>
+                    {joueurs.map((j, idx) => {
+                      const idDouble =
+                        joueurs.filter((a) => a.id === j.id).length > 1;
+                      const majJoueur = (champ, valeur) => {
+                        const n = [...joueurs];
+                        n[idx] = { ...n[idx], [champ]: valeur };
+                        setJoueurs(n);
+                      };
+                      const champ = {
+                        padding: "7px",
+                        background: "#333",
+                        color: "#fff",
+                        border: "1px solid #555",
+                        borderRadius: "4px",
+                        width: "100%"
+                      };
+                      return (
+                        <div
+                          key={idx}
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "1.6fr 1fr 1fr 1fr auto",
+                            gap: "8px",
+                            marginBottom: "6px",
+                            alignItems: "center"
+                          }}
+                        >
+                          <input
+                            type="text"
+                            value={j.nom}
+                            onChange={(e) => majJoueur("nom", e.target.value)}
+                            aria-label={"Nom du joueur " + (idx + 1)}
+                            style={champ}
+                          />
+                          <input
+                            type="text"
+                            value={j.id}
+                            onChange={(e) =>
+                              majJoueur("id", e.target.value.trim())
+                            }
+                            aria-label={"ID du joueur " + (idx + 1)}
+                            style={{
+                              ...champ,
+                              borderColor: idDouble ? "#f44336" : "#555"
+                            }}
+                            title={idDouble ? "Cet ID est déjà utilisé" : ""}
+                          />
+                          <input
+                            type="text"
+                            value={j.code}
+                            onChange={(e) =>
+                              majJoueur("code", e.target.value.trim())
+                            }
+                            aria-label={"Code du joueur " + (idx + 1)}
+                            style={champ}
+                          />
+                          <input
+                            type="number"
+                            value={j.solde}
+                            onChange={(e) =>
+                              majJoueur("solde", Number(e.target.value))
+                            }
+                            aria-label={"Solde du joueur " + (idx + 1)}
+                            style={champ}
+                          />
+                          {/* Confirmation dans la page plutôt qu'une fenêtre
+                              du navigateur : celles-ci sont bloquées dans
+                              certains aperçus, et la suppression échouait
+                              alors sans rien afficher. */}
+                          {joueurASupprimer === idx ? (
+                            <span style={{ display: "flex", gap: "5px" }}>
+                              <button
+                                onClick={() => {
+                                  setJoueurs(
+                                    joueurs.filter((_, i) => i !== idx)
+                                  );
+                                  setJoueurASupprimer(null);
+                                }}
+                                style={{
+                                  background: "#f44336",
+                                  color: "#fff",
+                                  border: "none",
+                                  borderRadius: "4px",
+                                  padding: "7px 10px",
+                                  cursor: "pointer",
+                                  fontWeight: "bold",
+                                  whiteSpace: "nowrap"
+                                }}
+                              >
+                                Supprimer
+                              </button>
+                              <button
+                                onClick={() => setJoueurASupprimer(null)}
+                                style={{
+                                  background: "#555",
+                                  color: "#fff",
+                                  border: "none",
+                                  borderRadius: "4px",
+                                  padding: "7px 10px",
+                                  cursor: "pointer"
+                                }}
+                              >
+                                Annuler
+                              </button>
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => setJoueurASupprimer(idx)}
+                              title={"Supprimer " + j.nom}
+                              style={{
+                                background: "#f44336",
+                                color: "#fff",
+                                border: "none",
+                                borderRadius: "4px",
+                                padding: "7px 11px",
+                                cursor: "pointer"
+                              }}
+                            >
+                              X
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {joueurs.some(
+                    (j, i) => joueurs.findIndex((a) => a.id === j.id) !== i
+                  ) && (
+                    <p style={{ color: "#f44336", fontSize: "0.85rem" }}>
+                      ⚠️ Des joueurs partagent le même ID : la connexion sur les
+                      bornes sera imprévisible.
+                    </p>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      // Un ID libre, pour ne pas créer de doublon d'emblée
+                      let n = joueurs.length + 1;
+                      while (joueurs.some((j) => j.id === String(n))) n++;
+                      setJoueurs([
+                        ...joueurs,
+                        {
+                          id: String(n),
+                          code: "",
+                          nom: "Nouveau joueur",
+                          solde: 0,
+                          totalMissions: 0,
+                          totalJeux: 0,
+                          nbPenalites: 0,
+                          totalPenalites: 0,
+                          jetonsEnJeu: 0,
+                          veinardActif: false,
+            veinardActif: false,
+            totalPenalites: 0,
+                          achatsBoutique: 0,
+                          argentVole: 0,
+                          argentGagneCarte: 0,
+                          paradisFiscal: false,
+                          finParadis: 0,
+                          deck: [],
+                          historique: [],
+                          qrCodesUtilises: [],
+                          missionsFaites: [],
+                          produitsAchetes: [],
+                          penalitesSubies: []
+                        }
+                      ]);
+                    }}
+                    style={{
+                      marginTop: "10px",
+                      background: "#4CAF50",
+                      color: "#fff",
+                      border: "none",
+                      padding: "9px 16px",
+                      borderRadius: "6px",
+                      fontWeight: "bold",
+                      cursor: "pointer"
+                    }}
+                  >
+                    + Ajouter un joueur
+                  </button>
+                </div>
+
+                {/* Sauvegarde de la partie */}
+                <div
+                  style={{
+                    background: "#222",
+                    padding: "20px",
+                    borderRadius: "12px",
+                    border: "2px solid #4CAF50"
+                  }}
+                >
+                  <h3 style={{ color: "#4CAF50", margin: "0 0 5px 0" }}>
+                    💾 Sauvegarde de la partie
+                  </h3>
+                  <p
+                    style={{
+                      margin: "0 0 15px 0",
+                      fontSize: "0.85rem",
+                      color: "#aaa"
+                    }}
+                  >
+                    Le fichier contient la partie entière : joueurs, soldes,
+                    decks, historiques et réglages. Il permet de repartir de
+                    zéro sur n'importe quel appareil, même sans la base.
+                  </p>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: "10px"
+                    }}
+                  >
+                    <button
+                      onClick={telechargerSauvegarde}
+                      style={{
+                        padding: "14px",
+                        background: "#4CAF50",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "6px",
+                        fontWeight: "bold",
+                        fontSize: "1rem",
+                        cursor: "pointer"
+                      }}
+                    >
+                      ⬇️ Télécharger une sauvegarde
+                    </button>
+
+                    <label
+                      style={{
+                        padding: "14px",
+                        background: "#FF9800",
+                        color: "#fff",
+                        borderRadius: "6px",
+                        fontWeight: "bold",
+                        fontSize: "1rem",
+                        cursor: "pointer",
+                        textAlign: "center"
+                      }}
+                    >
+                      ⬆️ Restaurer un fichier
+                      <input
+                        type="file"
+                        accept=".json,application/json"
+                        onChange={(e) => {
+                          restaurerDepuisFichier(e.target.files[0]);
+                          e.target.value = "";
+                        }}
+                        style={{ display: "none" }}
+                      />
+                    </label>
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: "15px",
+                      padding: "12px",
+                      background: "#111",
+                      borderRadius: "6px",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: "10px",
+                      flexWrap: "wrap"
+                    }}
+                  >
+                    <span style={{ fontSize: "0.9rem" }}>
+                      Copie automatique sur cet appareil :{" "}
+                      <strong style={{ color: "#FFD700" }}>
+                        {dateSauvegardeLocale
+                          ? new Date(dateSauvegardeLocale).toLocaleTimeString()
+                          : "aucune"}
+                      </strong>
+                    </span>
+                    <button
+                      onClick={restaurerDepuisAppareil}
+                      disabled={!dateSauvegardeLocale}
+                      style={{
+                        padding: "8px 14px",
+                        background: dateSauvegardeLocale ? "#2196F3" : "#555",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "6px",
+                        cursor: dateSauvegardeLocale ? "pointer" : "not-allowed"
+                      }}
+                    >
+                      Restaurer cette copie
+                    </button>
+                  </div>
+
+                  {restaurationEnAttente && (
+                    <div
+                      style={{
+                        marginTop: "15px",
+                        padding: "15px",
+                        background: restaurationEnAttente.erreur
+                          ? "#5d1f1f"
+                          : "#1f3d1f",
+                        border: `2px solid ${restaurationEnAttente.erreur ? "#f44336" : "#4CAF50"}`,
+                        borderRadius: "8px"
+                      }}
+                    >
+                      {restaurationEnAttente.erreur ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: "10px",
+                            flexWrap: "wrap"
+                          }}
+                        >
+                          <span>⚠️ {restaurationEnAttente.erreur}</span>
+                          <button
+                            onClick={() => setRestaurationEnAttente(null)}
+                            style={{
+                              padding: "8px 14px",
+                              background: "#555",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: "6px",
+                              cursor: "pointer"
+                            }}
+                          >
+                            Fermer
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <p style={{ margin: "0 0 12px 0" }}>
+                            Remplacer la partie en cours par{" "}
+                            <strong>{restaurationEnAttente.source}</strong>, du{" "}
+                            <strong>{restaurationEnAttente.quand}</strong> ?
+                            <br />
+                            <span style={{ color: "#ccc" }}>
+                              {restaurationEnAttente.donnees.joueurs.length}{" "}
+                              joueur(s) seront restaurés. La partie actuelle
+                              sera perdue.
+                            </span>
+                          </p>
+                          <div style={{ display: "flex", gap: "10px" }}>
+                            <button
+                              onClick={() => {
+                                appliquerSauvegarde(
+                                  restaurationEnAttente.donnees
+                                );
+                                setRestaurationEnAttente(null);
+                              }}
+                              style={{
+                                padding: "10px 18px",
+                                background: "#4CAF50",
+                                color: "#fff",
+                                border: "none",
+                                borderRadius: "6px",
+                                fontWeight: "bold",
+                                cursor: "pointer"
+                              }}
+                            >
+                              Restaurer
+                            </button>
+                            <button
+                              onClick={() => setRestaurationEnAttente(null)}
+                              style={{
+                                padding: "10px 18px",
+                                background: "#555",
+                                color: "#fff",
+                                border: "none",
+                                borderRadius: "6px",
+                                cursor: "pointer"
+                              }}
+                            >
+                              Annuler
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Imprimerie */}
+                <div
+                  style={{
+                    background: "#222",
+                    padding: "20px",
+                    borderRadius: "12px",
+                    border: "2px dashed #2196F3"
+                  }}
+                >
+                  <h3 style={{ color: "#2196F3", margin: "0 0 15px 0" }}>
+                    🖨️ Imprimerie & PDF (Table 3)
+                  </h3>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "10px",
+                      alignItems: "flex-end"
+                    }}
+                  >
+                    <div style={{ flex: 2 }}>
+                      <label>Mission :</label>
+                      <select
+                        value={imprMissionId}
+                        onChange={(e) => setImprMissionId(e.target.value)}
+                        style={{ width: "100%", padding: "8px" }}
+                      >
+                        {missions.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.nom} ({m.montant}$)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div style={{ flex: 2 }}>
+                      <label>URL Image de fond (Optionnel) :</label>
+                      <input
+                        type="text"
+                        value={imprImgFond}
+                        onChange={(e) => setImprImgFond(e.target.value)}
+                        placeholder="https://..."
+                        style={{ width: "100%", padding: "8px" }}
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label>Qté :</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={qteImpr}
+                        onChange={(e) => setQteImpr(e.target.value)}
+                        style={{ width: "100%", padding: "8px" }}
+                      />
+                    </div>
+                    <button
+                      onClick={genererChequesPdf}
+                      style={{
+                        padding: "8px 15px",
+                        background: "#2196F3",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "6px",
+                        fontWeight: "bold",
+                        cursor: "pointer"
+                      }}
+                    >
+                      Générer
+                    </button>
+                  </div>
+
+                  <div
+                    id="printable-area"
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: "10px",
+                      marginTop: "20px"
+                    }}
+                  >
+                    {chequesImprimerie.map((ch, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          position: "relative",
+                          background: ch.img
+                            ? `url(${ch.img}) center/cover`
+                            : "#fff",
+                          color: "#000",
+                          padding: "15px",
+                          border: "2px dashed #000",
+                          height: "100px",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center"
+                        }}
+                      >
+                        <div
+                          style={{
+                            background: "rgba(255,255,255,0.8)",
+                            padding: "5px"
+                          }}
+                        >
+                          <h4 style={{ margin: 0 }}>MISSION : {ch.nom}</h4>
+                          <strong
+                            style={{ fontSize: "1.2rem", color: "green" }}
+                          >
+                            +{ch.montant}$
+                          </strong>
+                        </div>
+                        <div
+                          style={{
+                            background: "#eee",
+                            padding: "10px",
+                            border: "1px solid #000",
+                            fontSize: "0.6rem",
+                            textAlign: "center"
+                          }}
+                        >
+                          [QR CODE]
+                          <br />
+                          {ch.hash.substring(0, 8)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {chequesImprimerie.length > 0 && (
+                    <button
+                      className="no-print"
+                      onClick={() => window.print()}
+                      style={{
+                        width: "100%",
+                        padding: "10px",
+                        marginTop: "15px",
+                        background: "#4CAF50",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "6px",
+                        fontWeight: "bold"
+                      }}
+                    >
+                      🖨️ Imprimer les Chèques
+                    </button>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={() => setInterfaceActive("menu")}
+                style={{
+                  marginTop: "20px",
+                  padding: "10px 20px",
+                  background: "#555",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "6px",
+                  cursor: "pointer"
+                }}
+              >
+                Retour
+              </button>
+            </div>
+          );
+        }
+
+        // --- 2 bis. BASE DE DONNÉES (lecture seule) ---
+        // Vue d'ensemble des 7 tables, alimentée par les mêmes données que le
+        // reste du jeu : elle reflète donc en direct ce que font les autres
+        // appareils. Deux tables n'étaient visibles nulle part jusqu'ici : le
+        // registre des QR codes et l'historique des contrôles fiscaux.
+        if (interfaceActive === "base") {
+          const cadre = {
+            background: "#222",
+            padding: "18px",
+            borderRadius: "12px",
+            marginBottom: "20px",
+            overflowX: "auto"
+          };
+          const th = {
+            textAlign: "left",
+            padding: "7px 10px",
+            borderBottom: "2px solid #555",
+            color: "#888",
+            fontSize: "0.75rem",
+            textTransform: "uppercase",
+            whiteSpace: "nowrap"
+          };
+          const td = {
+            padding: "7px 10px",
+            borderBottom: "1px solid #333",
+            whiteSpace: "nowrap"
+          };
+          const Table = ({ colonnes, lignes, vide }) =>
+            lignes.length === 0 ? (
+              <p style={{ color: "#666", margin: 0 }}>{vide}</p>
+            ) : (
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: "0.9rem"
+                }}
+              >
+                <thead>
+                  <tr>
+                    {colonnes.map((c) => (
+                      <th key={c} style={th}>
+                        {c}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {lignes.map((l, i) => (
+                    <tr key={i}>
+                      {l.map((cel, k) => (
+                        <td key={k} style={td}>
+                          {cel}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            );
+
+          return (
+            <div
+              style={{ padding: "30px", maxWidth: "1200px", margin: "0 auto" }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "20px",
+                  flexWrap: "wrap",
+                  gap: "10px"
+                }}
+              >
+                <h1 style={{ color: "#2196F3", margin: 0 }}>
+                  🗄️ Base de données
+                </h1>
+                <span style={{ color: Sync.actif ? "#4CAF50" : "#FF9800" }}>
+                  {Sync.actif
+                    ? "● Connectée — partagée entre les appareils"
+                    : "● Hors ligne — données locales à cet appareil"}
+                </span>
+              </div>
+
+              <div style={cadre}>
+                <h3 style={{ color: "#4CAF50", marginTop: 0 }}>
+                  Table 1 — Comptes joueurs ({joueurs.length})
+                </h3>
+                <Table
+                  colonnes={[
+                    "ID",
+                    "Nom",
+                    "Code",
+                    "Montant total",
+                    "Argent missions",
+                    "Argent jeux",
+                    "Nb missions",
+                    "Pénalités",
+                    "Achats",
+                    "Argent volé",
+                    "Gains cartes",
+                    "Paradis",
+                    "Fin paradis"
+                  ]}
+                  vide="Aucun joueur."
+                  lignes={joueursActifs.map((j) => [
+                    j.id,
+                    j.nom,
+                    j.code,
+                    `${j.solde} $`,
+                    `${j.totalMissions} $`,
+                    `${j.totalJeux} $`,
+                    (j.missionsFaites || []).length,
+                    `${j.totalPenalites || 0} $ (${j.nbPenalites})`,
+                    `${j.achatsBoutique} $`,
+                    `${j.argentVole || 0} $`,
+                    `${j.argentGagneCarte || 0} $`,
+                    j.paradisActif ? "🌴 actif" : "—",
+                    j.paradisActif
+                      ? new Date(j.finParadis).toLocaleTimeString()
+                      : "—"
+                  ])}
+                />
+              </div>
+
+              <div style={cadre}>
+                <h3 style={{ color: "#4CAF50", marginTop: 0 }}>
+                  Table 2 — Missions ({missions.length})
+                </h3>
+                <Table
+                  colonnes={["Nom", "Montant", "Validée par"]}
+                  vide="Aucune mission."
+                  lignes={missions.map((m) => [
+                    m.nom,
+                    `${m.montant} $`,
+                    joueursActifs
+                      .filter((j) => (j.missionsFaites || []).includes(m.id))
+                      .map((j) => j.nom)
+                      .join(", ") || "—"
+                  ])}
+                />
+              </div>
+
+              <div style={cadre}>
+                <h3 style={{ color: "#2196F3", marginTop: 0 }}>
+                  Table 3 — QR codes ({qrCodesRegistre.length})
+                </h3>
+                <Table
+                  colonnes={["Hash", "Type", "Statut"]}
+                  vide="Aucun QR code généré. Ils apparaissent après une impression de chèques."
+                  lignes={qrCodesRegistre.map((q) => [
+                    q.hash,
+                    q.type,
+                    q.statut
+                  ])}
+                />
+              </div>
+
+              <div style={cadre}>
+                <h3 style={{ color: "#FF9800", marginTop: 0 }}>
+                  Table 4 — Catalogue ({produits.length + penalites.length})
+                </h3>
+                <Table
+                  colonnes={["Élément", "Type", "Montant", "Concerne"]}
+                  vide="Catalogue vide."
+                  lignes={[
+                    ...produits.map((p) => [
+                      p.nom,
+                      "Produit",
+                      `-${p.montant} $`,
+                      joueursActifs
+                        .filter((j) => (j.produitsAchetes || []).includes(p.id))
+                        .map((j) => j.nom)
+                        .join(", ") || "—"
+                    ]),
+                    ...penalites.map((p) => [
+                      p.nom,
+                      "Pénalité",
+                      `-${p.montant} $`,
+                      joueursActifs
+                        .filter((j) => (j.penalitesSubies || []).includes(p.id))
+                        .map((j) => j.nom)
+                        .join(", ") || "—"
+                    ])
+                  ]}
+                />
+              </div>
+
+              <div style={cadre}>
+                <h3 style={{ color: "#9C27B0", marginTop: 0 }}>
+                  Table 5 — Configuration globale
+                </h3>
+                <Table
+                  colonnes={["Paramètre", "Valeur"]}
+                  vide=""
+                  lignes={Object.keys(configGlobale).map((cle) => [
+                    cle,
+                    String(
+                      Array.isArray(configGlobale[cle])
+                        ? configGlobale[cle].join(", ")
+                        : configGlobale[cle]
+                    )
+                  ])}
+                />
+              </div>
+
+              <div style={cadre}>
+                <h3 style={{ color: "#f44336", marginTop: 0 }}>
+                  Table 6 — Contrôles fiscaux ({historiqueFiscal.length})
+                </h3>
+                <Table
+                  colonnes={["Heure", "Attaquant", "Cible", "Dé", "Résultat"]}
+                  vide="Aucun contrôle fiscal lancé pour le moment."
+                  lignes={historiqueFiscal.map((h) => [
+                    h.date,
+                    h.lanceur,
+                    h.cible,
+                    h.de,
+                    h.details
+                  ])}
+                />
+              </div>
+
+              <div style={cadre}>
+                <h3 style={{ color: "#00BCD4", marginTop: 0 }}>
+                  Table 7 — Configuration des dés
+                </h3>
+                <Table
+                  colonnes={["Dé", "F1", "F2", "F3", "F4", "F5", "F6"]}
+                  vide="Aucun dé configuré."
+                  lignes={desConfig.map((d) => [
+                    d.nom,
+                    ...d.faces.map((f) => `${f.type} ${f.pct}%`)
+                  ])}
+                />
+              </div>
+
+              <button
+                onClick={() => setInterfaceActive("admin")}
+                style={{
+                  padding: "12px 25px",
+                  background: "#555",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "8px",
+                  cursor: "pointer"
+                }}
+              >
+                🔙 Retour à l'Admin
+              </button>
+            </div>
+          );
+        }
+
+        // --- 3. BANQUE AUTOMATISÉE ---
+        if (interfaceActive === "banque") {
+          const dSelectionneObj = desConfig.find(
+            (d) => d.id === Number(deFiscalSelectionne)
+          );
+
+          return (
+            <div
+              style={{
+                padding: "30px",
+                maxWidth: "500px",
+                margin: "0 auto",
+                position: "relative"
+              }}
+            >
+              {/* Superposition de l'animation globale pour synchronisation visuelle */}
+              {animationActive && (
+                <div
+                  style={{
+                    position: "fixed",
+                    top: 0,
+                    left: 0,
+                    width: "100vw",
+                    height: "100vh",
+                    background: "rgba(0,0,0,0.95)",
+                    zIndex: 5000,
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "center",
+                    alignItems: "center"
+                  }}
+                >
+                  <h2
+                    style={{
+                      color: "#FFD700",
+                      fontSize: "1.8rem",
+                      textAlign: "center",
+                      margin: "0 20px 30px 20px"
+                    }}
+                  >
+                    {infosAnimation.phraseAction}
+                  </h2>
+                  <div
+                    className={estEnRoulementFiscal ? "dice-rolling" : ""}
+                    style={{
+                      width: "150px",
+                      height: "150px",
+                      background: infosAnimation.couleur,
+                      borderRadius: "25px",
+                      display: "flex",
+                      justifyContent: "center",
+                      alignItems: "center",
+                      border: "4px solid #fff",
+                      boxShadow: `0 0 30px ${infosAnimation.couleur}`
+                    }}
+                  >
+                    <span style={{ fontSize: "2.5rem", fontWeight: "bold" }}>
+                      {infosAnimation.face}
+                    </span>
+                  </div>
+                  {!estEnRoulementFiscal && (
+                    <h3
+                      style={{
+                        color: "#fff",
+                        fontSize: "1.2rem",
+                        marginTop: "30px",
+                        textAlign: "center"
+                      }}
+                    >
+                      {infosAnimation.phraseResultat}
+                    </h3>
+                  )}
+                </div>
+              )}
+
+              {rendreModalAdmin()}
+
+              {!joueurConnecteId ? (
+                <div style={{ textAlign: "center" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: "20px"
+                    }}
+                  >
+                    <h1 style={{ color: "#4CAF50", margin: 0 }}>📱 Banque</h1>
+                    <button
+                      onClick={() => setModalAdminOuvert(true)}
+                      style={{
+                        background: "#f44336",
+                        color: "#fff",
+                        border: "none",
+                        padding: "8px",
+                        borderRadius: "6px"
+                      }}
+                    >
+                      🔒 Quitter
+                    </button>
+                  </div>
+                  <div
+                    style={{
+                      background: "#222",
+                      padding: "25px",
+                      borderRadius: "12px",
+                      textAlign: "left",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "15px"
+                    }}
+                  >
+                    <label>
+                      ID :{" "}
+                      <input
+                        type="text"
+                        value={idSaisi}
+                        onChange={(e) => setIdSaisi(e.target.value)}
+                        style={{
+                          width: "100%",
+                          padding: "10px",
+                          background: "#333",
+                          color: "#fff",
+                          border: "none"
+                        }}
+                      />
+                    </label>
+                    <label>
+                      Code :{" "}
+                      <input
+                        type="password"
+                        value={codeSaisi}
+                        onChange={(e) => setCodeSaisi(e.target.value)}
+                        style={{
+                          width: "100%",
+                          padding: "10px",
+                          background: "#333",
+                          color: "#fff",
+                          border: "none"
+                        }}
+                      />
+                    </label>
+                    <button
+                      onClick={() => {
+                        const j = joueursActifs.find(
+                          (item) =>
+                            item.id.toLowerCase() === idSaisi.toLowerCase() &&
+                            item.code === codeSaisi
+                        );
+                        if (j) {
+                          setJoueurConnecteId(j.id);
+                          setSousMenuBanque("accueil");
+                          // Les identifiants sont effacés dès l'entrée : la
+                          // borne est partagée, ils n'ont pas à survivre à la
+                          // connexion.
+                          setIdSaisi("");
+                          setCodeSaisi("");
+                        } else {
+                          // En cas d'erreur on laisse la saisie, pour corriger.
+                          alert("Erreur identifiants.");
+                        }
+                      }}
+                      style={{
+                        padding: "12px",
+                        background: "#4CAF50",
+                        color: "#fff",
+                        border: "none",
+                        fontWeight: "bold"
+                      }}
+                    >
+                      Connexion
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      borderBottom: "1px solid #444",
+                      paddingBottom: "15px",
+                      marginBottom: "20px"
+                    }}
+                  >
+                    <div>
+                      <h2 style={{ margin: 0, color: "#4CAF50" }}>
+                        {joueurActuel.nom}
+                      </h2>
+                      <span
+                        style={{
+                          fontSize: "1.2rem",
+                          color: "#FFD700",
+                          fontWeight: "bold"
+                        }}
+                      >
+                        {joueurActuel.solde.toLocaleString()} $
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", gap: "5px" }}>
+                      <button
+                        onClick={fermerSessionJoueur}
+                        style={{
+                          background: "#FF9800",
+                          color: "#fff",
+                          border: "none",
+                          padding: "8px",
+                          borderRadius: "6px"
+                        }}
+                      >
+                        🚪 Déco
+                      </button>
+                      <button
+                        onClick={() => setModalAdminOuvert(true)}
+                        style={{
+                          background: "#f44336",
+                          color: "#fff",
+                          border: "none",
+                          padding: "8px",
+                          borderRadius: "6px"
+                        }}
+                      >
+                        🔒
+                      </button>
+                    </div>
+                  </div>
+
+                  {sousMenuBanque === "accueil" && (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "10px"
+                      }}
+                    >
+                      <button
+                        onClick={() => setSousMenuBanque("compte")}
+                        className="checkbox-btn"
+                      >
+                        💳 Consulter mon compte
+                      </button>
+                      <button
+                        onClick={() => setSousMenuBanque("deck")}
+                        className="checkbox-btn"
+                      >
+                        🎒 Mon deck ({joueurActuel.deck.length})
+                      </button>
+                      <button
+                        onClick={() => setSousMenuBanque("scanner")}
+                        className="checkbox-btn"
+                        style={{
+                          background: "#2196F3",
+                          borderColor: "#2196F3"
+                        }}
+                      >
+                        📷 Scanner QR Code
+                      </button>
+                      <button
+                        onClick={() => setSousMenuBanque("historique")}
+                        className="checkbox-btn"
+                      >
+                        📊 Historique
+                      </button>
+                    </div>
+                  )}
+
+                  {sousMenuBanque === "compte" && (
+                    <div
+                      style={{
+                        background: "#222",
+                        padding: "20px",
+                        borderRadius: "10px"
+                      }}
+                    >
+                      <h3 style={{ color: "#4CAF50", marginTop: 0 }}>
+                        💳 Détails du Compte
+                      </h3>
+                      <ul
+                        style={{
+                          listStyle: "none",
+                          padding: 0,
+                          lineHeight: "2"
+                        }}
+                      >
+                        <li>
+                          Solde total :{" "}
+                          <strong style={{ color: "#FFD700" }}>
+                            {joueurActuel.solde}$
+                          </strong>
+                        </li>
+                        <li>
+                          Argent Missions :{" "}
+                          <strong>{joueurActuel.totalMissions}$</strong>
+                        </li>
+                        <li>
+                          Argent Jeu (Croupier) :{" "}
+                          <strong>{joueurActuel.totalJeux}$</strong>
+                        </li>
+                        <li>
+                          Achats Boutique :{" "}
+                          <strong style={{ color: "#f44336" }}>
+                            -{joueurActuel.achatsBoutique}$
+                          </strong>
+                        </li>
+                        <li>
+                          Nombre de pénalités :{" "}
+                          <strong style={{ color: "#f44336" }}>
+                            {joueurActuel.nbPenalites}
+                          </strong>
+                        </li>
+                        <li>
+                          Argent volé :{" "}
+                          <strong style={{ color: "#2196F3" }}>
+                            {joueurActuel.argentVole}$
+                          </strong>
+                        </li>
+                        <li>
+                          Argent gagné (Carte) :{" "}
+                          <strong style={{ color: "#9C27B0" }}>
+                            {joueurActuel.argentGagneCarte}$
+                          </strong>
+                        </li>
+                      </ul>
+                      <button
+                        onClick={() => setSousMenuBanque("accueil")}
+                        className="checkbox-btn"
+                        style={{ marginTop: "15px" }}
+                      >
+                        Retour
+                      </button>
+                    </div>
+                  )}
+
+                  {sousMenuBanque === "deck" && (
+                    <div
+                      style={{
+                        background: "#222",
+                        padding: "20px",
+                        borderRadius: "10px"
+                      }}
+                    >
+                      <h3>🎒 Mon Deck</h3>
+                      {joueurActuel.deck.length === 0 ? (
+                        <p style={{ color: "#888" }}>Vide.</p>
+                      ) : (
+                        joueurActuel.deck.map((c, i) => (
+                          <div
+                            key={i}
+                            style={{
+                              background: "#333",
+                              padding: "10px",
+                              marginBottom: "8px",
+                              borderRadius: "6px"
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between"
+                              }}
+                            >
+                              <strong style={{ color: "#9C27B0" }}>
+                                {c.nom}
+                              </strong>
+                              <button
+                                onClick={() => defausserCarte(c.id)}
+                                style={{
+                                  background: "transparent",
+                                  border: "none",
+                                  color: "#f44336",
+                                  cursor: "pointer",
+                                  textDecoration: "underline",
+                                  fontSize: "0.8rem"
+                                }}
+                              >
+                                Défausser
+                              </button>
+                            </div>
+                            <p
+                              style={{
+                                margin: "5px 0",
+                                fontSize: "0.85rem",
+                                color: "#aaa"
+                              }}
+                            >
+                              {c.definition}
+                            </p>
+
+                            {c.id === "controle_fiscal" ? (
+                              <button
+                                onClick={() =>
+                                  setSousMenuBanque("activer_fiscal")
+                                }
+                                style={{
+                                  padding: "8px",
+                                  background: "#f44336",
+                                  color: "#fff",
+                                  border: "none",
+                                  borderRadius: "4px",
+                                  cursor: "pointer",
+                                  width: "100%"
+                                }}
+                              >
+                                ⚡ Lancer Attaque
+                              </button>
+                            ) : c.id === "paradis_fiscal" ? (
+                              <button
+                                onClick={() => {
+                                  setJoueurs((prev) =>
+                                    prev.map((j) =>
+                                      j.id === joueurActuel.id
+                                        ? {
+                                            ...j,
+                                            finParadis:
+                                              Date.now() +
+                                              configGlobale.dureeParadisFiscalMin *
+                                                60000,
+                                            paradisFiscal: true,
+                                            deck: j.deck.filter(
+                                              (card) => card.id !== c.id
+                                            )
+                                          }
+                                        : j
+                                    )
+                                  );
+                                  setHistoriqueAffichage((prev) => [
+                                    c.phraseAnim,
+                                    prev[0]
+                                  ]);
+                                  alert(
+                                    `Paradis Fiscal activé pour ${configGlobale.dureeParadisFiscalMin} minutes !`
+                                  );
+                                  setSousMenuBanque("accueil");
+                                }}
+                                style={{
+                                  padding: "8px",
+                                  background: "#FFD700",
+                                  color: "#000",
+                                  border: "none",
+                                  borderRadius: "4px",
+                                  cursor: "pointer",
+                                  fontWeight: "bold",
+                                  width: "100%"
+                                }}
+                              >
+                                🌴 S'isoler
+                              </button>
+                            ) : c.id === "veinard" ? (
+                              // Le joueur arme la carte quand il le décide :
+                              // elle ne sera consommée qu'au retour des jetons
+                              // de la table qu'il aura choisie.
+                              joueurActuel.veinardActif ? (
+                                <div>
+                                  <div
+                                    style={{
+                                      padding: "8px",
+                                      background: "#00BCD4",
+                                      color: "#000",
+                                      borderRadius: "4px",
+                                      fontWeight: "bold",
+                                      textAlign: "center",
+                                      marginBottom: "6px"
+                                    }}
+                                  >
+                                    ✨ Activée — s'appliquera au retour de vos
+                                    jetons
+                                  </div>
+                                  <button
+                                    onClick={() =>
+                                      setJoueurs((prev) =>
+                                        prev.map((j) =>
+                                          j.id === joueurActuel.id
+                                            ? { ...j, veinardActif: false }
+                                            : j
+                                        )
+                                      )
+                                    }
+                                    style={{
+                                      padding: "6px",
+                                      background: "transparent",
+                                      color: "#aaa",
+                                      border: "1px solid #555",
+                                      borderRadius: "4px",
+                                      cursor: "pointer",
+                                      width: "100%",
+                                      fontSize: "0.85rem"
+                                    }}
+                                  >
+                                    Garder pour plus tard
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    setJoueurs((prev) =>
+                                      prev.map((j) =>
+                                        j.id === joueurActuel.id
+                                          ? { ...j, veinardActif: true }
+                                          : j
+                                      )
+                                    );
+                                    setHistoriqueAffichage((prev) => [
+                                      c.phraseAnim,
+                                      prev[0]
+                                    ]);
+                                  }}
+                                  style={{
+                                    padding: "8px",
+                                    background: "#00BCD4",
+                                    color: "#000",
+                                    border: "none",
+                                    borderRadius: "4px",
+                                    cursor: "pointer",
+                                    fontWeight: "bold",
+                                    width: "100%"
+                                  }}
+                                >
+                                  ✨ Activer pour ma prochaine table
+                                </button>
+                              )
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setJoueurs((prev) =>
+                                    prev.map((j) => {
+                                      if (j.id === joueurActuel.id) {
+                                        return {
+                                          ...j,
+                                          deck: j.deck.filter(
+                                            (card) => card.id !== c.id
+                                          )
+                                        };
+                                      }
+                                      return j;
+                                    })
+                                  );
+                                  setHistoriqueAffichage((prev) => [
+                                    c.phraseAnim,
+                                    prev[0]
+                                  ]);
+                                  alert("Carte activée !");
+                                  setSousMenuBanque("accueil");
+                                }}
+                                style={{
+                                  padding: "8px",
+                                  background: "#4CAF50",
+                                  color: "#fff",
+                                  border: "none",
+                                  borderRadius: "4px",
+                                  width: "100%"
+                                }}
+                              >
+                                Activer
+                              </button>
+                            )}
+                          </div>
+                        ))
+                      )}
+                      <button
+                        onClick={() => setSousMenuBanque("accueil")}
+                        className="checkbox-btn"
+                        style={{ marginTop: "15px" }}
+                      >
+                        Retour
+                      </button>
+                    </div>
+                  )}
+
+                  {sousMenuBanque === "activer_fiscal" && (
+                    <div
+                      style={{
+                        background: "#222",
+                        padding: "20px",
+                        borderRadius: "10px"
+                      }}
+                    >
+                      <h3 style={{ color: "#f44336" }}>
+                        ⚡ Paramétrer l'Attaque
+                      </h3>
+                      <label style={{ display: "block", marginBottom: "10px" }}>
+                        Cible :
+                        <select
+                          value={cibleFiscaleSelectionnee}
+                          onChange={(e) =>
+                            setCibleFiscaleSelectionnee(e.target.value)
+                          }
+                          style={{
+                            width: "100%",
+                            padding: "10px",
+                            background: "#333",
+                            color: "#fff",
+                            border: "none",
+                            marginTop: "5px"
+                          }}
+                        >
+                          <option value="">-- Choisir --</option>
+                          {joueursVisibles
+                            .filter((j) => j.id !== joueurActuel.id)
+                            .map((j) => (
+                              <option key={j.id} value={j.id}>
+                                {j.nom}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+
+                      <label style={{ display: "block", marginBottom: "5px" }}>
+                        Choix du Dé :
+                        <select
+                          value={deFiscalSelectionne}
+                          onChange={(e) =>
+                            setDeFiscalSelectionne(e.target.value)
+                          }
+                          style={{
+                            width: "100%",
+                            padding: "10px",
+                            background: "#333",
+                            color: "#fff",
+                            border: "none",
+                            marginTop: "5px"
+                          }}
+                        >
+                          {desConfig.map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.nom}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      {/* Affichage des faces du dé avant lancer */}
+                      {dSelectionneObj && (
+                        <div
+                          style={{
+                            background: "#111",
+                            padding: "10px",
+                            borderRadius: "6px",
+                            marginBottom: "15px",
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: "5px",
+                            justifyContent: "center"
+                          }}
+                        >
+                          {dSelectionneObj.faces.map((f, i) => (
+                            <div
+                              key={i}
+                              style={{
+                                padding: "5px 8px",
+                                background:
+                                  f.type === "Rouge"
+                                    ? "#f44336"
+                                    : f.type === "Vert"
+                                      ? "#4CAF50"
+                                      : "#2196F3",
+                                borderRadius: "4px",
+                                fontSize: "0.8rem",
+                                fontWeight: "bold"
+                              }}
+                            >
+                              {f.type} {f.pct}%
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <button
+                        onClick={lancerControleFiscal}
+                        style={{
+                          width: "100%",
+                          padding: "15px",
+                          background: "#f44336",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "8px",
+                          fontWeight: "bold",
+                          cursor: "pointer"
+                        }}
+                      >
+                        🎲 TIRER LE DÉ
+                      </button>
+                      <button
+                        onClick={() => setSousMenuBanque("deck")}
+                        className="checkbox-btn"
+                        style={{ marginTop: "10px" }}
+                      >
+                        Annuler
+                      </button>
+                    </div>
+                  )}
+
+                  {sousMenuBanque === "animation_attente" && (
+                    <div style={{ textAlign: "center", padding: "40px 0" }}>
+                      {/* Espace tampon si besoin, mais l'animation globale passe par dessus */}
+                    </div>
+                  )}
+
+                  {sousMenuBanque === "scanner" && (
+                    <div
+                      style={{
+                        background: "#222",
+                        padding: "20px",
+                        borderRadius: "10px",
+                        textAlign: "center"
+                      }}
+                    >
+                      <h3>📷 Scanner Simulator</h3>
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "8px"
+                        }}
+                      >
+                        {missions.map((m) => (
+                          <button
+                            key={m.id}
+                            onClick={() => scannerQrCodeSimule("mission", m)}
+                            style={{
+                              padding: "12px",
+                              background: "#4CAF50",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: "6px"
+                            }}
+                          >
+                            🎁 {m.nom} (+{m.montant}$)
+                          </button>
+                        ))}
+                        {cartesJeu.map((c) => (
+                          <button
+                            key={c.id}
+                            onClick={() => scannerQrCodeSimule("carte", c)}
+                            style={{
+                              padding: "12px",
+                              background: "#9C27B0",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: "6px"
+                            }}
+                          >
+                            🃏 {c.nom}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        onClick={() => setSousMenuBanque("accueil")}
+                        className="checkbox-btn"
+                        style={{ marginTop: "15px" }}
+                      >
+                        Retour
+                      </button>
+                    </div>
+                  )}
+
+                  {sousMenuBanque === "scanner_choix" && (
+                    <div
+                      style={{
+                        background: "#222",
+                        padding: "20px",
+                        borderRadius: "10px",
+                        textAlign: "center"
+                      }}
+                    >
+                      <h3 style={{ color: "#4CAF50" }}>✅ Action réussie !</h3>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "10px",
+                          marginTop: "15px"
+                        }}
+                      >
+                        <button
+                          onClick={() => setSousMenuBanque("scanner")}
+                          style={{
+                            flex: 1,
+                            padding: "10px",
+                            background: "#2196F3",
+                            color: "#fff",
+                            border: "none",
+                            borderRadius: "6px",
+                            cursor: "pointer"
+                          }}
+                        >
+                          Scanner à nouveau
+                        </button>
+                        <button
+                          onClick={() => setSousMenuBanque("accueil")}
+                          style={{
+                            flex: 1,
+                            padding: "10px",
+                            background: "#555",
+                            color: "#fff",
+                            border: "none",
+                            borderRadius: "6px",
+                            cursor: "pointer"
+                          }}
+                        >
+                          Menu
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {sousMenuBanque === "historique" && (
+                    <div
+                      style={{
+                        background: "#222",
+                        padding: "20px",
+                        borderRadius: "10px"
+                      }}
+                    >
+                      <h3>📊 Historique</h3>
+                      {joueurActuel.paradisActif && (
+                        <p style={{ color: "#FFD700" }}>
+                          🌴 Paradis Fiscal Actif (Finit vers{" "}
+                          {new Date(
+                            joueurActuel.finParadis
+                          ).toLocaleTimeString()}
+                          )
+                        </p>
+                      )}
+                      {joueurActuel.historique.length === 0 ? (
+                        <p>{configGlobale.phraseAucunHistorique}</p>
+                      ) : (
+                        joueurActuel.historique.map((h, i) => (
+                          <div
+                            key={i}
+                            style={{
+                              background: "#333",
+                              padding: "8px",
+                              marginBottom: "5px",
+                              fontSize: "0.85rem"
+                            }}
+                          >
+                            • {h}
+                          </div>
+                        ))
+                      )}
+                      <button
+                        onClick={() => setSousMenuBanque("accueil")}
+                        className="checkbox-btn"
+                        style={{ marginTop: "15px" }}
+                      >
+                        Retour
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        // 4. INTERFACE CROUPIER
+        if (interfaceActive === "croupier") {
+          const jC = joueursActifs.find((j) => j.id === joueurCroupierId);
+          // Le croupier doit voir la carte que le joueur possède, pour lui
+          // proposer de l'utiliser sur cette table : le joueur est devant lui,
+          // pas devant une borne.
+          const detientVeinard = jC
+            ? jC.deck.some((c) => c.id === "veinard")
+            : false;
+          const aLeVeinard = jC ? !!jC.veinardActif && detientVeinard : false;
+
+          return (
+            <div
+              style={{ padding: "30px", maxWidth: "600px", margin: "0 auto" }}
+            >
+              <h1 style={{ color: "#9C27B0" }}>🎲 Croupier</h1>
+              <div
+                style={{
+                  background: "#222",
+                  padding: "20px",
+                  borderRadius: "12px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "15px"
+                }}
+              >
+                <select
+                  value={joueurCroupierId}
+                  onChange={(e) => setJoueurCroupierId(e.target.value)}
+                  style={{
+                    padding: "12px",
+                    background: "#333",
+                    color: "#fff",
+                    border: "none",
+                    fontSize: "1.1rem"
+                  }}
+                >
+                  {joueurs.map((j) => (
+                    <option key={j.id} value={j.id}>
+                      {j.nom} (Solde: {j.solde}$)
+                    </option>
+                  ))}
+                </select>
+                {jC && (jC.jetonsEnJeu || 0) > 0 && (
+                  <div
+                    style={{
+                      background: "#FFD700",
+                      color: "#000",
+                      padding: "10px",
+                      borderRadius: "4px",
+                      fontWeight: "bold",
+                      textAlign: "center"
+                    }}
+                  >
+                    🎰 {jC.jetonsEnJeu}$ de jetons sur la table
+                  </div>
+                )}
+
+                {aLeVeinard && (
+                  <div
+                    style={{
+                      background: "#00BCD4",
+                      color: "#000",
+                      padding: "8px",
+                      borderRadius: "4px",
+                      fontWeight: "bold",
+                      textAlign: "center"
+                    }}
+                  >
+                    ✨ LE VEINARD ACTIVÉ — s'applique au retour des jetons ✨
+                  </div>
+                )}
+
+                {detientVeinard && !aLeVeinard && (
+                  <div
+                    style={{
+                      background: "#FF9800",
+                      color: "#000",
+                      padding: "12px",
+                      borderRadius: "6px",
+                      textAlign: "center"
+                    }}
+                  >
+                    <div style={{ fontWeight: "bold", marginBottom: "8px" }}>
+                      ✨ Ce joueur possède la carte Le Veinard, non activée
+                    </div>
+                    <div style={{ fontSize: "0.9rem", marginBottom: "10px" }}>
+                      Lui demander s'il souhaite l'utiliser sur cette table.
+                      Usage unique : elle réduira sa perte de{" "}
+                      {configGlobale.bonusVeinardPertes}% ou augmentera son gain
+                      de {configGlobale.bonusVeinardGain}%.
+                    </div>
+                    <button
+                      onClick={() =>
+                        setJoueurs((prev) =>
+                          prev.map((j) =>
+                            j.id === jC.id ? { ...j, veinardActif: true } : j
+                          )
+                        )
+                      }
+                      style={{
+                        padding: "10px 18px",
+                        background: "#00BCD4",
+                        color: "#000",
+                        border: "none",
+                        borderRadius: "6px",
+                        fontWeight: "bold",
+                        cursor: "pointer"
+                      }}
+                    >
+                      Activer pour ce joueur
+                    </button>
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    background: "#000",
+                    border: "2px solid #555",
+                    borderRadius: "8px",
+                    padding: "20px",
+                    textAlign: "center"
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: "3rem",
+                      color: "#4CAF50",
+                      fontWeight: "bold"
+                    }}
+                  >
+                    {totalCroupier} $
+                  </span>
+                  {croupierStack.length > 0 && (
+                    <div
+                      style={{
+                        color: "#aaa",
+                        fontSize: "0.9rem",
+                        marginTop: "5px"
+                      }}
+                    >
+                      Détail : {croupierStack.join(" + ")}{" "}
+                      {saisieCroupierManuelle && `+ ${saisieCroupierManuelle}`}
+                    </div>
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: "10px"
+                  }}
+                >
+                  {configGlobale.raccourcisTactiles.map((v, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setCroupierStack([...croupierStack, v])}
+                      style={{
+                        padding: "15px",
+                        background: "#444",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "8px",
+                        fontSize: "1.2rem",
+                        cursor: "pointer"
+                      }}
+                    >
+                      +{v}$
+                    </button>
+                  ))}
+                </div>
+
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <input
+                    type="number"
+                    placeholder="Saisie manuelle"
+                    value={saisieCroupierManuelle}
+                    onChange={(e) => setSaisieCroupierManuelle(e.target.value)}
+                    style={{
+                      flex: 2,
+                      padding: "12px",
+                      background: "#333",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "8px",
+                      fontSize: "1.1rem"
+                    }}
+                  />
+                  <button
+                    onClick={() =>
+                      setCroupierStack((prev) => prev.slice(0, -1))
+                    }
+                    style={{
+                      flex: 1,
+                      background: "#FF9800",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "8px",
+                      cursor: "pointer",
+                      fontWeight: "bold"
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      setCroupierStack([]);
+                      setSaisieCroupierManuelle("");
+                    }}
+                    style={{
+                      flex: 1,
+                      background: "#f44336",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "8px",
+                      cursor: "pointer",
+                      fontWeight: "bold"
+                    }}
+                  >
+                    Reset
+                  </button>
+                </div>
+
+                <div
+                  style={{ display: "flex", gap: "10px", marginTop: "10px" }}
+                >
+                  <button
+                    onClick={() => actionCroupierCalcul("retrait")}
+                    style={{
+                      flex: 1,
+                      padding: "20px",
+                      background: "#f44336",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "8px",
+                      fontSize: "1.2rem",
+                      fontWeight: "bold",
+                      cursor: "pointer"
+                    }}
+                  >
+                    ACHAT DE JETONS
+                  </button>
+                  <button
+                    onClick={() => actionCroupierCalcul("credit")}
+                    style={{
+                      flex: 1,
+                      padding: "20px",
+                      background: "#4CAF50",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "8px",
+                      fontSize: "1.2rem",
+                      fontWeight: "bold",
+                      cursor: "pointer"
+                    }}
+                  >
+                    RETOUR DES JETONS
+                  </button>
+                </div>
+              </div>
+              {rendreModalAdmin()}
+              <button
+                onClick={() => setModalAdminOuvert(true)}
+                style={{
+                  width: "100%",
+                  marginTop: "20px",
+                  padding: "12px",
+                  background: "#555",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "8px"
+                }}
+              >
+                🔒 Retour au menu
+              </button>
+            </div>
+          );
+        }
+
+        // 5. ÉCRAN D'AFFICHAGE
+        if (interfaceActive === "affichage") {
+          return (
+            <div
+              style={{
+                padding: "30px",
+                maxWidth: "900px",
+                margin: "0 auto",
+                position: "relative"
+              }}
+            >
+              {animationActive && (
+                <div
+                  style={{
+                    position: "fixed",
+                    top: 0,
+                    left: 0,
+                    width: "100vw",
+                    height: "100vh",
+                    background: "rgba(0,0,0,0.95)",
+                    zIndex: 10,
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "center",
+                    alignItems: "center"
+                  }}
+                >
+                  <h2
+                    style={{
+                      color: "#FFD700",
+                      fontSize: "2rem",
+                      textAlign: "center",
+                      margin: "0 20px 30px 20px"
+                    }}
+                  >
+                    {infosAnimation.phraseAction}
+                  </h2>
+                  <div
+                    className={estEnRoulementFiscal ? "dice-rolling" : ""}
+                    style={{
+                      width: "200px",
+                      height: "200px",
+                      background: infosAnimation.couleur,
+                      borderRadius: "30px",
+                      display: "flex",
+                      justifyContent: "center",
+                      alignItems: "center",
+                      border: "5px solid #fff",
+                      boxShadow: `0 0 50px ${infosAnimation.couleur}`
+                    }}
+                  >
+                    <span style={{ fontSize: "3rem", fontWeight: "bold" }}>
+                      {infosAnimation.face}
+                    </span>
+                  </div>
+                  {!estEnRoulementFiscal && (
+                    <h3
+                      style={{
+                        color: "#fff",
+                        fontSize: "1.5rem",
+                        marginTop: "40px"
+                      }}
+                    >
+                      {infosAnimation.phraseResultat}
+                    </h3>
+                  )}
+                </div>
+              )}
+
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <div style={{ flex: 1 }}>
+                  <h1 style={{ color: "#FFD700", margin: "0 0 20px 0" }}>
+                    🏆 CLASSEMENT GÉNÉRAL
+                  </h1>
+                  <div
+                    style={{
+                      background: "#222",
+                      borderRadius: "12px",
+                      padding: "20px"
+                    }}
+                  >
+                    {classementAffiche.map((j, i) => (
+                      <div
+                        key={j.id}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          padding: "15px",
+                          marginBottom: "10px",
+                          background: i === 0 ? "#332b00" : "#333",
+                          borderRadius: "8px",
+                          fontSize: "1.3rem",
+                          borderLeft: i === 0 ? "5px solid #FFD700" : "none"
+                        }}
+                      >
+                        <span>
+                          <strong>#{i + 1}</strong> {j.nom}
+                        </span>
+                        <strong style={{ color: "#4CAF50" }}>
+                          {j.solde.toLocaleString()} $
+                        </strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ width: "300px", marginLeft: "30px" }}>
+                  <div
+                    style={{
+                      background: "#222",
+                      padding: "20px",
+                      borderRadius: "12px",
+                      textAlign: "center"
+                    }}
+                  >
+                    <h3 style={{ color: "#FF9800", marginTop: 0 }}>
+                      {configGlobale.phraseParadisFiscal}
+                    </h3>
+                    <span
+                      style={{
+                        fontSize: "3rem",
+                        fontWeight: "bold",
+                        color: "#fff"
+                      }}
+                    >
+                      {nbParadisActifs}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  background: "#181818",
+                  padding: "15px",
+                  borderRadius: "8px",
+                  borderLeft: "5px solid #2196F3",
+                  marginTop: "30px"
+                }}
+              >
+                <h4 style={{ color: "#2196F3", margin: "0 0 10px 0" }}>
+                  Derniers Événements :
+                </h4>
+                {historiqueAffichage.map(
+                  (h, idx) =>
+                    h && (
+                      <p
+                        key={idx}
+                        style={{
+                          margin: "5px 0",
+                          color: idx === 0 ? "#fff" : "#888"
+                        }}
+                      >
+                        • {h}
+                      </p>
+                    )
+                )}
+              </div>
+
+              {rendreModalAdmin()}
+              <button
+                onClick={() => setModalAdminOuvert(true)}
+                style={{
+                  marginTop: "40px",
+                  padding: "10px 20px",
+                  background: "#555",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "6px"
+                }}
+              >
+                🔒 Retour au menu
+              </button>
+            </div>
+          );
+        }
+
+        // 6. INTERFACE BANQUIER (Export CSV Excel & Validation)
+        if (interfaceActive === "banquier") {
+          const tousItemsBoutique = [...produits, ...penalites, ...missions];
+          const itemsFiltres = tousItemsBoutique.filter((i) =>
+            i.nom.toLowerCase().includes(rechercheBanquier.toLowerCase())
+          );
+
+          return (
+            <div
+              style={{ padding: "30px", maxWidth: "800px", margin: "0 auto" }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "20px"
+                }}
+              >
+                <h1 style={{ color: "#FF9800", margin: 0 }}>
+                  🏦 Guichet Banquier
+                </h1>
+                <button
+                  onClick={exporterBaseExcel}
+                  style={{
+                    background: "#2196F3",
+                    color: "#fff",
+                    border: "none",
+                    padding: "10px 15px",
+                    borderRadius: "6px",
+                    fontWeight: "bold",
+                    cursor: "pointer"
+                  }}
+                >
+                  📊 Export Excel (suivi)
+                </button>
+              </div>
+
+              <div
+                style={{
+                  background: configGlobale.modeLocal ? "#d32f2f" : "#222",
+                  padding: "20px",
+                  borderRadius: "12px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "20px",
+                  border: configGlobale.modeLocal ? "3px solid #f44336" : "none"
+                }}
+              >
+                {configGlobale.modeLocal && (
+                  <h2 style={{ color: "#fff", textAlign: "center", margin: 0 }}>
+                    ⚠️ MODE LOCAL (SECOURS) ACTIF ⚠️
+                  </h2>
+                )}
+
+                <div>
+                  <label style={{ fontWeight: "bold" }}>
+                    Sélectionner le Joueur au guichet :
+                  </label>
+                  <select
+                    value={joueurBanquierId}
+                    onChange={(e) => setJoueurBanquierId(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "12px",
+                      background: "#333",
+                      color: "#fff",
+                      border: "1px solid #555",
+                      borderRadius: "6px",
+                      fontSize: "1.1rem",
+                      marginTop: "5px"
+                    }}
+                  >
+                    {joueurs.map((j) => (
+                      <option key={j.id} value={j.id}>
+                        {j.nom} (Solde: {j.solde}$)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <input
+                    type="text"
+                    placeholder="🔍 Rechercher..."
+                    value={rechercheBanquier}
+                    onChange={(e) => setRechercheBanquier(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "12px",
+                      background: "#333",
+                      color: "#fff",
+                      border: "1px solid #555",
+                      borderRadius: "6px",
+                      fontSize: "1rem",
+                      boxSizing: "border-box"
+                    }}
+                  />
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: "15px",
+                    maxHeight: "400px",
+                    overflowY: "auto"
+                  }}
+                >
+                  {itemsFiltres.map((item, idx) => {
+                    const isSelected = selectionBanquier.some(
+                      (s) => s.id === item.id && s.type === item.type
+                    );
+                    let colorLabel = "#fff";
+                    if (item.type === "mission") colorLabel = "#4CAF50";
+                    if (item.type === "penalite") colorLabel = "#f44336";
+                    if (item.type === "produit") colorLabel = "#FF9800";
+
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => toggleSelectionBanquier(item)}
+                        className={`checkbox-btn ${isSelected ? "selected" : ""}`}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center"
+                          }}
+                        >
+                          <span style={{ fontWeight: "bold" }}>{item.nom}</span>
+                          <span
+                            style={{
+                              color: isSelected ? "#fff" : colorLabel,
+                              fontWeight: "bold"
+                            }}
+                          >
+                            {item.type === "mission" ? "+" : "-"}
+                            {item.montant}$
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            fontSize: "0.8rem",
+                            color: isSelected ? "#e0e0e0" : "#aaa",
+                            marginTop: "5px",
+                            textTransform: "uppercase"
+                          }}
+                        >
+                          {item.type}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <button
+                  onClick={validerPanierBanquier}
+                  disabled={selectionBanquier.length === 0}
+                  style={{
+                    padding: "20px",
+                    background:
+                      selectionBanquier.length > 0 ? "#4CAF50" : "#555",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "8px",
+                    fontSize: "1.2rem",
+                    fontWeight: "bold",
+                    cursor:
+                      selectionBanquier.length > 0 ? "pointer" : "not-allowed"
+                  }}
+                >
+                  ✅ VALIDER LE PANIER ({selectionBanquier.length})
+                </button>
+              </div>
+
+              <div style={{ marginTop: "20px", textAlign: "center" }}>
+                <button
+                  onClick={() => setInterfaceActive("menu")}
+                  style={{
+                    padding: "12px 25px",
+                    background: "#555",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "8px",
+                    cursor: "pointer"
+                  }}
+                >
+                  🔙 Retour au menu
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        return null;
+      }
+
+      const root = ReactDOM.createRoot(document.getElementById("root"));
+      root.render(<App />);
+    </script>
+  </body>
+</html>

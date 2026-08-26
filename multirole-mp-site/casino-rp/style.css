@@ -1,0 +1,95 @@
+/* Feuille de styles du Casino RP.
+   Le reste de la mise en forme est porté par les styles en ligne des
+   composants React, dans index.html. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Le centrage et la typographie viennent du gabarit d'origine : ils sont
+   conservés tels quels pour ne rien changer à l'apparence du site. */
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background-color: #1a1a1a;
+  color: #fff;
+  font-family: sans-serif;
+  font-size: 1.0625rem;
+  line-height: 1.6;
+}
+
+/* Boutons pleine largeur des menus, et cases à cocher du guichet banquier */
+.checkbox-btn {
+  display: inline-block;
+  width: 100%;
+  padding: 15px;
+  margin-bottom: 10px;
+  background: #333;
+  border: 2px solid #555;
+  border-radius: 8px;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.checkbox-btn.selected {
+  background: #4caf50;
+  border-color: #fff;
+}
+
+/* Dé du contrôle fiscal, pendant le roulement */
+@keyframes spinDice {
+  0% {
+    transform: rotate(0deg) scale(0.8);
+    opacity: 0.6;
+  }
+  50% {
+    transform: rotate(180deg) scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+    opacity: 0.6;
+  }
+}
+
+.dice-rolling {
+  animation: spinDice 0.3s infinite linear;
+}
+
+/* Le dé tourne vite et longtemps : on le fait seulement palpiter pour qui
+   demande moins d'animations, sans supprimer le signal « ça tourne ». */
+@media (prefers-reduced-motion: reduce) {
+  .dice-rolling {
+    animation: spinDice 2s infinite ease-in-out;
+    transform: none;
+  }
+}
+
+/* Impression des chèques de mission : seule la planche sort sur le papier */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  #printable-area,
+  #printable-area * {
+    visibility: visible;
+  }
+
+  #printable-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    background: white;
+    color: black;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+}
