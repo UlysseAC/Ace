@@ -118,7 +118,7 @@
             id: "veinard",
             nom: "Le Veinard",
             definition:
-              "Réduit les pertes de 50% et augmente les gains de 5% chez le croupier.",
+              "Usage unique : réduit les pertes de 50% et augmente les gains de 5% sur votre prochaine opération chez le croupier.",
             phraseAnim: "La chance sourit !"
           },
           {
@@ -591,14 +591,24 @@
                   typeOp === "credit"
                     ? j.totalJeux + montantFinal
                     : j.totalJeux - montantFinal;
+                const nvHist = [
+                  `Croupier [${tableCroupier}] : ${typeOp === "credit" ? "+" : "-"}${montantFinal}$`,
+                  ...j.historique
+                ];
+                // Usage unique : la carte est consommée par l'opération. Les
+                // refus (solde ou limite) sont sortis plus haut, donc une
+                // opération annulée ne la gaspille pas.
+                if (aLeVeinard) {
+                  nvHist.unshift("Carte [Le Veinard] consommée");
+                }
                 return {
                   ...j,
                   solde: Math.max(0, nvSolde),
                   totalJeux: nvJeux,
-                  historique: [
-                    `Croupier [${tableCroupier}] : ${typeOp === "credit" ? "+" : "-"}${montantFinal}$`,
-                    ...j.historique
-                  ]
+                  deck: aLeVeinard
+                    ? j.deck.filter((c) => c.id !== "veinard")
+                    : j.deck,
+                  historique: nvHist
                 };
               }
               return j;
@@ -2258,7 +2268,7 @@
                                   textAlign: "center"
                                 }}
                               >
-                                ✨ Effet actif chez le croupier
+                                ✨ S'appliquera à votre prochaine opération
                               </div>
                             ) : (
                               <button
@@ -2644,7 +2654,7 @@
                       textAlign: "center"
                     }}
                   >
-                    ✨ CARTE LE VEINARD ACTIVE ✨
+                    ✨ LE VEINARD — s'applique à cette opération ✨
                   </div>
                 )}
 
