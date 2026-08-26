@@ -12,6 +12,7 @@
     <script src="vendor/babel.js"></script>
     <script src="vendor/firebase-app.js"></script>
     <script src="vendor/firebase-database.js"></script>
+    <script src="vendor/xlsx.js"></script>
     <script src="firebase-config.js"></script>
     <script src="sync.js"></script>
     <link rel="stylesheet" href="style.css" />
@@ -127,6 +128,7 @@
             totalMissions: 2000,
             totalJeux: 3000,
             nbPenalites: 0,
+            totalPenalites: 0,
             achatsBoutique: 0,
             argentVole: 0,
             argentGagneCarte: 0,
@@ -147,6 +149,7 @@
             totalMissions: 1000,
             totalJeux: 4400,
             nbPenalites: 0,
+            totalPenalites: 0,
             achatsBoutique: 0,
             argentVole: 0,
             argentGagneCarte: 0,
@@ -167,6 +170,7 @@
             totalMissions: 1500,
             totalJeux: 2350,
             nbPenalites: 0,
+            totalPenalites: 0,
             achatsBoutique: 0,
             argentVole: 0,
             argentGagneCarte: 0,
@@ -187,6 +191,7 @@
             totalMissions: 800,
             totalJeux: 1300,
             nbPenalites: 0,
+            totalPenalites: 0,
             achatsBoutique: 0,
             argentVole: 0,
             argentGagneCarte: 0,
@@ -273,105 +278,124 @@
         );
 
         // ================= LOGIQUE EXPORT CSV (STYLE EXCEL) =================
-        const exporterBaseCSV = () => {
-          let csvContent = "﻿"; // Format BOM pour Excel
-          const separator = ";";
+        // Reproduit la feuille de suivi : une ligne par élément, une colonne
+        // par joueur, une case à cocher à l'intersection. Les cases déjà
+        // validées dans le jeu arrivent cochées, et les totaux se recalculent
+        // dès qu'on en coche une de plus.
+        const exporterBaseExcel = () => {
+          const lignes = [];
+          const joueursExport = joueursActifs;
+          const COL0 = 0; // libellés
+          const COL_MONTANT = 1; // montant de l'élément
+          const COL_J0 = 2; // première colonne joueur
 
-          // Ligne 1 & 2 : En-têtes Joueurs
-          csvContent +=
-            "Numéro" +
-            separator +
-            joueursActifs.map((j) => j.id).join(separator) +
-            "\n";
-          csvContent +=
-            "Participants" +
-            separator +
-            joueursActifs.map((j) => j.nom).join(separator) +
-            "\n";
+          const ligne = (libelle, montant, valeurs) => {
+            const l = [libelle, montant];
+            valeurs.forEach((v) => l.push(v));
+            lignes.push(l);
+            return lignes.length; // numéro de ligne (1-indexé)
+          };
 
-          // Stats Globales
-          csvContent +=
-            "Compte en banque" +
-            separator +
-            joueursActifs.map((j) => j.solde).join(separator) +
-            "\n";
-          csvContent +=
-            "Jeu" +
-            separator +
-            joueursActifs.map((j) => j.totalJeux).join(separator) +
-            "\n";
-          csvContent +=
-            "Missions" +
-            separator +
-            joueursActifs.map((j) => j.totalMissions).join(separator) +
-            "\n";
-          csvContent +=
-            "Achats Boutique" +
-            separator +
-            joueursActifs.map((j) => j.achatsBoutique).join(separator) +
-            "\n";
-          csvContent +=
-            "Nbr Pénalités" +
-            separator +
-            joueursActifs.map((j) => j.nbPenalites).join(separator) +
-            "\n";
-          csvContent +=
-            "Argent volé" +
-            separator +
-            joueursActifs.map((j) => j.argentVole).join(separator) +
-            "\n";
-          csvContent +=
-            "Argent gagné (Carte)" +
-            separator +
-            joueursActifs.map((j) => j.argentGagneCarte).join(separator) +
-            "\n\n";
+          const colonne = (i) => XLSX.utils.encode_col(COL_J0 + i);
 
-          // Checklist des tables (VRAI/FAUX)
-          csvContent += "--- MISSIONS ---" + separator + "\n";
-          missions.forEach((m) => {
-            csvContent +=
-              `"${m.nom} (${m.montant}$)"` +
-              separator +
-              joueursActifs
-                .map((j) =>
-                  j.missionsFaites?.includes(m.id) ? "VRAI" : "FAUX"
-                )
-                .join(separator) +
-              "\n";
-          });
-          csvContent += "\n--- PRODUITS ---" + separator + "\n";
-          produits.forEach((p) => {
-            csvContent +=
-              `"${p.nom} (${p.montant}$)"` +
-              separator +
-              joueursActifs
-                .map((j) =>
-                  j.produitsAchetes?.includes(p.id) ? "VRAI" : "FAUX"
-                )
-                .join(separator) +
-              "\n";
-          });
-          csvContent += "\n--- PÉNALITÉS ---" + separator + "\n";
-          penalites.forEach((p) => {
-            csvContent +=
-              `"${p.nom} (${p.montant}$)"` +
-              separator +
-              joueursActifs
-                .map((j) =>
-                  j.penalitesSubies?.includes(p.id) ? "VRAI" : "FAUX"
-                )
-                .join(separator) +
-              "\n";
-          });
-
-          const encodedUri = encodeURI(
-            "data:text/csv;charset=utf-8," + csvContent
+          ligne("Numéro", "", joueursExport.map((j) => j.id));
+          ligne("Participants", "Montant:", joueursExport.map((j) => j.nom));
+          const ligneSolde = ligne(
+            "Compte en banque",
+            "",
+            joueursExport.map((j) => j.solde)
           );
-          const link = document.createElement("a");
-          link.setAttribute("href", encodedUri);
-          link.setAttribute("download", "sauvegarde_banque.csv");
-          document.body.appendChild(link);
-          link.click();
+          ligne("Jeu", "", joueursExport.map((j) => j.totalJeux));
+          ligne("Missions", "", joueursExport.map((j) => j.totalMissions));
+          ligne("Achats boutique", "", joueursExport.map((j) => j.achatsBoutique));
+          ligne("", "", []);
+
+          // Les trois catégories, chacune avec ses cases à cocher
+          const sections = [
+            ["MISSIONS (à cocher = crédit)", missions, "missionsFaites"],
+            ["PRODUITS (à cocher = débit)", produits, "produitsAchetes"],
+            ["PÉNALITÉS (à cocher = débit)", penalites, "penalitesSubies"]
+          ];
+          const plages = [];
+
+          sections.forEach(([titre, elements, champ]) => {
+            ligne(titre, "", []);
+            const premiere = lignes.length + 1;
+            elements.forEach((el) => {
+              ligne(
+                el.nom,
+                el.montant,
+                joueursExport.map((j) => (j[champ] || []).includes(el.id))
+              );
+            });
+            const derniere = lignes.length;
+            if (derniere >= premiere) plages.push([premiere, derniere]);
+            ligne("", "", []);
+          });
+
+          // Ce que les cases déjà cochées représentent : ces éléments ont
+          // déjà été portés au compte du joueur dans le jeu. Sans cette
+          // soustraction, le total les compterait une seconde fois.
+          const dejaApplique = (j) => {
+            const somme = (elements, champ, signe) =>
+              elements.reduce(
+                (t, el) =>
+                  (j[champ] || []).includes(el.id) ? t + signe * el.montant : t,
+                0
+              );
+            return (
+              somme(missions, "missionsFaites", 1) +
+              somme(produits, "produitsAchetes", -1) +
+              somme(penalites, "penalitesSubies", -1)
+            );
+          };
+
+          const ligneDeja = ligne(
+            "Déjà porté au compte",
+            "",
+            joueursExport.map(dejaApplique)
+          );
+
+          // Total : tout ce qui est coché, moins ce qui l'était déjà. Au
+          // moment de l'export il vaut donc zéro, et il grandit à mesure que
+          // de nouvelles cases sont cochées.
+          const [mis, pro, pen] = plages;
+          const totalPour = (i) => {
+            const c = colonne(i);
+            const M = XLSX.utils.encode_col(COL_MONTANT);
+            const bloc = (p, signe) =>
+              p
+                ? `${signe}SUMPRODUCT(--${c}${p[0]}:${c}${p[1]},${M}${p[0]}:${M}${p[1]})`
+                : "";
+            const coche = (bloc(mis, "") + bloc(pro, "-") + bloc(pen, "-"))
+              .replace(/^\+/, "");
+            return `${coche}-${c}${ligneDeja}`;
+          };
+
+          const ligneTotal = lignes.length + 1;
+          const l = ["TOTAL À APPLIQUER (nouvelles coches)", ""];
+          joueursExport.forEach((_, i) => l.push({ f: totalPour(i) }));
+          lignes.push(l);
+
+          const l2 = ["Solde après application", ""];
+          joueursExport.forEach((_, i) => {
+            const c = colonne(i);
+            l2.push({ f: `${c}${ligneSolde}+${c}${ligneTotal}` });
+          });
+          lignes.push(l2);
+
+          const feuille = XLSX.utils.aoa_to_sheet(lignes);
+          feuille["!cols"] = [{ wch: 34 }, { wch: 10 }].concat(
+            joueursExport.map(() => ({ wch: 11 }))
+          );
+
+          const classeur = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(classeur, feuille, "Suivi");
+          const horodatage = new Date()
+            .toISOString()
+            .slice(0, 16)
+            .replace(/[:T]/g, "-");
+          XLSX.writeFile(classeur, `casino-rp-suivi-${horodatage}.xlsx`);
         };
 
         // ================= DÉCONNEXION AUTOMATIQUE =================
@@ -795,6 +819,7 @@
                   achatsBoutique:
                     j.achatsBoutique + (coutTotal - penalitesTotal),
                   nbPenalites: j.nbPenalites + (penalitesTotal > 0 ? 1 : 0),
+                  totalPenalites: (j.totalPenalites || 0) + penalitesTotal,
                   missionsFaites: [...j.missionsFaites, ...missionsN],
                   produitsAchetes: [...j.produitsAchetes, ...produitsN],
                   penalitesSubies: [...j.penalitesSubies, ...penalitesN],
@@ -1077,7 +1102,33 @@
             <div
               style={{ padding: "30px", maxWidth: "900px", margin: "0 auto" }}
             >
-              <h1 style={{ color: "#FF9800" }}>🛠️ Interface Admin</h1>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: "10px"
+                }}
+              >
+                <h1 style={{ color: "#FF9800", margin: 0 }}>
+                  🛠️ Interface Admin
+                </h1>
+                <button
+                  onClick={() => setInterfaceActive("base")}
+                  style={{
+                    padding: "10px 18px",
+                    background: "#2196F3",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "6px",
+                    fontWeight: "bold",
+                    cursor: "pointer"
+                  }}
+                >
+                  🗄️ Voir la base de données
+                </button>
+              </div>
 
               <div
                 style={{
@@ -1863,6 +1914,8 @@
                           totalMissions: 0,
                           totalJeux: 0,
                           nbPenalites: 0,
+                          totalPenalites: 0,
+            totalPenalites: 0,
                           achatsBoutique: 0,
                           argentVole: 0,
                           argentGagneCarte: 0,
@@ -2159,6 +2212,261 @@
                 }}
               >
                 Retour
+              </button>
+            </div>
+          );
+        }
+
+        // --- 2 bis. BASE DE DONNÉES (lecture seule) ---
+        // Vue d'ensemble des 7 tables, alimentée par les mêmes données que le
+        // reste du jeu : elle reflète donc en direct ce que font les autres
+        // appareils. Deux tables n'étaient visibles nulle part jusqu'ici : le
+        // registre des QR codes et l'historique des contrôles fiscaux.
+        if (interfaceActive === "base") {
+          const cadre = {
+            background: "#222",
+            padding: "18px",
+            borderRadius: "12px",
+            marginBottom: "20px",
+            overflowX: "auto"
+          };
+          const th = {
+            textAlign: "left",
+            padding: "7px 10px",
+            borderBottom: "2px solid #555",
+            color: "#888",
+            fontSize: "0.75rem",
+            textTransform: "uppercase",
+            whiteSpace: "nowrap"
+          };
+          const td = {
+            padding: "7px 10px",
+            borderBottom: "1px solid #333",
+            whiteSpace: "nowrap"
+          };
+          const Table = ({ colonnes, lignes, vide }) =>
+            lignes.length === 0 ? (
+              <p style={{ color: "#666", margin: 0 }}>{vide}</p>
+            ) : (
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: "0.9rem"
+                }}
+              >
+                <thead>
+                  <tr>
+                    {colonnes.map((c) => (
+                      <th key={c} style={th}>
+                        {c}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {lignes.map((l, i) => (
+                    <tr key={i}>
+                      {l.map((cel, k) => (
+                        <td key={k} style={td}>
+                          {cel}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            );
+
+          return (
+            <div
+              style={{ padding: "30px", maxWidth: "1200px", margin: "0 auto" }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "20px",
+                  flexWrap: "wrap",
+                  gap: "10px"
+                }}
+              >
+                <h1 style={{ color: "#2196F3", margin: 0 }}>
+                  🗄️ Base de données
+                </h1>
+                <span style={{ color: Sync.actif ? "#4CAF50" : "#FF9800" }}>
+                  {Sync.actif
+                    ? "● Connectée — partagée entre les appareils"
+                    : "● Hors ligne — données locales à cet appareil"}
+                </span>
+              </div>
+
+              <div style={cadre}>
+                <h3 style={{ color: "#4CAF50", marginTop: 0 }}>
+                  Table 1 — Comptes joueurs ({joueurs.length})
+                </h3>
+                <Table
+                  colonnes={[
+                    "ID",
+                    "Nom",
+                    "Code",
+                    "Montant total",
+                    "Argent missions",
+                    "Argent jeux",
+                    "Nb missions",
+                    "Pénalités",
+                    "Achats",
+                    "Argent volé",
+                    "Gains cartes",
+                    "Paradis",
+                    "Fin paradis"
+                  ]}
+                  vide="Aucun joueur."
+                  lignes={joueursActifs.map((j) => [
+                    j.id,
+                    j.nom,
+                    j.code,
+                    `${j.solde} $`,
+                    `${j.totalMissions} $`,
+                    `${j.totalJeux} $`,
+                    (j.missionsFaites || []).length,
+                    `${j.totalPenalites || 0} $ (${j.nbPenalites})`,
+                    `${j.achatsBoutique} $`,
+                    `${j.argentVole || 0} $`,
+                    `${j.argentGagneCarte || 0} $`,
+                    j.paradisActif ? "🌴 actif" : "—",
+                    j.paradisActif
+                      ? new Date(j.finParadis).toLocaleTimeString()
+                      : "—"
+                  ])}
+                />
+              </div>
+
+              <div style={cadre}>
+                <h3 style={{ color: "#4CAF50", marginTop: 0 }}>
+                  Table 2 — Missions ({missions.length})
+                </h3>
+                <Table
+                  colonnes={["Nom", "Montant", "Validée par"]}
+                  vide="Aucune mission."
+                  lignes={missions.map((m) => [
+                    m.nom,
+                    `${m.montant} $`,
+                    joueursActifs
+                      .filter((j) => (j.missionsFaites || []).includes(m.id))
+                      .map((j) => j.nom)
+                      .join(", ") || "—"
+                  ])}
+                />
+              </div>
+
+              <div style={cadre}>
+                <h3 style={{ color: "#2196F3", marginTop: 0 }}>
+                  Table 3 — QR codes ({qrCodesRegistre.length})
+                </h3>
+                <Table
+                  colonnes={["Hash", "Type", "Statut"]}
+                  vide="Aucun QR code généré. Ils apparaissent après une impression de chèques."
+                  lignes={qrCodesRegistre.map((q) => [
+                    q.hash,
+                    q.type,
+                    q.statut
+                  ])}
+                />
+              </div>
+
+              <div style={cadre}>
+                <h3 style={{ color: "#FF9800", marginTop: 0 }}>
+                  Table 4 — Catalogue ({produits.length + penalites.length})
+                </h3>
+                <Table
+                  colonnes={["Élément", "Type", "Montant", "Concerne"]}
+                  vide="Catalogue vide."
+                  lignes={[
+                    ...produits.map((p) => [
+                      p.nom,
+                      "Produit",
+                      `-${p.montant} $`,
+                      joueursActifs
+                        .filter((j) => (j.produitsAchetes || []).includes(p.id))
+                        .map((j) => j.nom)
+                        .join(", ") || "—"
+                    ]),
+                    ...penalites.map((p) => [
+                      p.nom,
+                      "Pénalité",
+                      `-${p.montant} $`,
+                      joueursActifs
+                        .filter((j) => (j.penalitesSubies || []).includes(p.id))
+                        .map((j) => j.nom)
+                        .join(", ") || "—"
+                    ])
+                  ]}
+                />
+              </div>
+
+              <div style={cadre}>
+                <h3 style={{ color: "#9C27B0", marginTop: 0 }}>
+                  Table 5 — Configuration globale
+                </h3>
+                <Table
+                  colonnes={["Paramètre", "Valeur"]}
+                  vide=""
+                  lignes={Object.keys(configGlobale).map((cle) => [
+                    cle,
+                    String(
+                      Array.isArray(configGlobale[cle])
+                        ? configGlobale[cle].join(", ")
+                        : configGlobale[cle]
+                    )
+                  ])}
+                />
+              </div>
+
+              <div style={cadre}>
+                <h3 style={{ color: "#f44336", marginTop: 0 }}>
+                  Table 6 — Contrôles fiscaux ({historiqueFiscal.length})
+                </h3>
+                <Table
+                  colonnes={["Heure", "Attaquant", "Cible", "Dé", "Résultat"]}
+                  vide="Aucun contrôle fiscal lancé pour le moment."
+                  lignes={historiqueFiscal.map((h) => [
+                    h.date,
+                    h.lanceur,
+                    h.cible,
+                    h.de,
+                    h.details
+                  ])}
+                />
+              </div>
+
+              <div style={cadre}>
+                <h3 style={{ color: "#00BCD4", marginTop: 0 }}>
+                  Table 7 — Configuration des dés
+                </h3>
+                <Table
+                  colonnes={["Dé", "F1", "F2", "F3", "F4", "F5", "F6"]}
+                  vide="Aucun dé configuré."
+                  lignes={desConfig.map((d) => [
+                    d.nom,
+                    ...d.faces.map((f) => `${f.type} ${f.pct}%`)
+                  ])}
+                />
+              </div>
+
+              <button
+                onClick={() => setInterfaceActive("admin")}
+                style={{
+                  padding: "12px 25px",
+                  background: "#555",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "8px",
+                  cursor: "pointer"
+                }}
+              >
+                🔙 Retour à l'Admin
               </button>
             </div>
           );
@@ -3443,7 +3751,7 @@
                   🏦 Guichet Banquier
                 </h1>
                 <button
-                  onClick={exporterBaseCSV}
+                  onClick={exporterBaseExcel}
                   style={{
                     background: "#2196F3",
                     color: "#fff",
@@ -3454,7 +3762,7 @@
                     cursor: "pointer"
                   }}
                 >
-                  💾 Export Excel CSV
+                  📊 Export Excel (suivi)
                 </button>
               </div>
 

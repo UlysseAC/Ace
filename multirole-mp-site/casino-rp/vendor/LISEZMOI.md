@@ -15,6 +15,7 @@ version voulue.
 | `babel.js`            | Babel Standalone      | 7.x      | `@babel/standalone/babel.min.js`     |
 | `firebase-app.js`     | Firebase App (compat) | 10.12.2  | `firebase/firebase-app-compat.js`    |
 | `firebase-database.js`| Firebase Realtime DB  | 10.12.2  | `firebase/firebase-database-compat.js` |
+| `xlsx.js`             | SheetJS               | 0.18.5   | `xlsx/dist/xlsx.full.min.js`         |
 
 ## À propos de Babel
 
