@@ -61,7 +61,7 @@
             id: "veinard",
             nom: "Le Veinard",
             definition:
-              "Usage unique : réduit les pertes de 50% et augmente les gains de 5% sur votre prochaine opération chez le croupier.",
+              "Usage unique : quand vous rendez vos jetons au croupier, réduit votre perte de 50% ou augmente votre gain de 5%.",
             phraseAnim: "La chance sourit !"
           },
           {
@@ -129,6 +129,7 @@
             totalJeux: 3000,
             nbPenalites: 0,
             totalPenalites: 0,
+            jetonsEnJeu: 0,
             achatsBoutique: 0,
             argentVole: 0,
             argentGagneCarte: 0,
@@ -150,6 +151,7 @@
             totalJeux: 4400,
             nbPenalites: 0,
             totalPenalites: 0,
+            jetonsEnJeu: 0,
             achatsBoutique: 0,
             argentVole: 0,
             argentGagneCarte: 0,
@@ -171,6 +173,7 @@
             totalJeux: 2350,
             nbPenalites: 0,
             totalPenalites: 0,
+            jetonsEnJeu: 0,
             achatsBoutique: 0,
             argentVole: 0,
             argentGagneCarte: 0,
@@ -192,6 +195,7 @@
             totalJeux: 1300,
             nbPenalites: 0,
             totalPenalites: 0,
+            jetonsEnJeu: 0,
             achatsBoutique: 0,
             argentVole: 0,
             argentGagneCarte: 0,
@@ -232,6 +236,7 @@
         const [croupierStack, setCroupierStack] = React.useState([]);
 
         // États Banquier & Boutique
+        const [joueurASupprimer, setJoueurASupprimer] = React.useState(null);
         const [joueurBanquierId, setJoueurBanquierId] = React.useState("steph");
         const [rechercheBanquier, setRechercheBanquier] = React.useState("");
         const [selectionBanquier, setSelectionBanquier] = React.useState([]);
@@ -535,6 +540,12 @@
             setHistoriqueAffichage(donnees.historiqueAffichage);
         };
 
+        // La confirmation s'affiche dans la page : une fenêtre du navigateur
+        // peut être bloquée, et la restauration serait alors annulée sans que
+        // rien ne l'indique.
+        const [restaurationEnAttente, setRestaurationEnAttente] =
+          React.useState(null);
+
         const restaurerDepuisFichier = (fichier) => {
           if (!fichier) return;
           const lecteur = new FileReader();
@@ -542,23 +553,22 @@
             try {
               const donnees = JSON.parse(lecteur.result);
               if (!donnees.joueurs) {
-                alert("Ce fichier ne contient pas de partie.");
+                setRestaurationEnAttente({
+                  erreur: "Ce fichier ne contient pas de partie."
+                });
                 return;
               }
-              const quand = donnees.date
-                ? new Date(donnees.date).toLocaleString()
-                : "date inconnue";
-              if (
-                !confirm(
-                  `Remplacer la partie en cours par la sauvegarde du ${quand} ? ` +
-                    `${donnees.joueurs.length} joueur(s) seront restaurés.`
-                )
-              )
-                return;
-              appliquerSauvegarde(donnees);
-              alert("Partie restaurée.");
+              setRestaurationEnAttente({
+                donnees,
+                source: "le fichier " + fichier.name,
+                quand: donnees.date
+                  ? new Date(donnees.date).toLocaleString()
+                  : "date inconnue"
+              });
             } catch (e) {
-              alert("Fichier illisible : " + e.message);
+              setRestaurationEnAttente({
+                erreur: "Fichier illisible : " + e.message
+              });
             }
           };
           lecteur.readAsText(fichier);
@@ -568,16 +578,21 @@
           try {
             const brut = localStorage.getItem(CLE_SAUVEGARDE_LOCALE);
             if (!brut) {
-              alert("Aucune copie automatique sur cet appareil.");
+              setRestaurationEnAttente({
+                erreur: "Aucune copie automatique sur cet appareil."
+              });
               return;
             }
             const donnees = JSON.parse(brut);
-            const quand = new Date(donnees.date).toLocaleString();
-            if (!confirm(`Restaurer la copie automatique du ${quand} ?`)) return;
-            appliquerSauvegarde(donnees);
-            alert("Partie restaurée depuis cet appareil.");
+            setRestaurationEnAttente({
+              donnees,
+              source: "la copie automatique de cet appareil",
+              quand: new Date(donnees.date).toLocaleString()
+            });
           } catch (e) {
-            alert("Copie automatique illisible : " + e.message);
+            setRestaurationEnAttente({
+              erreur: "Copie automatique illisible : " + e.message
+            });
           }
         };
 
@@ -688,79 +703,103 @@
           croupierStack.reduce((a, b) => a + b, 0) +
           Number(saisieCroupierManuelle || 0);
 
+        // Deux temps distincts à la table :
+        //  - l'achat de jetons n'est qu'une conversion, le joueur n'a encore
+        //    rien gagné ni perdu : aucune carte ne s'y applique ;
+        //  - le retour des jetons révèle le résultat, et c'est là que
+        //    Le Veinard adoucit la perte ou gonfle le gain.
         const actionCroupierCalcul = (typeOp) => {
           const jC = joueurs.find((j) => j.id === joueurCroupierId);
           if (!jC) return;
-          let montantFinal = totalCroupier;
+          const montant = totalCroupier;
 
-          if (montantFinal <= 0) {
+          if (montant <= 0) {
             alert("Veuillez saisir un montant.");
             return;
           }
 
           const aLeVeinard = jC.deck.some((c) => c.id === "veinard");
+          const jetonsAvant = jC.jetonsEnJeu || 0;
 
           if (typeOp === "retrait") {
-            if (aLeVeinard) {
-              montantFinal = Math.max(
-                0,
-                montantFinal -
-                  (montantFinal * configGlobale.bonusVeinardPertes) / 100
-              );
-              alert(
-                `Effet [Le Veinard] : Pertes réduites ! Débit réel : ${montantFinal}$`
-              );
-            }
-            if (montantFinal > jC.solde) {
+            if (montant > jC.solde) {
               alert("Montant insuffisant !");
               return;
             }
-            if (montantFinal > configGlobale.limiteRetraitCroupier) {
+            if (montant > configGlobale.limiteRetraitCroupier) {
               alert(configGlobale.phraseLimiteCroupier);
               return;
             }
-          } else if (typeOp === "credit") {
-            if (aLeVeinard) {
-              montantFinal +=
-                (montantFinal * configGlobale.bonusVeinardGain) / 100;
-              alert(
-                `Effet [Le Veinard] : Gains augmentés ! Crédit réel : ${montantFinal}$`
-              );
-            }
+            setJoueurs((prev) =>
+              prev.map((j) =>
+                j.id === jC.id
+                  ? {
+                      ...j,
+                      solde: Math.max(0, j.solde - montant),
+                      totalJeux: j.totalJeux - montant,
+                      jetonsEnJeu: jetonsAvant + montant,
+                      historique: [
+                        `Croupier [${tableCroupier}] : achat de ${montant}$ de jetons`,
+                        ...j.historique
+                      ]
+                    }
+                  : j
+              )
+            );
+            setCroupierStack([]);
+            setSaisieCroupierManuelle("");
+            return;
+          }
+
+          // Retour des jetons : le résultat de la partie est la différence
+          // entre ce que le joueur rapporte et ce qu'il avait pris.
+          const resultat = montant - jetonsAvant;
+          let bonus = 0;
+          if (aLeVeinard && resultat < 0) {
+            bonus = Math.round(
+              (-resultat * configGlobale.bonusVeinardPertes) / 100
+            );
+          } else if (aLeVeinard && resultat > 0) {
+            bonus = Math.round(
+              (resultat * configGlobale.bonusVeinardGain) / 100
+            );
+          }
+          const credite = montant + bonus;
+
+          if (bonus > 0) {
+            alert(
+              resultat < 0
+                ? `Effet [Le Veinard] : perte de ${-resultat}$ réduite à ${-resultat - bonus}$. Crédit : ${credite}$`
+                : `Effet [Le Veinard] : gain de ${resultat}$ porté à ${resultat + bonus}$. Crédit : ${credite}$`
+            );
           }
 
           setJoueurs((prev) =>
             prev.map((j) => {
-              if (j.id === jC.id) {
-                const nvSolde =
-                  typeOp === "credit"
-                    ? j.solde + montantFinal
-                    : j.solde - montantFinal;
-                const nvJeux =
-                  typeOp === "credit"
-                    ? j.totalJeux + montantFinal
-                    : j.totalJeux - montantFinal;
-                const nvHist = [
-                  `Croupier [${tableCroupier}] : ${typeOp === "credit" ? "+" : "-"}${montantFinal}$`,
-                  ...j.historique
-                ];
-                // Usage unique : la carte est consommée par l'opération. Les
-                // refus (solde ou limite) sont sortis plus haut, donc une
-                // opération annulée ne la gaspille pas.
-                if (aLeVeinard) {
-                  nvHist.unshift("Carte [Le Veinard] consommée");
-                }
-                return {
-                  ...j,
-                  solde: Math.max(0, nvSolde),
-                  totalJeux: nvJeux,
-                  deck: aLeVeinard
+              if (j.id !== jC.id) return j;
+              const bilan =
+                resultat === 0
+                  ? "à l'équilibre"
+                  : resultat > 0
+                    ? `gain de ${resultat + bonus}$`
+                    : `perte de ${-resultat - bonus}$`;
+              const nvHist = [
+                `Croupier [${tableCroupier}] : retour de ${montant}$ de jetons, ${bilan}`,
+                ...j.historique
+              ];
+              // La carte n'est consommée que si elle a réellement joué.
+              if (bonus > 0) nvHist.unshift("Carte [Le Veinard] consommée");
+              return {
+                ...j,
+                solde: Math.max(0, j.solde + credite),
+                totalJeux: j.totalJeux + credite,
+                jetonsEnJeu: 0,
+                deck:
+                  bonus > 0
                     ? j.deck.filter((c) => c.id !== "veinard")
                     : j.deck,
-                  historique: nvHist
-                };
-              }
-              return j;
+                historique: nvHist
+              };
             })
           );
 
@@ -1876,28 +1915,62 @@
                             aria-label={"Solde du joueur " + (idx + 1)}
                             style={champ}
                           />
-                          <button
-                            onClick={() => {
-                              if (
-                                confirm(
-                                  `Supprimer ${j.nom} ? Son compte et son historique seront perdus.`
-                                )
-                              )
-                                setJoueurs(
-                                  joueurs.filter((_, i) => i !== idx)
-                                );
-                            }}
-                            style={{
-                              background: "#f44336",
-                              color: "#fff",
-                              border: "none",
-                              borderRadius: "4px",
-                              padding: "7px 11px",
-                              cursor: "pointer"
-                            }}
-                          >
-                            X
-                          </button>
+                          {/* Confirmation dans la page plutôt qu'une fenêtre
+                              du navigateur : celles-ci sont bloquées dans
+                              certains aperçus, et la suppression échouait
+                              alors sans rien afficher. */}
+                          {joueurASupprimer === idx ? (
+                            <span style={{ display: "flex", gap: "5px" }}>
+                              <button
+                                onClick={() => {
+                                  setJoueurs(
+                                    joueurs.filter((_, i) => i !== idx)
+                                  );
+                                  setJoueurASupprimer(null);
+                                }}
+                                style={{
+                                  background: "#f44336",
+                                  color: "#fff",
+                                  border: "none",
+                                  borderRadius: "4px",
+                                  padding: "7px 10px",
+                                  cursor: "pointer",
+                                  fontWeight: "bold",
+                                  whiteSpace: "nowrap"
+                                }}
+                              >
+                                Supprimer
+                              </button>
+                              <button
+                                onClick={() => setJoueurASupprimer(null)}
+                                style={{
+                                  background: "#555",
+                                  color: "#fff",
+                                  border: "none",
+                                  borderRadius: "4px",
+                                  padding: "7px 10px",
+                                  cursor: "pointer"
+                                }}
+                              >
+                                Annuler
+                              </button>
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => setJoueurASupprimer(idx)}
+                              title={"Supprimer " + j.nom}
+                              style={{
+                                background: "#f44336",
+                                color: "#fff",
+                                border: "none",
+                                borderRadius: "4px",
+                                padding: "7px 11px",
+                                cursor: "pointer"
+                              }}
+                            >
+                              X
+                            </button>
+                          )}
                         </div>
                       );
                     })}
@@ -1928,6 +2001,7 @@
                           totalJeux: 0,
                           nbPenalites: 0,
                           totalPenalites: 0,
+                          jetonsEnJeu: 0,
             totalPenalites: 0,
                           achatsBoutique: 0,
                           argentVole: 0,
@@ -2066,6 +2140,95 @@
                       Restaurer cette copie
                     </button>
                   </div>
+
+                  {restaurationEnAttente && (
+                    <div
+                      style={{
+                        marginTop: "15px",
+                        padding: "15px",
+                        background: restaurationEnAttente.erreur
+                          ? "#5d1f1f"
+                          : "#1f3d1f",
+                        border: `2px solid ${restaurationEnAttente.erreur ? "#f44336" : "#4CAF50"}`,
+                        borderRadius: "8px"
+                      }}
+                    >
+                      {restaurationEnAttente.erreur ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: "10px",
+                            flexWrap: "wrap"
+                          }}
+                        >
+                          <span>⚠️ {restaurationEnAttente.erreur}</span>
+                          <button
+                            onClick={() => setRestaurationEnAttente(null)}
+                            style={{
+                              padding: "8px 14px",
+                              background: "#555",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: "6px",
+                              cursor: "pointer"
+                            }}
+                          >
+                            Fermer
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <p style={{ margin: "0 0 12px 0" }}>
+                            Remplacer la partie en cours par{" "}
+                            <strong>{restaurationEnAttente.source}</strong>, du{" "}
+                            <strong>{restaurationEnAttente.quand}</strong> ?
+                            <br />
+                            <span style={{ color: "#ccc" }}>
+                              {restaurationEnAttente.donnees.joueurs.length}{" "}
+                              joueur(s) seront restaurés. La partie actuelle
+                              sera perdue.
+                            </span>
+                          </p>
+                          <div style={{ display: "flex", gap: "10px" }}>
+                            <button
+                              onClick={() => {
+                                appliquerSauvegarde(
+                                  restaurationEnAttente.donnees
+                                );
+                                setRestaurationEnAttente(null);
+                              }}
+                              style={{
+                                padding: "10px 18px",
+                                background: "#4CAF50",
+                                color: "#fff",
+                                border: "none",
+                                borderRadius: "6px",
+                                fontWeight: "bold",
+                                cursor: "pointer"
+                              }}
+                            >
+                              Restaurer
+                            </button>
+                            <button
+                              onClick={() => setRestaurationEnAttente(null)}
+                              style={{
+                                padding: "10px 18px",
+                                background: "#555",
+                                color: "#fff",
+                                border: "none",
+                                borderRadius: "6px",
+                                cursor: "pointer"
+                              }}
+                            >
+                              Annuler
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Imprimerie */}
@@ -3022,7 +3185,7 @@
                                   textAlign: "center"
                                 }}
                               >
-                                ✨ S'appliquera à votre prochaine opération
+                                ✨ S'appliquera au retour de vos jetons
                               </div>
                             ) : (
                               <button
@@ -3397,6 +3560,21 @@
                     </option>
                   ))}
                 </select>
+                {jC && (jC.jetonsEnJeu || 0) > 0 && (
+                  <div
+                    style={{
+                      background: "#FFD700",
+                      color: "#000",
+                      padding: "10px",
+                      borderRadius: "4px",
+                      fontWeight: "bold",
+                      textAlign: "center"
+                    }}
+                  >
+                    🎰 {jC.jetonsEnJeu}$ de jetons sur la table
+                  </div>
+                )}
+
                 {aLeVeinard && (
                   <div
                     style={{
@@ -3408,7 +3586,7 @@
                       textAlign: "center"
                     }}
                   >
-                    ✨ LE VEINARD — s'applique à cette opération ✨
+                    ✨ LE VEINARD — s'appliquera au retour des jetons ✨
                   </div>
                 )}
 
@@ -3538,7 +3716,7 @@
                       cursor: "pointer"
                     }}
                   >
-                    DÉBITER (Perte)
+                    ACHAT DE JETONS
                   </button>
                   <button
                     onClick={() => actionCroupierCalcul("credit")}
@@ -3554,7 +3732,7 @@
                       cursor: "pointer"
                     }}
                   >
-                    CRÉDITER (Gain)
+                    RETOUR DES JETONS
                   </button>
                 </div>
               </div>
