@@ -1,6 +1,6 @@
-@view-transition {
-  navigation: auto;
-}
+/* Feuille de styles du Casino RP.
+   Le reste de la mise en forme est porté par les styles en ligne des
+   composants React, dans index.html. */
 
 *,
 *::before,
@@ -8,168 +8,88 @@
   box-sizing: border-box;
 }
 
+/* Le centrage et la typographie viennent du gabarit d'origine : ils sont
+   conservés tels quels pour ne rien changer à l'apparence du site. */
 body {
   margin: 0;
-  font-family: "Lato", sans-serif;
-  font-size: 1.0625rem;
-  line-height: 1.6;
-  color: #222;
-  background: #eee;
   min-height: 100vh;
-  margin: 0;
   display: grid;
   place-items: center;
+  background-color: #1a1a1a;
+  color: #fff;
+  font-family: sans-serif;
+  font-size: 1.0625rem;
+  line-height: 1.6;
 }
 
-.card {
-  display: block;
-  max-width: 26rem;
-  width: 100%;
-  text-decoration: none;
-  color: inherit;
-  background: white;
-  border-radius: 12px;
-  overflow: hidden;
-  box-shadow:
-    rgba(50, 50, 93, 0.25) 0px 50px 100px -20px,
-    rgba(0, 0, 0, 0.3) 0px 30px 60px -30px;
-}
-
-.card__image {
-  display: block;
-  width: 100%;
-  height: auto;
-  aspect-ratio: 1;
-  object-fit: cover;
-  view-transition-name: article-image;
-}
-
-.card__body {
-  padding: 1.25rem 1.35rem 1.4rem;
-}
-
-.card__title {
-  margin: 0 0 0.5rem;
-  font-size: 1.55rem;
-  font-weight: 900;
-  line-height: 1.2;
-  letter-spacing: -0.02em;
-  view-transition-name: article-title;
-}
-
-.card__desc {
-  margin: 0 0 1rem;
-  opacity: 0.8;
-  font-size: 0.95rem;
-  line-height: 1.5;
-}
-
-.card__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  opacity: 0.8;
-  color: var(--muted);
-}
-
-.page-article {
-  padding: 1.5rem 1.25rem 3.5rem;
-}
-
-.article {
-  max-width: 40rem;
-  margin: 0 auto;
-}
-
-.article__back {
+/* Boutons pleine largeur des menus, et cases à cocher du guichet banquier */
+.checkbox-btn {
   display: inline-block;
-  margin-bottom: 1.25rem;
-  font-size: 0.875rem;
-  font-weight: 600;
-  text-decoration: none;
-}
-
-.article__image {
-  display: block;
   width: 100%;
-  height: auto;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
-  border-radius: 14px;
-  box-shadow:
-    rgba(50, 50, 93, 0.25) 0px 50px 100px -20px,
-    rgba(0, 0, 0, 0.3) 0px 30px 60px -30px;
-  view-transition-name: article-image;
+  padding: 15px;
+  margin-bottom: 10px;
+  background: #333;
+  border: 2px solid #555;
+  border-radius: 8px;
+  font-size: 1.1rem;
+  cursor: pointer;
 }
 
-.article__header {
-  margin: 1.75rem 0 1.5rem;
+.checkbox-btn.selected {
+  background: #4caf50;
+  border-color: #fff;
 }
 
-.article__title {
-  margin: 0 0 0.75rem;
-  font-size: clamp(1.85rem, 4vw, 2.5rem);
-  font-weight: 700;
-  line-height: 1.15;
-  letter-spacing: -0.025em;
-  view-transition-name: article-title;
+/* Dé du contrôle fiscal, pendant le roulement */
+@keyframes spinDice {
+  0% {
+    transform: rotate(0deg) scale(0.8);
+    opacity: 0.6;
+  }
+  50% {
+    transform: rotate(180deg) scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: rotate(360deg) scale(1);
+    opacity: 0.6;
+  }
 }
 
-.article__deck {
-  margin: 0 0 1rem;
-  font-size: 1.125rem;
-  opacity: 0.8;
-  line-height: 1.5;
+.dice-rolling {
+  animation: spinDice 0.3s infinite linear;
 }
 
-.article__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  font-size: 0.875rem;
-  font-weight: 500;
-  opacity: 0.8;
-}
-
-.article__content {
-  background: white;
-  border: 1px solid #ccc;
-  border-radius: 14px;
-  padding: 1.5rem 1.5rem 1.75rem;
-  backdrop-filter: blur(8px);
-}
-
-.article__content p {
-  margin: 0 0 1.15rem;
-}
-
-.article__content p:last-child {
-  margin-bottom: 0;
-}
-
-.article__content h2 {
-  margin: 1.75rem 0 0.65rem;
-  font-size: 1.35rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-}
-
-.article__content h2:first-child {
-  margin-top: 0;
-}
-
-.article__content code {
-  font-size: 0.9em;
-  padding: 0.1em 0.35em;
-  border-radius: 0.25em;
-  background: color-mix(in oklab, #333 6%, transparent);
-}
-
-/* Prefer less motion when requested */
+/* Le dé tourne vite et longtemps : on le fait seulement palpiter pour qui
+   demande moins d'animations, sans supprimer le signal « ça tourne ». */
 @media (prefers-reduced-motion: reduce) {
-  .card {
-    transition: none;
+  .dice-rolling {
+    animation: spinDice 2s infinite ease-in-out;
+    transform: none;
+  }
+}
+
+/* Impression des chèques de mission : seule la planche sort sur le papier */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  #printable-area,
+  #printable-area * {
+    visibility: visible;
+  }
+
+  #printable-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    background: white;
+    color: black;
+  }
+
+  .no-print {
+    display: none !important;
   }
 }

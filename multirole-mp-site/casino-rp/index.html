@@ -12,70 +12,8 @@
     <script src="firebase-config.js"></script>
     <script src="sync.js"></script>
     <link rel="stylesheet" href="style.css" />
-    <style>
-      @keyframes spinDice {
-        0% {
-          transform: rotate(0deg) scale(0.8);
-          opacity: 0.6;
-        }
-        50% {
-          transform: rotate(180deg) scale(1.1);
-          opacity: 1;
-        }
-        100% {
-          transform: rotate(360deg) scale(1);
-          opacity: 0.6;
-        }
-      }
-      .dice-rolling {
-        animation: spinDice 0.3s infinite linear;
-      }
-      @media print {
-        body * {
-          visibility: hidden;
-        }
-        #printable-area,
-        #printable-area * {
-          visibility: visible;
-        }
-        #printable-area {
-          position: absolute;
-          left: 0;
-          top: 0;
-          width: 100%;
-          background: white;
-          color: black;
-        }
-        .no-print {
-          display: none !important;
-        }
-      }
-      .checkbox-btn {
-        display: inline-block;
-        padding: 15px;
-        background: #333;
-        border: 2px solid #555;
-        border-radius: 8px;
-        cursor: pointer;
-        margin-bottom: 10px;
-        width: 100%;
-        box-sizing: border-box;
-        font-size: 1.1rem;
-      }
-      .checkbox-btn.selected {
-        background: #4caf50;
-        border-color: #fff;
-      }
-    </style>
   </head>
-  <body
-    style="
-      margin: 0;
-      background-color: #1a1a1a;
-      color: #fff;
-      font-family: sans-serif;
-    "
-  >
+  <body>
     <div id="root"></div>
 
     <script type="text/babel">
