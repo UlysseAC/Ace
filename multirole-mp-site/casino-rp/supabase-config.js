@@ -18,6 +18,6 @@
  * définies dans supabase-schema.sql.
  */
 window.CONFIG_SUPABASE = {
-  url: "",
-  cle: ""
+  url: "https://xeumjjbthbmtllpplonk.supabase.co",
+  cle: "sb_publishable_zV9CI1EEQL0MUFX-9oJ5Xg_Z93h4tEq"
 };
