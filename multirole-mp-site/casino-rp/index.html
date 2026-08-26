@@ -283,6 +283,13 @@
         // validées dans le jeu arrivent cochées, et les totaux se recalculent
         // dès qu'on en coche une de plus.
         const exporterBaseExcel = () => {
+          if (typeof XLSX === "undefined") {
+            alert(
+              "La librairie tableur n'est pas chargée (vendor/xlsx.js).\n" +
+                "L'export Excel est indisponible sur cet aperçu."
+            );
+            return;
+          }
           const lignes = [];
           const joueursExport = joueursActifs;
           const COL0 = 0; // libellés
