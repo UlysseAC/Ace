@@ -130,6 +130,7 @@
             nbPenalites: 0,
             totalPenalites: 0,
             jetonsEnJeu: 0,
+            veinardActif: false,
             achatsBoutique: 0,
             argentVole: 0,
             argentGagneCarte: 0,
@@ -152,6 +153,7 @@
             nbPenalites: 0,
             totalPenalites: 0,
             jetonsEnJeu: 0,
+            veinardActif: false,
             achatsBoutique: 0,
             argentVole: 0,
             argentGagneCarte: 0,
@@ -174,6 +176,7 @@
             nbPenalites: 0,
             totalPenalites: 0,
             jetonsEnJeu: 0,
+            veinardActif: false,
             achatsBoutique: 0,
             argentVole: 0,
             argentGagneCarte: 0,
@@ -196,6 +199,7 @@
             nbPenalites: 0,
             totalPenalites: 0,
             jetonsEnJeu: 0,
+            veinardActif: false,
             achatsBoutique: 0,
             argentVole: 0,
             argentGagneCarte: 0,
@@ -690,6 +694,8 @@
                 ? {
                     ...j,
                     deck: j.deck.filter((c) => c.id !== carteId),
+                    veinardActif:
+                      carteId === "veinard" ? false : j.veinardActif,
                     historique: [`Carte défaussée`, ...j.historique]
                   }
                 : j
@@ -718,7 +724,9 @@
             return;
           }
 
-          const aLeVeinard = jC.deck.some((c) => c.id === "veinard");
+          // La carte n'agit que si le joueur l'a lui-meme activee.
+          const aLeVeinard =
+            !!jC.veinardActif && jC.deck.some((c) => c.id === "veinard");
           const jetonsAvant = jC.jetonsEnJeu || 0;
 
           if (typeOp === "retrait") {
@@ -794,6 +802,7 @@
                 solde: Math.max(0, j.solde + credite),
                 totalJeux: j.totalJeux + credite,
                 jetonsEnJeu: 0,
+            veinardActif: false,
                 deck:
                   bonus > 0
                     ? j.deck.filter((c) => c.id !== "veinard")
@@ -2002,6 +2011,8 @@
                           nbPenalites: 0,
                           totalPenalites: 0,
                           jetonsEnJeu: 0,
+                          veinardActif: false,
+            veinardActif: false,
             totalPenalites: 0,
                           achatsBoutique: 0,
                           argentVole: 0,
@@ -3172,21 +3183,78 @@
                                 🌴 S'isoler
                               </button>
                             ) : c.id === "veinard" ? (
-                              // Carte passive : son effet s'applique chez le
-                              // croupier tant qu'elle est dans le deck. Pas de
-                              // bouton d'activation, qui la consommerait.
-                              <div
-                                style={{
-                                  padding: "8px",
-                                  background: "#00BCD4",
-                                  color: "#000",
-                                  borderRadius: "4px",
-                                  fontWeight: "bold",
-                                  textAlign: "center"
-                                }}
-                              >
-                                ✨ S'appliquera au retour de vos jetons
-                              </div>
+                              // Le joueur arme la carte quand il le décide :
+                              // elle ne sera consommée qu'au retour des jetons
+                              // de la table qu'il aura choisie.
+                              joueurActuel.veinardActif ? (
+                                <div>
+                                  <div
+                                    style={{
+                                      padding: "8px",
+                                      background: "#00BCD4",
+                                      color: "#000",
+                                      borderRadius: "4px",
+                                      fontWeight: "bold",
+                                      textAlign: "center",
+                                      marginBottom: "6px"
+                                    }}
+                                  >
+                                    ✨ Activée — s'appliquera au retour de vos
+                                    jetons
+                                  </div>
+                                  <button
+                                    onClick={() =>
+                                      setJoueurs((prev) =>
+                                        prev.map((j) =>
+                                          j.id === joueurActuel.id
+                                            ? { ...j, veinardActif: false }
+                                            : j
+                                        )
+                                      )
+                                    }
+                                    style={{
+                                      padding: "6px",
+                                      background: "transparent",
+                                      color: "#aaa",
+                                      border: "1px solid #555",
+                                      borderRadius: "4px",
+                                      cursor: "pointer",
+                                      width: "100%",
+                                      fontSize: "0.85rem"
+                                    }}
+                                  >
+                                    Garder pour plus tard
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    setJoueurs((prev) =>
+                                      prev.map((j) =>
+                                        j.id === joueurActuel.id
+                                          ? { ...j, veinardActif: true }
+                                          : j
+                                      )
+                                    );
+                                    setHistoriqueAffichage((prev) => [
+                                      c.phraseAnim,
+                                      prev[0]
+                                    ]);
+                                  }}
+                                  style={{
+                                    padding: "8px",
+                                    background: "#00BCD4",
+                                    color: "#000",
+                                    border: "none",
+                                    borderRadius: "4px",
+                                    cursor: "pointer",
+                                    fontWeight: "bold",
+                                    width: "100%"
+                                  }}
+                                >
+                                  ✨ Activer pour ma prochaine table
+                                </button>
+                              )
                             ) : (
                               <button
                                 onClick={() => {
@@ -3524,9 +3592,13 @@
         // 4. INTERFACE CROUPIER
         if (interfaceActive === "croupier") {
           const jC = joueursActifs.find((j) => j.id === joueurCroupierId);
-          const aLeVeinard = jC
+          // Le croupier doit voir la carte que le joueur possède, pour lui
+          // proposer de l'utiliser sur cette table : le joueur est devant lui,
+          // pas devant une borne.
+          const detientVeinard = jC
             ? jC.deck.some((c) => c.id === "veinard")
             : false;
+          const aLeVeinard = jC ? !!jC.veinardActif && detientVeinard : false;
 
           return (
             <div
@@ -3586,7 +3658,49 @@
                       textAlign: "center"
                     }}
                   >
-                    ✨ LE VEINARD — s'appliquera au retour des jetons ✨
+                    ✨ LE VEINARD ACTIVÉ — s'applique au retour des jetons ✨
+                  </div>
+                )}
+
+                {detientVeinard && !aLeVeinard && (
+                  <div
+                    style={{
+                      background: "#FF9800",
+                      color: "#000",
+                      padding: "12px",
+                      borderRadius: "6px",
+                      textAlign: "center"
+                    }}
+                  >
+                    <div style={{ fontWeight: "bold", marginBottom: "8px" }}>
+                      ✨ Ce joueur possède la carte Le Veinard, non activée
+                    </div>
+                    <div style={{ fontSize: "0.9rem", marginBottom: "10px" }}>
+                      Lui demander s'il souhaite l'utiliser sur cette table.
+                      Usage unique : elle réduira sa perte de{" "}
+                      {configGlobale.bonusVeinardPertes}% ou augmentera son gain
+                      de {configGlobale.bonusVeinardGain}%.
+                    </div>
+                    <button
+                      onClick={() =>
+                        setJoueurs((prev) =>
+                          prev.map((j) =>
+                            j.id === jC.id ? { ...j, veinardActif: true } : j
+                          )
+                        )
+                      }
+                      style={{
+                        padding: "10px 18px",
+                        background: "#00BCD4",
+                        color: "#000",
+                        border: "none",
+                        borderRadius: "6px",
+                        fontWeight: "bold",
+                        cursor: "pointer"
+                      }}
+                    >
+                      Activer pour ce joueur
+                    </button>
                   </div>
                 )}
 
