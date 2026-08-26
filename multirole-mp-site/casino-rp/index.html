@@ -373,6 +373,144 @@
           link.click();
         };
 
+        // ================= SAUVEGARDE & RESTAURATION =================
+        // Filet de sécurité indépendant de Firebase : la partie entière peut
+        // être exportée dans un fichier, et rechargée depuis n'importe quel
+        // appareil. Une copie automatique est gardée sur chaque appareil.
+
+        const CLE_SAUVEGARDE_LOCALE = "casino-rp-sauvegarde";
+
+        const donneesPartie = () => ({
+          version: 1,
+          date: new Date().toISOString(),
+          configGlobale,
+          missions,
+          produits,
+          penalites,
+          cartesJeu,
+          desConfig,
+          joueurs,
+          qrCodesRegistre,
+          historiqueFiscal,
+          historiqueAffichage
+        });
+
+        // Copie automatique sur l'appareil, toutes les 30 secondes. Chaque
+        // appareil garde ainsi de quoi relancer la partie si la base devient
+        // inaccessible.
+        const [dateSauvegardeLocale, setDateSauvegardeLocale] =
+          React.useState(null);
+
+        const refDonnees = React.useRef(donneesPartie);
+        refDonnees.current = donneesPartie;
+
+        React.useEffect(() => {
+          const enregistrer = () => {
+            try {
+              const donnees = refDonnees.current();
+              localStorage.setItem(
+                CLE_SAUVEGARDE_LOCALE,
+                JSON.stringify(donnees)
+              );
+              setDateSauvegardeLocale(donnees.date);
+            } catch (e) {
+              // Stockage plein ou navigation privée : la sauvegarde manuelle
+              // reste disponible, on ne bloque pas la partie pour autant.
+            }
+          };
+          enregistrer();
+          const minuteur = setInterval(enregistrer, 30000);
+          return () => clearInterval(minuteur);
+        }, []);
+
+        React.useEffect(() => {
+          try {
+            const brut = localStorage.getItem(CLE_SAUVEGARDE_LOCALE);
+            if (brut) setDateSauvegardeLocale(JSON.parse(brut).date);
+          } catch (e) {}
+        }, []);
+
+        const telechargerSauvegarde = () => {
+          const contenu = JSON.stringify(donneesPartie(), null, 2);
+          const horodatage = new Date()
+            .toISOString()
+            .slice(0, 16)
+            .replace(/[:T]/g, "-");
+          const lien = document.createElement("a");
+          lien.href = URL.createObjectURL(
+            new Blob([contenu], { type: "application/json" })
+          );
+          lien.download = `casino-rp-${horodatage}.json`;
+          document.body.appendChild(lien);
+          lien.click();
+          document.body.removeChild(lien);
+          URL.revokeObjectURL(lien.href);
+        };
+
+        const appliquerSauvegarde = (donnees) => {
+          // Les setters passent par useEtatPartage : en mode synchronisé, la
+          // restauration se propage d'elle-même à tous les appareils.
+          if (donnees.configGlobale) setConfigGlobale(donnees.configGlobale);
+          if (donnees.missions) setMissions(donnees.missions);
+          if (donnees.produits) setProduits(donnees.produits);
+          if (donnees.penalites) setPenalites(donnees.penalites);
+          if (donnees.cartesJeu) setCartesJeu(donnees.cartesJeu);
+          if (donnees.desConfig) setDesConfig(donnees.desConfig);
+          if (donnees.joueurs) setJoueurs(donnees.joueurs);
+          if (donnees.qrCodesRegistre)
+            setQrCodesRegistre(donnees.qrCodesRegistre);
+          if (donnees.historiqueFiscal)
+            setHistoriqueFiscal(donnees.historiqueFiscal);
+          if (donnees.historiqueAffichage)
+            setHistoriqueAffichage(donnees.historiqueAffichage);
+        };
+
+        const restaurerDepuisFichier = (fichier) => {
+          if (!fichier) return;
+          const lecteur = new FileReader();
+          lecteur.onload = () => {
+            try {
+              const donnees = JSON.parse(lecteur.result);
+              if (!donnees.joueurs) {
+                alert("Ce fichier ne contient pas de partie.");
+                return;
+              }
+              const quand = donnees.date
+                ? new Date(donnees.date).toLocaleString()
+                : "date inconnue";
+              if (
+                !confirm(
+                  `Remplacer la partie en cours par la sauvegarde du ${quand} ? ` +
+                    `${donnees.joueurs.length} joueur(s) seront restaurés.`
+                )
+              )
+                return;
+              appliquerSauvegarde(donnees);
+              alert("Partie restaurée.");
+            } catch (e) {
+              alert("Fichier illisible : " + e.message);
+            }
+          };
+          lecteur.readAsText(fichier);
+        };
+
+        const restaurerDepuisAppareil = () => {
+          try {
+            const brut = localStorage.getItem(CLE_SAUVEGARDE_LOCALE);
+            if (!brut) {
+              alert("Aucune copie automatique sur cet appareil.");
+              return;
+            }
+            const donnees = JSON.parse(brut);
+            const quand = new Date(donnees.date).toLocaleString();
+            if (!confirm(`Restaurer la copie automatique du ${quand} ?`)) return;
+            appliquerSauvegarde(donnees);
+            alert("Partie restaurée depuis cet appareil.");
+          } catch (e) {
+            alert("Copie automatique illisible : " + e.message);
+          }
+        };
+
         // ================= LOGIQUE IMPRIMERIE =================
         const genererChequesPdf = () => {
           const mObj =
@@ -1518,6 +1656,116 @@
                   >
                     + Ajouter une Carte
                   </button>
+                </div>
+
+                {/* Sauvegarde de la partie */}
+                <div
+                  style={{
+                    background: "#222",
+                    padding: "20px",
+                    borderRadius: "12px",
+                    border: "2px solid #4CAF50"
+                  }}
+                >
+                  <h3 style={{ color: "#4CAF50", margin: "0 0 5px 0" }}>
+                    💾 Sauvegarde de la partie
+                  </h3>
+                  <p
+                    style={{
+                      margin: "0 0 15px 0",
+                      fontSize: "0.85rem",
+                      color: "#aaa"
+                    }}
+                  >
+                    Le fichier contient la partie entière : joueurs, soldes,
+                    decks, historiques et réglages. Il permet de repartir de
+                    zéro sur n'importe quel appareil, même sans la base.
+                  </p>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: "10px"
+                    }}
+                  >
+                    <button
+                      onClick={telechargerSauvegarde}
+                      style={{
+                        padding: "14px",
+                        background: "#4CAF50",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "6px",
+                        fontWeight: "bold",
+                        fontSize: "1rem",
+                        cursor: "pointer"
+                      }}
+                    >
+                      ⬇️ Télécharger une sauvegarde
+                    </button>
+
+                    <label
+                      style={{
+                        padding: "14px",
+                        background: "#FF9800",
+                        color: "#fff",
+                        borderRadius: "6px",
+                        fontWeight: "bold",
+                        fontSize: "1rem",
+                        cursor: "pointer",
+                        textAlign: "center"
+                      }}
+                    >
+                      ⬆️ Restaurer un fichier
+                      <input
+                        type="file"
+                        accept=".json,application/json"
+                        onChange={(e) => {
+                          restaurerDepuisFichier(e.target.files[0]);
+                          e.target.value = "";
+                        }}
+                        style={{ display: "none" }}
+                      />
+                    </label>
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: "15px",
+                      padding: "12px",
+                      background: "#111",
+                      borderRadius: "6px",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: "10px",
+                      flexWrap: "wrap"
+                    }}
+                  >
+                    <span style={{ fontSize: "0.9rem" }}>
+                      Copie automatique sur cet appareil :{" "}
+                      <strong style={{ color: "#FFD700" }}>
+                        {dateSauvegardeLocale
+                          ? new Date(dateSauvegardeLocale).toLocaleTimeString()
+                          : "aucune"}
+                      </strong>
+                    </span>
+                    <button
+                      onClick={restaurerDepuisAppareil}
+                      disabled={!dateSauvegardeLocale}
+                      style={{
+                        padding: "8px 14px",
+                        background: dateSauvegardeLocale ? "#2196F3" : "#555",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "6px",
+                        cursor: dateSauvegardeLocale ? "pointer" : "not-allowed"
+                      }}
+                    >
+                      Restaurer cette copie
+                    </button>
+                  </div>
                 </div>
 
                 {/* Imprimerie */}
