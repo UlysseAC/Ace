@@ -31,6 +31,7 @@
           limiteRetraitCroupier: 5000,
           dureeRoulement: 3,
           dureeArret: 2,
+          dureeInactiviteSec: 120,
           raccourcisTactiles: [100, 500, 1000, 5000],
           modeLocal: false,
           bonusVeinardGain: 5,
@@ -372,6 +373,38 @@
           document.body.appendChild(link);
           link.click();
         };
+
+        // ================= DÉCONNEXION AUTOMATIQUE =================
+        // Les 3 bornes sont partagées par tous les joueurs : un joueur qui
+        // s'éloigne sans se déconnecter laisserait son compte ouvert au
+        // suivant. On revient donc à l'écran de connexion après un silence.
+        React.useEffect(() => {
+          if (!joueurConnecteId) return;
+          const delai =
+            (Number(configGlobale.dureeInactiviteSec) > 0
+              ? Number(configGlobale.dureeInactiviteSec)
+              : 120) * 1000;
+
+          let minuteur;
+          const relancer = () => {
+            clearTimeout(minuteur);
+            minuteur = setTimeout(() => {
+              setJoueurConnecteId(null);
+              setSousMenuBanque("accueil");
+            }, delai);
+          };
+
+          const evenements = ["pointerdown", "keydown", "wheel", "touchstart"];
+          evenements.forEach((e) =>
+            window.addEventListener(e, relancer, { passive: true })
+          );
+          relancer();
+
+          return () => {
+            clearTimeout(minuteur);
+            evenements.forEach((e) => window.removeEventListener(e, relancer));
+          };
+        }, [joueurConnecteId, configGlobale.dureeInactiviteSec]);
 
         // ================= SAUVEGARDE & RESTAURATION =================
         // Filet de sécurité indépendant de Firebase : la partie entière peut
@@ -1158,6 +1191,21 @@
                       />
                     </label>
 
+                    <label>
+                      Déconnexion borne après (s) :{" "}
+                      <input
+                        type="number"
+                        value={configGlobale.dureeInactiviteSec}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            dureeInactiviteSec: Number(e.target.value)
+                          })
+                        }
+                        style={{ width: "100%", padding: "5px" }}
+                      />
+                    </label>
+
                     <label style={{ gridColumn: "span 2" }}>
                       Phrase Limite Croupier :{" "}
                       <input
@@ -1655,6 +1703,192 @@
                     }}
                   >
                     + Ajouter une Carte
+                  </button>
+                </div>
+
+                {/* Table 1 : les joueurs */}
+                <div
+                  style={{
+                    background: "#222",
+                    padding: "20px",
+                    borderRadius: "12px"
+                  }}
+                >
+                  <h3 style={{ color: "#4CAF50", margin: "0 0 5px 0" }}>
+                    Table 1 : Joueurs ({joueurs.length})
+                  </h3>
+                  <p
+                    style={{
+                      margin: "0 0 15px 0",
+                      fontSize: "0.85rem",
+                      color: "#aaa"
+                    }}
+                  >
+                    L'ID et le code sont ce que le joueur saisit sur la borne.
+                    Deux joueurs ne peuvent pas avoir le même ID.
+                  </p>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1.6fr 1fr 1fr 1fr auto",
+                      gap: "8px",
+                      fontSize: "0.8rem",
+                      color: "#888",
+                      marginBottom: "6px",
+                      textTransform: "uppercase"
+                    }}
+                  >
+                    <span>Nom</span>
+                    <span>ID</span>
+                    <span>Code</span>
+                    <span>Solde</span>
+                    <span />
+                  </div>
+
+                  <div style={{ maxHeight: "420px", overflowY: "auto" }}>
+                    {joueurs.map((j, idx) => {
+                      const idDouble =
+                        joueurs.filter((a) => a.id === j.id).length > 1;
+                      const majJoueur = (champ, valeur) => {
+                        const n = [...joueurs];
+                        n[idx] = { ...n[idx], [champ]: valeur };
+                        setJoueurs(n);
+                      };
+                      const champ = {
+                        padding: "7px",
+                        background: "#333",
+                        color: "#fff",
+                        border: "1px solid #555",
+                        borderRadius: "4px",
+                        width: "100%"
+                      };
+                      return (
+                        <div
+                          key={idx}
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "1.6fr 1fr 1fr 1fr auto",
+                            gap: "8px",
+                            marginBottom: "6px",
+                            alignItems: "center"
+                          }}
+                        >
+                          <input
+                            type="text"
+                            value={j.nom}
+                            onChange={(e) => majJoueur("nom", e.target.value)}
+                            aria-label={"Nom du joueur " + (idx + 1)}
+                            style={champ}
+                          />
+                          <input
+                            type="text"
+                            value={j.id}
+                            onChange={(e) =>
+                              majJoueur("id", e.target.value.trim())
+                            }
+                            aria-label={"ID du joueur " + (idx + 1)}
+                            style={{
+                              ...champ,
+                              borderColor: idDouble ? "#f44336" : "#555"
+                            }}
+                            title={idDouble ? "Cet ID est déjà utilisé" : ""}
+                          />
+                          <input
+                            type="text"
+                            value={j.code}
+                            onChange={(e) =>
+                              majJoueur("code", e.target.value.trim())
+                            }
+                            aria-label={"Code du joueur " + (idx + 1)}
+                            style={champ}
+                          />
+                          <input
+                            type="number"
+                            value={j.solde}
+                            onChange={(e) =>
+                              majJoueur("solde", Number(e.target.value))
+                            }
+                            aria-label={"Solde du joueur " + (idx + 1)}
+                            style={champ}
+                          />
+                          <button
+                            onClick={() => {
+                              if (
+                                confirm(
+                                  `Supprimer ${j.nom} ? Son compte et son historique seront perdus.`
+                                )
+                              )
+                                setJoueurs(
+                                  joueurs.filter((_, i) => i !== idx)
+                                );
+                            }}
+                            style={{
+                              background: "#f44336",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: "4px",
+                              padding: "7px 11px",
+                              cursor: "pointer"
+                            }}
+                          >
+                            X
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {joueurs.some(
+                    (j, i) => joueurs.findIndex((a) => a.id === j.id) !== i
+                  ) && (
+                    <p style={{ color: "#f44336", fontSize: "0.85rem" }}>
+                      ⚠️ Des joueurs partagent le même ID : la connexion sur les
+                      bornes sera imprévisible.
+                    </p>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      // Un ID libre, pour ne pas créer de doublon d'emblée
+                      let n = joueurs.length + 1;
+                      while (joueurs.some((j) => j.id === String(n))) n++;
+                      setJoueurs([
+                        ...joueurs,
+                        {
+                          id: String(n),
+                          code: "",
+                          nom: "Nouveau joueur",
+                          solde: 0,
+                          totalMissions: 0,
+                          totalJeux: 0,
+                          nbPenalites: 0,
+                          achatsBoutique: 0,
+                          argentVole: 0,
+                          argentGagneCarte: 0,
+                          paradisFiscal: false,
+                          finParadis: 0,
+                          deck: [],
+                          historique: [],
+                          qrCodesUtilises: [],
+                          missionsFaites: [],
+                          produitsAchetes: [],
+                          penalitesSubies: []
+                        }
+                      ]);
+                    }}
+                    style={{
+                      marginTop: "10px",
+                      background: "#4CAF50",
+                      color: "#fff",
+                      border: "none",
+                      padding: "9px 16px",
+                      borderRadius: "6px",
+                      fontWeight: "bold",
+                      cursor: "pointer"
+                    }}
+                  >
+                    + Ajouter un joueur
                   </button>
                 </div>
 

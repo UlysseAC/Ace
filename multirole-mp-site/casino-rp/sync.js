@@ -20,9 +20,13 @@
   // Firebase ne stocke pas les tableaux vides et renvoie parfois un objet
   // indexé à la place d'un tableau : on rétablit toujours un vrai tableau,
   // sinon les .map/.some du jeu plantent au premier chargement.
+  // Les entrées vides sont écartées : une suppression laisse parfois un trou,
+  // et un joueur nul ferait planter l'affichage du classement.
+  const nonVide = (x) => x !== null && x !== undefined;
+
   const versTableau = (v) => {
-    if (Array.isArray(v)) return v;
-    if (v && typeof v === "object") return Object.values(v);
+    if (Array.isArray(v)) return v.filter(nonVide);
+    if (v && typeof v === "object") return Object.values(v).filter(nonVide);
     return [];
   };
 
@@ -94,6 +98,12 @@
         if (empreinteAvant[j.id] !== JSON.stringify(valeur)) {
           modifs[j.id] = valeur;
         }
+      });
+      // Un joueur retiré de la liste doit aussi disparaître de la base :
+      // une mise à jour n'efface rien, il faut demander sa suppression.
+      const idsApres = new Set(apres.map((j) => j.id));
+      avant.forEach((j) => {
+        if (!idsApres.has(j.id)) modifs[j.id] = null;
       });
       if (Object.keys(modifs).length > 0) {
         racine.child("joueurs").update(modifs);
