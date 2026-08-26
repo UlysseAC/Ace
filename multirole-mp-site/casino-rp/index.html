@@ -226,6 +226,7 @@
         const [sousMenuBanque, setSousMenuBanque] = React.useState("accueil");
         const [modalAdminOuvert, setModalAdminOuvert] = React.useState(false);
         const [saisieCodeAdmin, setSaisieCodeAdmin] = React.useState("");
+        const [erreurCodeAdmin, setErreurCodeAdmin] = React.useState("");
 
         // États Activation Contrôle Fiscal (Banque)
         const [cibleFiscaleSelectionnee, setCibleFiscaleSelectionnee] =
@@ -412,6 +413,18 @@
             .slice(0, 16)
             .replace(/[:T]/g, "-");
           XLSX.writeFile(classeur, `casino-rp-suivi-${horodatage}.xlsx`);
+        };
+
+        const validerCodeAdmin = () => {
+          if (saisieCodeAdmin !== configGlobale.codeAdmin) {
+            setErreurCodeAdmin("Code incorrect.");
+            return;
+          }
+          setInterfaceActive("menu");
+          setModalAdminOuvert(false);
+          setSaisieCodeAdmin("");
+          setErreurCodeAdmin("");
+          fermerSessionJoueur();
         };
 
         // Ferme la session du joueur et efface toute trace de sa saisie :
@@ -1094,6 +1107,105 @@
             (secRoulement + secArret) * 1000 + 1000
           );
         };
+
+        // Fenêtre de code administrateur, partagée par les écrans installés
+        // sur un appareil dédié : on ne doit pas pouvoir en sortir vers
+        // l'Admin sans le code.
+        const rendreModalAdmin = () =>
+          modalAdminOuvert ? (
+            <div
+              style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                width: "100vw",
+                height: "100vh",
+                background: "rgba(0,0,0,0.9)",
+                display: "flex",
+                justifyContent: "center",
+                alignItems: "center",
+                zIndex: 2000
+              }}
+            >
+              <div
+                style={{
+                  background: "#222",
+                  padding: "30px",
+                  borderRadius: "12px",
+                  textAlign: "center",
+                  minWidth: "280px"
+                }}
+              >
+                <h3 style={{ marginTop: 0 }}>🔒 Code Administrateur</h3>
+                <input
+                  type="password"
+                  value={saisieCodeAdmin}
+                  autoFocus
+                  onChange={(e) => {
+                    setSaisieCodeAdmin(e.target.value);
+                    setErreurCodeAdmin("");
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") validerCodeAdmin();
+                  }}
+                  style={{
+                    padding: "10px",
+                    width: "80%",
+                    background: "#333",
+                    color: "#fff",
+                    border: "1px solid #555",
+                    borderRadius: "4px"
+                  }}
+                />
+                {/* Message dans la page : une alerte du navigateur peut être
+                    bloquée, et l'erreur passerait alors inaperçue. */}
+                <p
+                  style={{
+                    color: "#f44336",
+                    minHeight: "1.4em",
+                    margin: "8px 0 12px 0",
+                    fontSize: "0.9rem"
+                  }}
+                >
+                  {erreurCodeAdmin}
+                </p>
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <button
+                    onClick={validerCodeAdmin}
+                    style={{
+                      flex: 1,
+                      padding: "10px",
+                      background: "#4CAF50",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer"
+                    }}
+                  >
+                    Valider
+                  </button>
+                  <button
+                    onClick={() => {
+                      setModalAdminOuvert(false);
+                      setSaisieCodeAdmin("");
+                      setErreurCodeAdmin("");
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: "10px",
+                      background: "#555",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer"
+                    }}
+                  >
+                    Annuler
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null;
 
         // ========================================================
         // ================= RENDU DES INTERFACES =================
@@ -2734,82 +2846,7 @@
                 </div>
               )}
 
-              {modalAdminOuvert && (
-                <div
-                  style={{
-                    position: "fixed",
-                    top: 0,
-                    left: 0,
-                    width: "100vw",
-                    height: "100vh",
-                    background: "rgba(0,0,0,0.9)",
-                    display: "flex",
-                    justifyContent: "center",
-                    alignItems: "center",
-                    zIndex: 2000
-                  }}
-                >
-                  <div
-                    style={{
-                      background: "#222",
-                      padding: "30px",
-                      borderRadius: "12px",
-                      textAlign: "center"
-                    }}
-                  >
-                    <h3>🔒 Code Administrateur</h3>
-                    <input
-                      type="password"
-                      value={saisieCodeAdmin}
-                      onChange={(e) => setSaisieCodeAdmin(e.target.value)}
-                      style={{
-                        padding: "10px",
-                        width: "80%",
-                        marginBottom: "15px",
-                        background: "#333",
-                        color: "#fff",
-                        border: "1px solid #555"
-                      }}
-                    />
-                    <div style={{ display: "flex", gap: "10px" }}>
-                      <button
-                        onClick={() => {
-                          if (saisieCodeAdmin === configGlobale.codeAdmin) {
-                            setInterfaceActive("menu");
-                            setModalAdminOuvert(false);
-                            fermerSessionJoueur();
-                            setSaisieCodeAdmin("");
-                          } else alert("Code Faux !");
-                        }}
-                        style={{
-                          flex: 1,
-                          padding: "10px",
-                          background: "#4CAF50",
-                          color: "#fff",
-                          border: "none"
-                        }}
-                      >
-                        Valider
-                      </button>
-                      <button
-                        onClick={() => {
-                          setModalAdminOuvert(false);
-                          setSaisieCodeAdmin("");
-                        }}
-                        style={{
-                          flex: 1,
-                          padding: "10px",
-                          background: "#555",
-                          color: "#fff",
-                          border: "none"
-                        }}
-                      >
-                        Annuler
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
+              {rendreModalAdmin()}
 
               {!joueurConnecteId ? (
                 <div style={{ textAlign: "center" }}>
@@ -3850,8 +3887,9 @@
                   </button>
                 </div>
               </div>
+              {rendreModalAdmin()}
               <button
-                onClick={() => setInterfaceActive("menu")}
+                onClick={() => setModalAdminOuvert(true)}
                 style={{
                   width: "100%",
                   marginTop: "20px",
@@ -3862,7 +3900,7 @@
                   borderRadius: "8px"
                 }}
               >
-                Retour au menu
+                🔒 Retour au menu
               </button>
             </div>
           );
@@ -4026,8 +4064,9 @@
                 )}
               </div>
 
+              {rendreModalAdmin()}
               <button
-                onClick={() => setInterfaceActive("menu")}
+                onClick={() => setModalAdminOuvert(true)}
                 style={{
                   marginTop: "40px",
                   padding: "10px 20px",
@@ -4037,7 +4076,7 @@
                   borderRadius: "6px"
                 }}
               >
-                Retour au menu
+                🔒 Retour au menu
               </button>
             </div>
           );

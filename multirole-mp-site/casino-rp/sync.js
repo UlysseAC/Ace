@@ -67,8 +67,75 @@
     historiqueAffichage: versTableau
   };
 
+  /*
+   * File d'attente des écritures.
+   *
+   * Les actions partent dans l'ordre où elles ont été demandées, une seule à
+   * la fois : la suivante attend que la précédente soit confirmée par la base.
+   * Aucun délai n'est ajouté — la file se vide aussi vite que le réseau le
+   * permet, et l'affichage local, lui, ne l'attend pas.
+   */
+  let chaine = Promise.resolve();
+  let enCours = 0;
+
+  const enfiler = (tache) => {
+    enCours++;
+    chaine = chaine
+      .then(tache)
+      .catch((e) => console.error("Synchronisation :", e))
+      .then(() => {
+        enCours--;
+      });
+    return chaine;
+  };
+
+  // Applique sur la valeur du serveur la modification faite localement,
+  // plutôt que d'écraser avec notre copie. Deux appareils qui touchent le
+  // même joueur en même temps voient ainsi leurs deux effets conservés.
+  const fusionner = (serveur, base, local) => {
+    if (!serveur) return local;
+    const resultat = { ...serveur };
+    Object.keys(local).forEach((cle) => {
+      const avant = base ? base[cle] : undefined;
+      const apres = local[cle];
+      if (JSON.stringify(avant) === JSON.stringify(apres)) return;
+
+      if (typeof apres === "number" && typeof avant === "number") {
+        // Montants : on rejoue l'écart, pas la valeur. Un débit de 100 et un
+        // crédit de 500 simultanés donnent bien +400, et non l'un des deux.
+        resultat[cle] = (Number(serveur[cle]) || 0) + (apres - avant);
+      } else if (Array.isArray(apres)) {
+        const avantListe = Array.isArray(avant) ? avant : [];
+        const serveurListe = versTableau(serveur[cle]);
+        const identite = (x) =>
+          x && typeof x === "object" ? x.id : JSON.stringify(x);
+        const idsAvant = new Set(avantListe.map(identite));
+        const idsApres = new Set(apres.map(identite));
+        const ajoutes = apres.filter((x) => !idsAvant.has(identite(x)));
+        const conserves = serveurListe.filter(
+          (x) => !(idsAvant.has(identite(x)) && !idsApres.has(identite(x)))
+        );
+        // L'historique se lit du plus récent au plus ancien : les nouvelles
+        // lignes passent devant.
+        resultat[cle] = cle === "historique"
+          ? ajoutes.concat(conserves)
+          : conserves.concat(
+              ajoutes.filter(
+                (x) => !conserves.some((y) => identite(y) === identite(x))
+              )
+            );
+      } else {
+        resultat[cle] = apres;
+      }
+    });
+    return resultat;
+  };
+
   const Sync = {
     actif: disponible,
+
+    // Nombre d'écritures encore en attente, pour l'affichage.
+    enAttente: () => enCours,
 
     ecouter(cle, rappel) {
       if (!disponible) return () => {};
@@ -80,42 +147,59 @@
     ecrire(cle, valeur) {
       if (!disponible) return;
       if (cle === "joueurs") return Sync.ecrireJoueurs([], valeur);
-      racine.child(cle).set(valeur);
+      enfiler(() => racine.child(cle).set(valeur));
     },
 
-    // N'écrit que les joueurs réellement modifiés. Sans ça, le croupier qui
-    // débite Steph écraserait le panier que le banquier vient de valider
-    // pour Alex, puisque les deux enverraient la liste entière.
+    // N'écrit que les joueurs réellement modifiés, un par un. Sans ça, le
+    // croupier qui débite Steph écraserait le panier que le banquier vient de
+    // valider pour Alex, puisque les deux enverraient la liste entière.
     ecrireJoueurs(avant, apres) {
       if (!disponible) return;
-      const empreinteAvant = {};
+      const baseParId = {};
       avant.forEach((j, i) => {
-        empreinteAvant[j.id] = JSON.stringify({ ...j, ordre: i });
+        baseParId[j.id] = { ...j, ordre: i };
       });
-      const modifs = {};
+
       apres.forEach((j, i) => {
         const valeur = { ...j, ordre: i };
-        if (empreinteAvant[j.id] !== JSON.stringify(valeur)) {
-          modifs[j.id] = valeur;
-        }
+        const base = baseParId[j.id];
+        if (base && JSON.stringify(base) === JSON.stringify(valeur)) return;
+        enfiler(
+          () =>
+            new Promise((resolve, reject) =>
+              racine
+                .child("joueurs/" + j.id)
+                .transaction(
+                  (serveur) => fusionner(serveur, base, valeur),
+                  (e) => (e ? reject(e) : resolve())
+                )
+            )
+        );
       });
+
       // Un joueur retiré de la liste doit aussi disparaître de la base :
       // une mise à jour n'efface rien, il faut demander sa suppression.
       const idsApres = new Set(apres.map((j) => j.id));
       avant.forEach((j) => {
-        if (!idsApres.has(j.id)) modifs[j.id] = null;
+        if (!idsApres.has(j.id)) {
+          enfiler(() => racine.child("joueurs/" + j.id).set(null));
+        }
       });
-      if (Object.keys(modifs).length > 0) {
-        racine.child("joueurs").update(modifs);
-      }
     },
 
     // L'animation du dé doit se jouer sur l'écran de la salle, pas seulement
     // sur le téléphone du lanceur : on la diffuse comme un événement.
     diffuser(evenement) {
       if (!disponible) return;
-      racine.child("evenement").set({ ...evenement, ts: Date.now() });
+      enfiler(() =>
+        racine.child("evenement").set({ ...evenement, ts: Date.now() })
+      );
     },
+
+    // Exposée pour pouvoir vérifier la politique de fusion indépendamment
+    // du réseau : c'est elle qui décide du sort de deux modifications
+    // concurrentes sur un même joueur.
+    fusionner,
 
     normaliser(cle, brut) {
       const f = normalisateurs[cle];
