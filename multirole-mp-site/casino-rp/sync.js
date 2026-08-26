@@ -1,27 +1,23 @@
 /*
  * Couche de synchronisation temps réel entre les appareils de la partie.
  *
- * Sans configuration Firebase, tout reste local : `Sync.actif` vaut false et
+ * Sans configuration Supabase, tout reste local : `Sync.actif` vaut false et
  * useEtatPartage se comporte exactement comme React.useState.
  */
 (function () {
-  const config = window.CONFIG_FIREBASE || {};
+  const config = window.CONFIG_SUPABASE || {};
   const disponible =
-    typeof firebase !== "undefined" &&
-    !!config.apiKey &&
-    !!config.databaseURL;
+    typeof supabase !== "undefined" && !!config.url && !!config.cle;
 
-  let racine = null;
-  if (disponible) {
-    firebase.initializeApp(config);
-    racine = firebase.database().ref("partie");
-  }
+  const client = disponible
+    ? supabase.createClient(config.url, config.cle)
+    : null;
 
-  // Firebase ne stocke pas les tableaux vides et renvoie parfois un objet
-  // indexé à la place d'un tableau : on rétablit toujours un vrai tableau,
-  // sinon les .map/.some du jeu plantent au premier chargement.
-  // Les entrées vides sont écartées : une suppression laisse parfois un trou,
-  // et un joueur nul ferait planter l'affichage du classement.
+  // La base ne stocke pas les tableaux vides et peut renvoyer un objet indexé
+  // à la place d'un tableau : on rétablit toujours un vrai tableau, sinon les
+  // .map/.some du jeu plantent au premier chargement. Les entrées vides sont
+  // écartées : une suppression laisse parfois un trou, et un joueur nul ferait
+  // planter l'affichage du classement.
   const nonVide = (x) => x !== null && x !== undefined;
 
   const versTableau = (v) => {
@@ -89,12 +85,12 @@
     return chaine;
   };
 
-  // Applique sur la valeur du serveur la modification faite localement,
+  // Applique sur la valeur de la base la modification faite localement,
   // plutôt que d'écraser avec notre copie. Deux appareils qui touchent le
   // même joueur en même temps voient ainsi leurs deux effets conservés.
-  const fusionner = (serveur, base, local) => {
-    if (!serveur) return local;
-    const resultat = { ...serveur };
+  const fusionner = (distant, base, local) => {
+    if (!distant) return local;
+    const resultat = { ...distant };
     Object.keys(local).forEach((cle) => {
       const avant = base ? base[cle] : undefined;
       const apres = local[cle];
@@ -103,32 +99,158 @@
       if (typeof apres === "number" && typeof avant === "number") {
         // Montants : on rejoue l'écart, pas la valeur. Un débit de 100 et un
         // crédit de 500 simultanés donnent bien +400, et non l'un des deux.
-        resultat[cle] = (Number(serveur[cle]) || 0) + (apres - avant);
+        resultat[cle] = (Number(distant[cle]) || 0) + (apres - avant);
       } else if (Array.isArray(apres)) {
         const avantListe = Array.isArray(avant) ? avant : [];
-        const serveurListe = versTableau(serveur[cle]);
+        const distantListe = versTableau(distant[cle]);
         const identite = (x) =>
           x && typeof x === "object" ? x.id : JSON.stringify(x);
         const idsAvant = new Set(avantListe.map(identite));
         const idsApres = new Set(apres.map(identite));
         const ajoutes = apres.filter((x) => !idsAvant.has(identite(x)));
-        const conserves = serveurListe.filter(
+        const conserves = distantListe.filter(
           (x) => !(idsAvant.has(identite(x)) && !idsApres.has(identite(x)))
         );
         // L'historique se lit du plus récent au plus ancien : les nouvelles
         // lignes passent devant.
-        resultat[cle] = cle === "historique"
-          ? ajoutes.concat(conserves)
-          : conserves.concat(
-              ajoutes.filter(
-                (x) => !conserves.some((y) => identite(y) === identite(x))
-              )
-            );
+        resultat[cle] =
+          cle === "historique"
+            ? ajoutes.concat(conserves)
+            : conserves.concat(
+                ajoutes.filter(
+                  (x) => !conserves.some((y) => identite(y) === identite(x))
+                )
+              );
       } else {
         resultat[cle] = apres;
       }
     });
     return resultat;
+  };
+
+  // -------------------------------------------------------------------
+  // Abonnements. La base pousse les changements, on les redistribue aux
+  // écrans intéressés. Chaque clé garde sa dernière valeur connue, pour
+  // pouvoir la servir immédiatement à un nouvel abonné.
+  // -------------------------------------------------------------------
+  const abonnes = {}; // cle -> [rappel]
+  const dernieres = {}; // cle -> valeur
+  let joueursParId = {}; // id -> { donnees, version }
+  let canal = null;
+
+  const prevenir = (cle) => {
+    (abonnes[cle] || []).forEach((r) => r(dernieres[cle]));
+  };
+
+  const listeJoueurs = () => Object.values(joueursParId).map((l) => l.donnees);
+
+  const rafraichirJoueurs = async () => {
+    const { data, error } = await client.from("joueurs").select("*");
+    if (error) return console.error("Lecture des joueurs :", error);
+    joueursParId = {};
+    (data || []).forEach((l) => {
+      joueursParId[l.id] = { donnees: l.donnees, version: l.version };
+    });
+    dernieres.joueurs = listeJoueurs();
+    prevenir("joueurs");
+  };
+
+  const rafraichirEtat = async (cle) => {
+    const { data, error } = await client
+      .from("etat")
+      .select("valeur")
+      .eq("cle", cle)
+      .maybeSingle();
+    if (error) return console.error("Lecture de " + cle + " :", error);
+    dernieres[cle] = data ? data.valeur : null;
+    prevenir(cle);
+  };
+
+  const ouvrirCanal = () => {
+    if (canal) return;
+    canal = client
+      .channel("partie")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "etat" },
+        (msg) => {
+          const ligne = msg.eventType === "DELETE" ? msg.old : msg.new;
+          if (!ligne || !ligne.cle) return;
+          dernieres[ligne.cle] =
+            msg.eventType === "DELETE" ? null : msg.new.valeur;
+          prevenir(ligne.cle);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "joueurs" },
+        (msg) => {
+          if (msg.eventType === "DELETE") {
+            if (msg.old && msg.old.id) delete joueursParId[msg.old.id];
+          } else {
+            joueursParId[msg.new.id] = {
+              donnees: msg.new.donnees,
+              version: msg.new.version
+            };
+          }
+          dernieres.joueurs = listeJoueurs();
+          prevenir("joueurs");
+        }
+      )
+      .subscribe((statut) => {
+        // À la connexion comme à chaque reconnexion, on relit tout : un
+        // appareil qui a perdu le réseau quelques minutes doit rattraper ce
+        // qui s'est passé pendant son absence.
+        if (statut === "SUBSCRIBED") {
+          rafraichirJoueurs();
+          Object.keys(abonnes)
+            .filter((c) => c !== "joueurs")
+            .forEach(rafraichirEtat);
+        }
+      });
+  };
+
+  // Écrit un joueur en rejouant notre modification sur la version courante.
+  // Si quelqu'un a écrit entre-temps, la mise à jour ne touche aucune ligne :
+  // on relit et on recommence.
+  const ecrireJoueur = async (id, base, valeur, essai = 0) => {
+    const connu = joueursParId[id];
+
+    if (!connu) {
+      const { error } = await client
+        .from("joueurs")
+        .insert({ id, donnees: valeur, version: 0 });
+      if (error && error.code === "23505" && essai < 5) {
+        // Créé par un autre appareil entre-temps : on repasse en modification.
+        await rafraichirJoueurs();
+        return ecrireJoueur(id, base, valeur, essai + 1);
+      }
+      if (error) throw error;
+      joueursParId[id] = { donnees: valeur, version: 0 };
+      return;
+    }
+
+    const fusionne = fusionner(connu.donnees, base, valeur);
+    const { data, error } = await client
+      .from("joueurs")
+      .update({
+        donnees: fusionne,
+        version: connu.version + 1,
+        modifie_le: new Date().toISOString()
+      })
+      .eq("id", id)
+      .eq("version", connu.version)
+      .select();
+
+    if (error) throw error;
+    if ((!data || data.length === 0) && essai < 5) {
+      // Version dépassée : quelqu'un a écrit avant nous, on rejoue dessus.
+      await rafraichirJoueurs();
+      return ecrireJoueur(id, base, valeur, essai + 1);
+    }
+    if (data && data[0]) {
+      joueursParId[id] = { donnees: data[0].donnees, version: data[0].version };
+    }
   };
 
   const Sync = {
@@ -139,15 +261,28 @@
 
     ecouter(cle, rappel) {
       if (!disponible) return () => {};
-      const noeud = racine.child(cle);
-      const handler = noeud.on("value", (snap) => rappel(snap.val()));
-      return () => noeud.off("value", handler);
+      abonnes[cle] = (abonnes[cle] || []).concat(rappel);
+      ouvrirCanal();
+      if (cle in dernieres) rappel(dernieres[cle]);
+      else if (cle === "joueurs") rafraichirJoueurs();
+      else rafraichirEtat(cle);
+      return () => {
+        abonnes[cle] = (abonnes[cle] || []).filter((r) => r !== rappel);
+      };
     },
 
     ecrire(cle, valeur) {
       if (!disponible) return;
       if (cle === "joueurs") return Sync.ecrireJoueurs([], valeur);
-      enfiler(() => racine.child(cle).set(valeur));
+      enfiler(async () => {
+        const { error } = await client
+          .from("etat")
+          .upsert(
+            { cle, valeur, modifie_le: new Date().toISOString() },
+            { onConflict: "cle" }
+          );
+        if (error) throw error;
+      });
     },
 
     // N'écrit que les joueurs réellement modifiés, un par un. Sans ça, le
@@ -164,25 +299,21 @@
         const valeur = { ...j, ordre: i };
         const base = baseParId[j.id];
         if (base && JSON.stringify(base) === JSON.stringify(valeur)) return;
-        enfiler(
-          () =>
-            new Promise((resolve, reject) =>
-              racine
-                .child("joueurs/" + j.id)
-                .transaction(
-                  (serveur) => fusionner(serveur, base, valeur),
-                  (e) => (e ? reject(e) : resolve())
-                )
-            )
-        );
+        enfiler(() => ecrireJoueur(j.id, base, valeur));
       });
 
-      // Un joueur retiré de la liste doit aussi disparaître de la base :
-      // une mise à jour n'efface rien, il faut demander sa suppression.
+      // Un joueur retiré de la liste doit aussi disparaître de la base.
       const idsApres = new Set(apres.map((j) => j.id));
       avant.forEach((j) => {
         if (!idsApres.has(j.id)) {
-          enfiler(() => racine.child("joueurs/" + j.id).set(null));
+          enfiler(async () => {
+            const { error } = await client
+              .from("joueurs")
+              .delete()
+              .eq("id", j.id);
+            if (error) throw error;
+            delete joueursParId[j.id];
+          });
         }
       });
     },
@@ -191,13 +322,11 @@
     // sur le téléphone du lanceur : on la diffuse comme un événement.
     diffuser(evenement) {
       if (!disponible) return;
-      enfiler(() =>
-        racine.child("evenement").set({ ...evenement, ts: Date.now() })
-      );
+      Sync.ecrire("evenement", { ...evenement, ts: Date.now() });
     },
 
-    // Exposée pour pouvoir vérifier la politique de fusion indépendamment
-    // du réseau : c'est elle qui décide du sort de deux modifications
+    // Exposée pour pouvoir vérifier la politique de fusion indépendamment du
+    // réseau : c'est elle qui décide du sort de deux modifications
     // concurrentes sur un même joueur.
     fusionner,
 
@@ -223,7 +352,11 @@
     React.useEffect(() => {
       if (!Sync.actif) return;
       return Sync.ecouter(cle, (brut) => {
-        if (brut === null || brut === undefined) {
+        const vide =
+          brut === null ||
+          brut === undefined ||
+          (Array.isArray(brut) && brut.length === 0);
+        if (vide) {
           // Base vide : le premier appareil connecté y dépose l'état initial.
           if (!dejaSeme.current) {
             dejaSeme.current = true;

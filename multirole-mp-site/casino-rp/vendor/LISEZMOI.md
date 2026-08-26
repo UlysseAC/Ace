@@ -13,8 +13,7 @@ version voulue.
 | `react.js`            | React (production)    | 18.3.1   | `react/umd/react.production.min.js`   |
 | `react-dom.js`        | ReactDOM (production) | 18.3.1   | `react-dom/umd/react-dom.production.min.js` |
 | `babel.js`            | Babel Standalone      | 7.x      | `@babel/standalone/babel.min.js`     |
-| `firebase-app.js`     | Firebase App (compat) | 10.12.2  | `firebase/firebase-app-compat.js`    |
-| `firebase-database.js`| Firebase Realtime DB  | 10.12.2  | `firebase/firebase-database-compat.js` |
+| `supabase.js`         | Supabase JS           | 2.112.4  | `@supabase/supabase-js/dist/umd/supabase.js` |
 | `xlsx.js`             | SheetJS               | 0.18.5   | `xlsx/dist/xlsx.full.min.js`         |
 
 ## À propos de Babel
