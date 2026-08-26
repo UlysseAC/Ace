@@ -405,6 +405,15 @@
           XLSX.writeFile(classeur, `casino-rp-suivi-${horodatage}.xlsx`);
         };
 
+        // Ferme la session du joueur et efface toute trace de sa saisie :
+        // la borne suivante ne doit rien conserver de lui.
+        const fermerSessionJoueur = React.useCallback(() => {
+          setJoueurConnecteId(null);
+          setSousMenuBanque("accueil");
+          setIdSaisi("");
+          setCodeSaisi("");
+        }, []);
+
         // ================= DÉCONNEXION AUTOMATIQUE =================
         // Les 3 bornes sont partagées par tous les joueurs : un joueur qui
         // s'éloigne sans se déconnecter laisserait son compte ouvert au
@@ -419,10 +428,7 @@
           let minuteur;
           const relancer = () => {
             clearTimeout(minuteur);
-            minuteur = setTimeout(() => {
-              setJoueurConnecteId(null);
-              setSousMenuBanque("accueil");
-            }, delai);
+            minuteur = setTimeout(fermerSessionJoueur, delai);
           };
 
           const evenements = ["pointerdown", "keydown", "wheel", "touchstart"];
@@ -435,7 +441,7 @@
             clearTimeout(minuteur);
             evenements.forEach((e) => window.removeEventListener(e, relancer));
           };
-        }, [joueurConnecteId, configGlobale.dureeInactiviteSec]);
+        }, [joueurConnecteId, configGlobale.dureeInactiviteSec, fermerSessionJoueur]);
 
         // ================= SAUVEGARDE & RESTAURATION =================
         // Filet de sécurité indépendant de Firebase : la partie entière peut
@@ -2597,7 +2603,8 @@
                           if (saisieCodeAdmin === configGlobale.codeAdmin) {
                             setInterfaceActive("menu");
                             setModalAdminOuvert(false);
-                            setJoueurConnecteId(null);
+                            fermerSessionJoueur();
+                            setSaisieCodeAdmin("");
                           } else alert("Code Faux !");
                         }}
                         style={{
@@ -2611,7 +2618,10 @@
                         Valider
                       </button>
                       <button
-                        onClick={() => setModalAdminOuvert(false)}
+                        onClick={() => {
+                          setModalAdminOuvert(false);
+                          setSaisieCodeAdmin("");
+                        }}
                         style={{
                           flex: 1,
                           padding: "10px",
@@ -2702,7 +2712,13 @@
                         if (j) {
                           setJoueurConnecteId(j.id);
                           setSousMenuBanque("accueil");
+                          // Les identifiants sont effacés dès l'entrée : la
+                          // borne est partagée, ils n'ont pas à survivre à la
+                          // connexion.
+                          setIdSaisi("");
+                          setCodeSaisi("");
                         } else {
+                          // En cas d'erreur on laisse la saisie, pour corriger.
                           alert("Erreur identifiants.");
                         }
                       }}
@@ -2746,7 +2762,7 @@
                     </div>
                     <div style={{ display: "flex", gap: "5px" }}>
                       <button
-                        onClick={() => setJoueurConnecteId(null)}
+                        onClick={fermerSessionJoueur}
                         style={{
                           background: "#FF9800",
                           color: "#fff",
