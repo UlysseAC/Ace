@@ -44,6 +44,7 @@
           dureeInactiviteSec: 120,
           raccourcisTactiles: [100, 500, 1000, 5000],
           modeLocal: false,
+          scannerActif: true,
           bonusVeinardGain: 5,
           bonusVeinardPertes: 50,
           phraseParadisFiscal: "Nombre d'habitants d'un paradis fiscal :",
@@ -652,6 +653,10 @@
         // ================= LOGIQUE SCANNER QR & DEFAUSSE =================
         const scannerQrCodeSimule = (type, objetDonnee) => {
           if (!joueurActuel) return;
+          if (!configGlobale.scannerActif) {
+            alert("Scanner QR désactivé. Activez-le dans l'Admin pour continuer.");
+            return;
+          }
           if (configGlobale.modeLocal && type === "carte") {
             alert(
               "Mode Local activé : Le scan des cartes physiques est temporairement bloqué !"
@@ -1501,6 +1506,22 @@
                         style={{ width: "20px", height: "20px" }}
                       />
                       MODE LOCAL (Bloque le scan des cartes physiques / Secours)
+                    </label>
+                  </div>
+                  <div style={{ marginTop: "15px" }}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={configGlobale.scannerActif}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            scannerActif: e.target.checked
+                          })
+                        }
+                        style={{ width: "20px", height: "20px" }}
+                      />
+                      📷 SCANNER QR ACTIF
                     </label>
                   </div>
                   <div style={{ marginTop: "15px" }}>
