@@ -43,7 +43,10 @@
           phraseLimiteCroupier: "Solde supérieur à la limite autorisée.",
           phraseSolidarite: "Dé Solidaire : choisissez un joueur pour aider",
           afficherIds: false,
-          afficherNoms: true
+          afficherNoms: true,
+          modeDonSolidarite: "tous",
+          nbJoueursPauvres: 3,
+          pourcentagePauvres: 25
         });
 
         // --- TABLE 2 : MISSIONS, PRODUITS & PÉNALITÉS ---
@@ -1034,10 +1037,28 @@
             valeurReelleAttaquant = -valL;
             valeurReelleCible = -valC;
 
-            const minSolde = Math.min(...joueursActifs.map((j) => j.solde));
-            const pauvres = joueursActifs.filter((j) => j.solde === minSolde);
-            const part = Math.round(cagnotte / pauvres.length);
-            donsDistribues = pauvres.map((p) => ({ id: p.id, montant: part }));
+            // Déterminer qui reçoit selon la config
+            let beneficiaires = [];
+            const mode = configGlobale.modeDonSolidarite || "minimum";
+
+            if (mode === "minimum") {
+              const minSolde = Math.min(...joueursActifs.map((j) => j.solde));
+              beneficiaires = joueursActifs.filter((j) => j.solde === minSolde);
+            } else if (mode === "tous") {
+              beneficiaires = joueursActifs;
+            } else if (mode === "n_pauvres") {
+              beneficiaires = joueursActifs
+                .sort((a, b) => a.solde - b.solde)
+                .slice(0, Math.max(1, configGlobale.nbJoueursPauvres));
+            } else if (mode === "pourcentage") {
+              const nb = Math.max(1, Math.ceil(joueursActifs.length * (configGlobale.pourcentagePauvres / 100)));
+              beneficiaires = joueursActifs
+                .sort((a, b) => a.solde - b.solde)
+                .slice(0, nb);
+            }
+
+            const part = Math.round(cagnotte / beneficiaires.length);
+            donsDistribues = beneficiaires.map((p) => ({ id: p.id, montant: part }));
             texteResultat = `Solidarité ! ${cagnotte}$ saisis et redistribués aux plus démunis.`;
           }
 
@@ -1589,6 +1610,67 @@
                       />
                       Afficher les noms
                     </label>
+                  </div>
+
+                  <div style={{ marginTop: "15px", padding: "10px", background: "#333", borderRadius: "6px" }}>
+                    <h4 style={{ color: "#2196F3", margin: "0 0 10px 0" }}>Redistribution Don (Solidarité)</h4>
+                    <label style={{ display: "block", marginBottom: "10px" }}>
+                      Type de redistribution :
+                      <select
+                        value={configGlobale.modeDonSolidarite}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            modeDonSolidarite: e.target.value
+                          })
+                        }
+                        style={{
+                          width: "100%",
+                          padding: "5px",
+                          background: "#222",
+                          color: "#fff",
+                          border: "1px solid #444",
+                          marginTop: "5px"
+                        }}
+                      >
+                        <option value="minimum">Minimum exact seulement</option>
+                        <option value="tous">À tous les joueurs</option>
+                        <option value="n_pauvres">N joueurs les plus pauvres</option>
+                        <option value="pourcentage">Pourcentage des plus pauvres</option>
+                      </select>
+                    </label>
+                    {configGlobale.modeDonSolidarite === "n_pauvres" && (
+                      <label style={{ display: "block" }}>
+                        Nombre de joueurs à aider :
+                        <input
+                          type="number"
+                          value={configGlobale.nbJoueursPauvres}
+                          onChange={(e) =>
+                            setConfigGlobale({
+                              ...configGlobale,
+                              nbJoueursPauvres: Number(e.target.value)
+                            })
+                          }
+                          style={{ width: "100%", padding: "5px", marginTop: "5px" }}
+                        />
+                      </label>
+                    )}
+                    {configGlobale.modeDonSolidarite === "pourcentage" && (
+                      <label style={{ display: "block" }}>
+                        Pourcentage des joueurs :
+                        <input
+                          type="number"
+                          value={configGlobale.pourcentagePauvres}
+                          onChange={(e) =>
+                            setConfigGlobale({
+                              ...configGlobale,
+                              pourcentagePauvres: Number(e.target.value)
+                            })
+                          }
+                          style={{ width: "100%", padding: "5px", marginTop: "5px" }}
+                        />
+                      </label>
+                    )}
                   </div>
                 </div>
 
