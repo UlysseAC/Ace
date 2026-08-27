@@ -12,6 +12,7 @@
     <script src="vendor/babel.js"></script>
     <script src="vendor/supabase.js"></script>
     <script src="vendor/xlsx.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
     <script src="supabase-config.js"></script>
     <script src="sync.js"></script>
     <link rel="stylesheet" href="style.css" />
@@ -23,6 +24,9 @@
       function App() {
         const [interfaceActive, setInterfaceActive] = React.useState("menu");
         const [supabaseConnected, setSupabaseConnected] = React.useState(false);
+        const [cameraActive, setCameraActive] = React.useState(false);
+        const videoRef = React.useRef(null);
+        const canvasRef = React.useRef(null);
 
         // Vérifier la connexion Supabase
         React.useEffect(() => {
@@ -712,6 +716,81 @@
               : `Carte "${objetDonnee.nom}" ajoutée dans votre deck !`
           );
           setSousMenuBanque("scanner_choix");
+        };
+
+        // ================= SCANNER CAMÉRA QR =================
+        const ouvrirScannerCamera = React.useCallback(async () => {
+          if (!configGlobale.scannerActif) {
+            alert("Scanner QR désactivé dans l'Admin.");
+            return;
+          }
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: "environment" }
+            });
+            setCameraActive(true);
+            if (videoRef.current) {
+              videoRef.current.srcObject = stream;
+              videoRef.current.play();
+              scannerQREnBoucle(stream);
+            }
+          } catch (err) {
+            alert("Impossible d'accéder à la caméra. " + err.message);
+          }
+        }, [configGlobale.scannerActif]);
+
+        const fermerScannerCamera = React.useCallback(() => {
+          setCameraActive(false);
+          if (videoRef.current && videoRef.current.srcObject) {
+            videoRef.current.srcObject.getTracks().forEach((t) => t.stop());
+          }
+        }, []);
+
+        const scannerQREnBoucle = (stream) => {
+          const video = videoRef.current;
+          const canvas = canvasRef.current;
+          if (!canvas || !video) return;
+          const ctx = canvas.getContext("2d");
+          let detectionEnCours = false;
+
+          const detectQR = () => {
+            if (!cameraActive) return;
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const code = jsQR(imageData.data, canvas.width, canvas.height);
+
+            if (code && !detectionEnCours) {
+              detectionEnCours = true;
+              const data = code.data;
+              if (data.startsWith("QR_")) {
+                traiterQRDetecte(data);
+              }
+              setTimeout(() => {
+                detectionEnCours = false;
+              }, 1000);
+            }
+            requestAnimationFrame(detectQR);
+          };
+          detectQR();
+        };
+
+        const traiterQRDetecte = (qrData) => {
+          if (qrData.includes("_MISSION_")) {
+            const missionId = parseInt(qrData.split("_")[2]);
+            const mission = missions.find((m) => m.id === missionId);
+            if (mission) {
+              scannerQrCodeSimule("mission", mission);
+            }
+          } else if (qrData.includes("_CARTE_")) {
+            const carteId = qrData.split("_")[2];
+            const carte = cartesJeu.find((c) => c.id === carteId);
+            if (carte) {
+              scannerQrCodeSimule("carte", carte);
+            }
+          }
+          fermerScannerCamera();
         };
 
         const defausserCarte = (carteId) => {
@@ -3523,45 +3602,97 @@
                         textAlign: "center"
                       }}
                     >
-                      <h3>📷 Scanner Simulator</h3>
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: "8px"
-                        }}
-                      >
-                        {missions.map((m) => (
+                      {configGlobale.scannerActif && !cameraActive ? (
+                        <>
+                          <h3>📷 Scanner QR - Caméra</h3>
+                          <p>Cliquez pour ouvrir la caméra et scanner un code QR</p>
                           <button
-                            key={m.id}
-                            onClick={() => scannerQrCodeSimule("mission", m)}
+                            onClick={ouvrirScannerCamera}
                             style={{
-                              padding: "12px",
-                              background: "#4CAF50",
+                              padding: "15px",
+                              background: "#2196F3",
                               color: "#fff",
                               border: "none",
-                              borderRadius: "6px"
+                              borderRadius: "6px",
+                              width: "100%",
+                              fontWeight: "bold",
+                              cursor: "pointer",
+                              marginBottom: "10px"
                             }}
                           >
-                            🎁 {m.nom} (+{m.montant}$)
+                            📸 OUVRIR CAMÉRA
                           </button>
-                        ))}
-                        {cartesJeu.map((c) => (
+                        </>
+                      ) : cameraActive ? (
+                        <>
+                          <h3>📷 Scanner actif...</h3>
+                          <video
+                            ref={videoRef}
+                            style={{
+                              width: "100%",
+                              borderRadius: "8px",
+                              marginBottom: "10px"
+                            }}
+                          />
+                          <canvas ref={canvasRef} style={{ display: "none" }} />
                           <button
-                            key={c.id}
-                            onClick={() => scannerQrCodeSimule("carte", c)}
+                            onClick={fermerScannerCamera}
                             style={{
                               padding: "12px",
-                              background: "#9C27B0",
+                              background: "#f44336",
                               color: "#fff",
                               border: "none",
-                              borderRadius: "6px"
+                              borderRadius: "6px",
+                              width: "100%",
+                              cursor: "pointer"
                             }}
                           >
-                            🃏 {c.nom}
+                            ✕ FERMER
                           </button>
-                        ))}
-                      </div>
+                        </>
+                      ) : (
+                        <>
+                          <h3>📷 Scanner Mode Manuel</h3>
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "8px"
+                            }}
+                          >
+                            {missions.map((m) => (
+                              <button
+                                key={m.id}
+                                onClick={() => scannerQrCodeSimule("mission", m)}
+                                style={{
+                                  padding: "12px",
+                                  background: "#4CAF50",
+                                  color: "#fff",
+                                  border: "none",
+                                  borderRadius: "6px"
+                                }}
+                              >
+                                🎁 {m.nom} (+{m.montant}$)
+                              </button>
+                            ))}
+                            {cartesJeu.map((c) => (
+                              <button
+                                key={c.id}
+                                onClick={() => scannerQrCodeSimule("carte", c)}
+                                style={{
+                                  padding: "12px",
+                                  background: "#9C27B0",
+                                  color: "#fff",
+                                  border: "none",
+                                  borderRadius: "6px"
+                                }}
+                              >
+                                🃏 {c.nom}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
                       <button
                         onClick={() => setSousMenuBanque("accueil")}
                         className="checkbox-btn"
