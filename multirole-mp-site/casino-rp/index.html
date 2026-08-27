@@ -1037,29 +1037,94 @@
             valeurReelleAttaquant = -valL;
             valeurReelleCible = -valC;
 
-            // Déterminer qui reçoit selon la config
-            let beneficiaires = [];
-            const mode = configGlobale.modeDonSolidarite || "minimum";
+            // Rapprocher les 3 plus pauvres au maximum possible
+            const pauvres = joueursActifs
+              .sort((a, b) => a.solde - b.solde)
+              .slice(0, 3);
 
-            if (mode === "minimum") {
-              const minSolde = Math.min(...joueursActifs.map((j) => j.solde));
-              beneficiaires = joueursActifs.filter((j) => j.solde === minSolde);
-            } else if (mode === "tous") {
-              beneficiaires = joueursActifs;
-            } else if (mode === "n_pauvres") {
-              beneficiaires = joueursActifs
-                .sort((a, b) => a.solde - b.solde)
-                .slice(0, Math.max(1, configGlobale.nbJoueursPauvres));
-            } else if (mode === "pourcentage") {
-              const nb = Math.max(1, Math.ceil(joueursActifs.length * (configGlobale.pourcentagePauvres / 100)));
-              beneficiaires = joueursActifs
-                .sort((a, b) => a.solde - b.solde)
-                .slice(0, nb);
+            if (pauvres.length === 0) {
+              donsDistribues = [];
+            } else if (pauvres.length === 1) {
+              // Seul 1 joueur pauvre : il prend tout
+              donsDistribues = [{ id: pauvres[0].id, montant: cagnotte }];
+            } else if (pauvres.length === 2) {
+              // 2 joueurs : les égaliser
+              const [p1, p2] = pauvres;
+              const ecart = p2.solde - p1.solde;
+              const seuilAcceptable = 10;
+
+              if (cagnotte < ecart - seuilAcceptable) {
+                // Pas assez pour rattraper : p1 prend tout
+                donsDistribues = [{ id: p1.id, montant: cagnotte }];
+              } else {
+                // Égaliser les 2
+                const p1Recu = Math.min(cagnotte, ecart);
+                const p2Recu = cagnotte - p1Recu;
+                donsDistribues = [
+                  { id: p1.id, montant: p1Recu },
+                  { id: p2.id, montant: p2Recu }
+                ];
+              }
+            } else {
+              // 3 joueurs : logique de catch-up progressive
+              const [p1, p2, p3] = pauvres;
+              const seuilAcceptable = 10;
+              let reste = cagnotte;
+
+              // Étape 1 : Amener p1 au niveau de p2
+              const ecart12 = Math.max(0, p2.solde - p1.solde);
+              let p1Recu = 0;
+              let p2Recu = 0;
+              let p3Recu = 0;
+
+              if (reste < ecart12 - seuilAcceptable) {
+                // Pas assez : p1 prend tout et c'est fini
+                p1Recu = reste;
+                reste = 0;
+              } else {
+                // p1 rattrape p2
+                p1Recu = ecart12;
+                reste -= ecart12;
+
+                // Étape 2 : Amener p1 et p2 au niveau de p3
+                const ecart23 = Math.max(0, p3.solde - p2.solde);
+                const besoin23 = ecart23 * 2; // Les 2 joueurs à rattraper
+
+                if (reste < besoin23 - seuilAcceptable) {
+                  // Pas assez pour égaliser les 3 : partager entre p1 et p2
+                  const partPar2 = Math.floor(reste / 2);
+                  p1Recu += partPar2;
+                  p2Recu += partPar2;
+                  if (reste % 2 === 1) p1Recu += 1;
+                  reste = 0;
+                } else {
+                  // Égaliser les 3
+                  p1Recu += Math.ceil(ecart23);
+                  p2Recu += Math.floor(ecart23);
+                  reste -= besoin23;
+
+                  // Étape 3 : Partager le reste entre les 3
+                  const partPar3 = Math.floor(reste / 3);
+                  p1Recu += partPar3;
+                  p2Recu += partPar3;
+                  p3Recu += partPar3;
+                  const resteFinal = reste % 3;
+                  for (let i = 0; i < resteFinal; i++) {
+                    if (i === 0) p1Recu += 1;
+                    else if (i === 1) p2Recu += 1;
+                    else p3Recu += 1;
+                  }
+                }
+              }
+
+              donsDistribues = [
+                { id: p1.id, montant: p1Recu },
+                { id: p2.id, montant: p2Recu },
+                { id: p3.id, montant: p3Recu }
+              ].filter((d) => d.montant > 0);
             }
 
-            const part = Math.round(cagnotte / beneficiaires.length);
-            donsDistribues = beneficiaires.map((p) => ({ id: p.id, montant: part }));
-            texteResultat = `Solidarité ! ${cagnotte}$ saisis et redistribués aux plus démunis.`;
+            texteResultat = `Solidarité ! ${cagnotte}$ saisis et redistribués pour rapprocher les plus démunis.`;
           }
 
           const phraseInitiale = configGlobale.phraseAttaqueCible
