@@ -129,6 +129,7 @@
             solde: 5000,
             totalMissions: 2000,
             totalJeux: 3000,
+            totalCartes: 0,
             nbPenalites: 0,
             totalPenalites: 0,
             jetonsEnJeu: 0,
@@ -152,6 +153,7 @@
             solde: 5400,
             totalMissions: 1000,
             totalJeux: 4400,
+            totalCartes: 0,
             nbPenalites: 0,
             totalPenalites: 0,
             jetonsEnJeu: 0,
@@ -326,6 +328,7 @@
           );
           ligne("Jeu", "", joueursExport.map((j) => j.totalJeux));
           ligne("Missions", "", joueursExport.map((j) => j.totalMissions));
+          ligne("Cartes obtenues", "", joueursExport.map((j) => j.totalCartes || 0));
           ligne("Achats boutique", "", joueursExport.map((j) => j.achatsBoutique));
           ligne("", "", []);
 
@@ -663,6 +666,7 @@
               if (j.id === joueurActuel.id) {
                 let soldeNv = j.solde;
                 let missionsNv = j.totalMissions;
+                let cartesNv = j.totalCartes || 0;
                 let deckNv = [...j.deck];
                 let histNv = [...j.historique];
                 let qrsNv = [...j.qrCodesUtilises, hashSimule];
@@ -677,6 +681,7 @@
                   listMissionsFaites.push(objetDonnee.id);
                 } else if (type === "carte") {
                   deckNv.push(objetDonnee);
+                  cartesNv += 1;
                   histNv.unshift(`Carte récupérée : ${objetDonnee.nom}`);
                 }
 
@@ -684,6 +689,7 @@
                   ...j,
                   solde: soldeNv,
                   totalMissions: missionsNv,
+                  totalCartes: cartesNv,
                   deck: deckNv,
                   historique: histNv,
                   qrCodesUtilises: qrsNv,
@@ -2703,6 +2709,7 @@
                     "Argent missions",
                     "Argent jeux",
                     "Nb missions",
+                    "Cartes",
                     "Pénalités",
                     "Achats",
                     "Argent volé",
@@ -2719,6 +2726,7 @@
                     `${j.totalMissions} $`,
                     `${j.totalJeux} $`,
                     (j.missionsFaites || []).length,
+                    j.totalCartes || 0,
                     `${j.totalPenalites || 0} $ (${j.nbPenalites})`,
                     `${j.achatsBoutique} $`,
                     `${j.argentVole || 0} $`,
