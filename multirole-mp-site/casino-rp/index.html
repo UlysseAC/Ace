@@ -3774,10 +3774,23 @@
                         textAlign: "center"
                       }}
                     >
-                      <h3>📷 Scanner de Code</h3>
-                      <div style={{ marginBottom: "15px" }}>
-                        <label style={{ display: "block", marginBottom: "8px" }}>
-                          Rentrer le code du chèque :
+                      <h3>📋 Validation de Codes</h3>
+
+                      {/* OPTION 1 : TAPER LE CODE */}
+                      <div
+                        style={{
+                          background: "#1a1a1a",
+                          padding: "15px",
+                          borderRadius: "8px",
+                          marginBottom: "20px",
+                          border: "2px solid #FFD700"
+                        }}
+                      >
+                        <h4 style={{ marginTop: 0, color: "#FFD700" }}>
+                          ✍️ Option 1 : Taper le Code
+                        </h4>
+                        <label style={{ display: "block", marginBottom: "10px" }}>
+                          Code du chèque (6 chiffres) :
                         </label>
                         <div style={{ display: "flex", gap: "8px" }}>
                           <input
@@ -3789,7 +3802,7 @@
                             onKeyPress={(e) => {
                               if (e.key === "Enter") validerCode(codeManuel);
                             }}
-                            placeholder="Ex: QR_ABC1234AB"
+                            placeholder="Ex: 260167"
                             style={{
                               flex: 1,
                               padding: "10px",
@@ -3815,60 +3828,20 @@
                         </div>
                       </div>
 
-                      {configGlobale.modeScanneur !== "disabled" && !cameraActive ? (
-                        <>
-                          {configGlobale.modeScanneur === "real" && (
-                            <>
-                              <h4>OU Scanner avec la caméra :</h4>
-                              <button
-                                onClick={ouvrirScannerCamera}
-                                style={{
-                                  padding: "15px",
-                                  background: "#2196F3",
-                                  color: "#fff",
-                                  border: "none",
-                                  borderRadius: "6px",
-                                  width: "100%",
-                                  fontWeight: "bold",
-                                  cursor: "pointer",
-                                  marginBottom: "10px"
-                                }}
-                              >
-                                📸 OUVRIR CAMÉRA
-                              </button>
-                            </>
-                          )}
-                        </>
-                      ) : cameraActive ? (
-                        <>
-                          <h3>📷 Scanner actif...</h3>
-                          <video
-                            ref={videoRef}
-                            style={{
-                              width: "100%",
-                              borderRadius: "8px",
-                              marginBottom: "10px"
-                            }}
-                          />
-                          <canvas ref={canvasRef} style={{ display: "none" }} />
-                          <button
-                            onClick={fermerScannerCamera}
-                            style={{
-                              padding: "12px",
-                              background: "#f44336",
-                              color: "#fff",
-                              border: "none",
-                              borderRadius: "6px",
-                              width: "100%",
-                              cursor: "pointer"
-                            }}
-                          >
-                            ✕ FERMER
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <h3>📷 Scanner Mode Manuel</h3>
+                      {/* OPTION 2 : SIMULATEUR (si activé) */}
+                      {configGlobale.modeScanneur === "simulator" && (
+                        <div
+                          style={{
+                            background: "#1a1a1a",
+                            padding: "15px",
+                            borderRadius: "8px",
+                            marginBottom: "20px",
+                            border: "2px solid #4CAF50"
+                          }}
+                        >
+                          <h4 style={{ marginTop: 0, color: "#4CAF50" }}>
+                            🎮 Option 2 : Simuler un Scanning
+                          </h4>
                           <div
                             style={{
                               display: "flex",
@@ -3907,14 +3880,87 @@
                               </button>
                             ))}
                           </div>
-                        </>
+                        </div>
                       )}
+
+                      {/* OPTION 3 : SCANNER RÉEL (si activé) */}
+                      {configGlobale.modeScanneur === "real" && !cameraActive && (
+                        <div
+                          style={{
+                            background: "#1a1a1a",
+                            padding: "15px",
+                            borderRadius: "8px",
+                            marginBottom: "20px",
+                            border: "2px solid #2196F3"
+                          }}
+                        >
+                          <h4 style={{ marginTop: 0, color: "#2196F3" }}>
+                            📷 Option 3 : Scanner Caméra
+                          </h4>
+                          <button
+                            onClick={ouvrirScannerCamera}
+                            style={{
+                              padding: "15px",
+                              background: "#2196F3",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: "6px",
+                              width: "100%",
+                              fontWeight: "bold",
+                              cursor: "pointer"
+                            }}
+                          >
+                            📸 OUVRIR CAMÉRA
+                          </button>
+                        </div>
+                      )}
+
+                      {/* VIDÉO SCANNER (si caméra active) */}
+                      {cameraActive && (
+                        <div
+                          style={{
+                            background: "#1a1a1a",
+                            padding: "15px",
+                            borderRadius: "8px",
+                            marginBottom: "20px",
+                            border: "2px solid #FF6B00"
+                          }}
+                        >
+                          <h3 style={{ marginTop: 0, color: "#FF6B00" }}>
+                            📷 Scanner Actif...
+                          </h3>
+                          <video
+                            ref={videoRef}
+                            style={{
+                              width: "100%",
+                              borderRadius: "8px",
+                              marginBottom: "10px"
+                            }}
+                          />
+                          <canvas ref={canvasRef} style={{ display: "none" }} />
+                          <button
+                            onClick={fermerScannerCamera}
+                            style={{
+                              padding: "12px",
+                              background: "#f44336",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: "6px",
+                              width: "100%",
+                              cursor: "pointer"
+                            }}
+                          >
+                            ✕ FERMER CAMÉRA
+                          </button>
+                        </div>
+                      )}
+
                       <button
                         onClick={() => setSousMenuBanque("accueil")}
                         className="checkbox-btn"
                         style={{ marginTop: "15px" }}
                       >
-                        Retour
+                        🏠 Retour au Menu
                       </button>
                     </div>
                   )}
