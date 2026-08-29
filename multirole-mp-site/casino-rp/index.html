@@ -41,54 +41,43 @@
 
         // Générer les codes QR pour l'impression
         React.useEffect(() => {
+          if (typeof QRCode === "undefined" || chequesImprimerie.length === 0) {
+            return;
+          }
+
           const genererQR = () => {
-            if (typeof QRCode === "undefined") {
-              console.error("QRCode library not loaded");
-              return;
-            }
             for (let i = 0; i < chequesImprimerie.length; i++) {
               const ch = chequesImprimerie[i];
               const element = document.getElementById(`qr-${i}`);
-              if (element) {
-                try {
-                  element.innerHTML = "";
-                  const canvas = document.createElement("canvas");
-                  QRCode.toCanvas(canvas, ch.code, {
-                    width: 130,
-                    margin: 1,
-                    color: {
-                      dark: "#000000",
-                      light: "#ffffff"
-                    }
-                  }, function(error) {
-                    if (error) {
-                      console.error("Erreur génération QR:", error);
-                      element.style.background = "#f0f0f0";
-                      element.textContent = "QR";
-                      element.style.fontSize = "10px";
-                      element.style.display = "flex";
-                      element.style.alignItems = "center";
-                      element.style.justifyContent = "center";
-                    } else {
+              if (!element) continue;
+
+              try {
+                element.innerHTML = "";
+                QRCode.toCanvas(element, ch.code, {
+                  width: 130,
+                  margin: 1,
+                  color: { dark: "#000000", light: "#ffffff" }
+                }, (error) => {
+                  if (error) {
+                    console.error("QR Error:", error);
+                    element.innerHTML = '<div style="width:100%;height:100%;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-size:10px;">QR</div>';
+                  } else {
+                    const canvas = element.querySelector("canvas");
+                    if (canvas) {
                       canvas.style.width = "100%";
                       canvas.style.height = "100%";
-                      element.innerHTML = "";
-                      element.appendChild(canvas);
+                      canvas.style.display = "block";
                     }
-                  });
-                } catch (err) {
-                  console.error("Erreur génération QR:", err);
-                  element.style.background = "#f0f0f0";
-                  element.textContent = "QR";
-                  element.style.fontSize = "10px";
-                  element.style.display = "flex";
-                  element.style.alignItems = "center";
-                  element.style.justifyContent = "center";
-                }
+                  }
+                });
+              } catch (err) {
+                console.error("QR Exception:", err);
+                element.innerHTML = '<div style="width:100%;height:100%;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-size:10px;">QR</div>';
               }
             }
           };
-          setTimeout(genererQR, 200);
+
+          setTimeout(genererQR, 300);
         }, [chequesImprimerie]);
 
         // --- TABLE 4 : CONFIGURATION GLOBALE ---
