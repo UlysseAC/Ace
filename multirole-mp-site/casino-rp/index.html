@@ -91,7 +91,7 @@
           dureeInactiviteSec: 120,
           raccourcisTactiles: [100, 500, 1000, 5000],
           modeLocal: false,
-          scannerActif: true,
+          modeScanneur: "simulator",
           bonusVeinardGain: 5,
           bonusVeinardPertes: 50,
           phraseParadisFiscal: "Nombre d'habitants d'un paradis fiscal :",
@@ -721,7 +721,7 @@
         // ================= LOGIQUE SCANNER QR & DEFAUSSE =================
         const scannerQrCodeSimule = (type, objetDonnee) => {
           if (!joueurActuel) return;
-          if (!configGlobale.scannerActif) {
+          if (configGlobale.modeScanneur === "disabled") {
             alert("Scanner QR désactivé. Activez-le dans l'Admin pour continuer.");
             return;
           }
@@ -790,9 +790,9 @@
             return;
           }
 
-          // Chercher le code dans le registre
+          // Chercher le code dans le registre (par code numérique ou hash)
           const codeValide = qrCodesRegistre.find(
-            (q) => q.hash.substring(0, 12) === code.trim().toUpperCase()
+            (q) => q.code === code.trim() || q.hash.substring(0, 12) === code.trim().toUpperCase()
           );
 
           if (!codeValide) {
@@ -821,8 +821,8 @@
 
         // ================= SCANNER CAMÉRA QR =================
         const ouvrirScannerCamera = React.useCallback(async () => {
-          if (!configGlobale.scannerActif) {
-            alert("Scanner QR désactivé dans l'Admin.");
+          if (configGlobale.modeScanneur !== "real") {
+            alert("Mode Scanner Réel non activé. Configurez-le dans l'Admin.");
             return;
           }
           try {
@@ -838,7 +838,7 @@
           } catch (err) {
             alert("Impossible d'accéder à la caméra. " + err.message);
           }
-        }, [configGlobale.scannerActif]);
+        }, [configGlobale.modeScanneur]);
 
         const fermerScannerCamera = React.useCallback(() => {
           setCameraActive(false);
@@ -1678,18 +1678,21 @@
                   </div>
                   <div style={{ marginTop: "15px" }}>
                     <label>
-                      <input
-                        type="checkbox"
-                        checked={configGlobale.scannerActif}
+                      Mode Scanneur :{" "}
+                      <select
+                        value={configGlobale.modeScanneur}
                         onChange={(e) =>
                           setConfigGlobale({
                             ...configGlobale,
-                            scannerActif: e.target.checked
+                            modeScanneur: e.target.value
                           })
                         }
-                        style={{ width: "20px", height: "20px" }}
-                      />
-                      📷 SCANNER QR ACTIF
+                        style={{ width: "100%", padding: "8px", marginTop: "5px" }}
+                      >
+                        <option value="disabled">🚫 Désactivé</option>
+                        <option value="simulator">🎮 Simulateur (codes générés)</option>
+                        <option value="real">📷 Scanner Réel (caméra)</option>
+                      </select>
                     </label>
                   </div>
                   <div style={{ marginTop: "15px" }}>
@@ -3861,25 +3864,29 @@
                         </div>
                       </div>
 
-                      {configGlobale.scannerActif && !cameraActive ? (
+                      {configGlobale.modeScanneur !== "disabled" && !cameraActive ? (
                         <>
-                          <h4>OU Scanner avec la caméra :</h4>
-                          <button
-                            onClick={ouvrirScannerCamera}
-                            style={{
-                              padding: "15px",
-                              background: "#2196F3",
-                              color: "#fff",
-                              border: "none",
-                              borderRadius: "6px",
-                              width: "100%",
-                              fontWeight: "bold",
-                              cursor: "pointer",
-                              marginBottom: "10px"
-                            }}
-                          >
-                            📸 OUVRIR CAMÉRA
-                          </button>
+                          {configGlobale.modeScanneur === "real" && (
+                            <>
+                              <h4>OU Scanner avec la caméra :</h4>
+                              <button
+                                onClick={ouvrirScannerCamera}
+                                style={{
+                                  padding: "15px",
+                                  background: "#2196F3",
+                                  color: "#fff",
+                                  border: "none",
+                                  borderRadius: "6px",
+                                  width: "100%",
+                                  fontWeight: "bold",
+                                  cursor: "pointer",
+                                  marginBottom: "10px"
+                                }}
+                              >
+                                📸 OUVRIR CAMÉRA
+                              </button>
+                            </>
+                          )}
                         </>
                       ) : cameraActive ? (
                         <>
