@@ -153,7 +153,7 @@
             finParadis: 0,
             deck: [],
             historique: [],
-            qrCodesUtilises: [],
+            codesUtilises: [],
             missionsFaites: [],
             produitsAchetes: [],
             penalitesSubies: []
@@ -176,7 +176,7 @@
             finParadis: 0,
             deck: [],
             historique: [],
-            qrCodesUtilises: [],
+            codesUtilises: [],
             missionsFaites: [],
             produitsAchetes: [],
             penalitesSubies: []
@@ -199,7 +199,7 @@
             finParadis: 0,
             deck: [],
             historique: [],
-            qrCodesUtilises: [],
+            codesUtilises: [],
             missionsFaites: [],
             produitsAchetes: [],
             penalitesSubies: []
@@ -222,15 +222,15 @@
             finParadis: 0,
             deck: [],
             historique: [],
-            qrCodesUtilises: [],
+            codesUtilises: [],
             missionsFaites: [],
             produitsAchetes: [],
             penalitesSubies: []
           }
         ]);
 
-        // --- TABLE 3 : REGISTRE DES QR CODES ---
-        const [qrCodesRegistre, setQrCodesRegistre] = useEtatPartage("qrCodesRegistre", []);
+        // --- TABLE 3 : REGISTRE DES CODES ---
+        const [codesRegistre, setCodesRegistre] = useEtatPartage("codesRegistre", []);
         // --- TABLE 5 : HISTORIQUE CONTRÔLES FISCAUX ---
         const [historiqueFiscal, setHistoriqueFiscal] = useEtatPartage("historiqueFiscal", []);
 
@@ -497,7 +497,7 @@
           cartesJeu,
           desConfig,
           joueurs,
-          qrCodesRegistre,
+          codesRegistre,
           historiqueFiscal,
           historiqueAffichage
         });
@@ -560,7 +560,7 @@
           }
           setJoueurs([]);
           setChequesImprimerie([]);
-          setQrCodesRegistre([]);
+          setCodesRegistre([]);
           setInterfaceActive("menu");
           alert("Nouvelle partie initialisée !");
         };
@@ -575,8 +575,8 @@
           if (donnees.cartesJeu) setCartesJeu(donnees.cartesJeu);
           if (donnees.desConfig) setDesConfig(donnees.desConfig);
           if (donnees.joueurs) setJoueurs(donnees.joueurs);
-          if (donnees.qrCodesRegistre)
-            setQrCodesRegistre(donnees.qrCodesRegistre);
+          if (donnees.codesRegistre)
+            setCodesRegistre(donnees.codesRegistre);
           if (donnees.historiqueFiscal)
             setHistoriqueFiscal(donnees.historiqueFiscal);
           if (donnees.historiqueAffichage)
@@ -649,12 +649,12 @@
             missions.find((m) => m.id === Number(imprMissionId)) || missions[0];
           if (!mObj) return;
           const nouveaux = [];
-          const nouveauRegistre = [...qrCodesRegistre];
+          const nouveauRegistre = [...codesRegistre];
 
           for (let i = 0; i < Number(qteImpr); i++) {
             const codeUnique = genererNumeroUnique();
             const hashUnique =
-              "QR_" + Math.random().toString(36).substring(2, 12).toUpperCase();
+              "CODE_" + Math.random().toString(36).substring(2, 12).toUpperCase();
             nouveaux.push({
               hash: hashUnique,
               code: codeUnique,
@@ -672,14 +672,14 @@
             });
           }
           setChequesImprimerie(nouveaux);
-          setQrCodesRegistre(nouveauRegistre);
+          setCodesRegistre(nouveauRegistre);
         };
 
-        // ================= LOGIQUE SCANNER QR & DEFAUSSE =================
-        const scannerQrCodeSimule = (type, objetDonnee) => {
+        // ================= LOGIQUE SCANNER & DEFAUSSE =================
+        const scannerCodeSimule = (type, objetDonnee) => {
           if (!joueurActuel) return;
           if (configGlobale.modeScanneur === "disabled") {
-            alert("Scanner QR désactivé. Activez-le dans l'Admin pour continuer.");
+            alert("Scanner désactivé. Activez-le dans l'Admin pour continuer.");
             return;
           }
           if (configGlobale.modeLocal && type === "carte") {
@@ -690,7 +690,7 @@
           }
 
           const hashSimule =
-            "QR_" +
+            "CODE_" +
             type.toUpperCase() +
             "_" +
             Math.random().toString(36).substring(2, 8);
@@ -702,7 +702,7 @@
                 let missionsNv = j.totalMissions;
                 let deckNv = [...j.deck];
                 let histNv = [...j.historique];
-                let qrsNv = [...j.qrCodesUtilises, hashSimule];
+                let codesNv = [...j.codesUtilises, hashSimule];
                 let listMissionsFaites = [...j.missionsFaites];
 
                 if (type === "mission") {
@@ -723,7 +723,7 @@
                   totalMissions: missionsNv,
                   deck: deckNv,
                   historique: histNv,
-                  qrCodesUtilises: qrsNv,
+                  codesUtilises: codesNv,
                   missionsFaites: listMissionsFaites
                 };
               }
@@ -748,7 +748,7 @@
           }
 
           // Chercher le code dans le registre (par code numérique ou hash)
-          const codeValide = qrCodesRegistre.find(
+          const codeValide = codesRegistre.find(
             (q) => q.code === code.trim() || q.hash.substring(0, 12) === code.trim().toUpperCase()
           );
 
@@ -758,7 +758,7 @@
           }
 
           // Vérifier que le code n'a pas déjà été utilisé
-          if (joueurActuel.qrCodesUtilises.includes(codeValide.hash)) {
+          if (joueurActuel.codesUtilises.includes(codeValide.hash)) {
             alert("Ce code a déjà été utilisé !");
             return;
           }
@@ -767,7 +767,7 @@
           if (codeValide.type === "Mission") {
             const mission = missions.find((m) => m.id === codeValide.missionId);
             if (mission) {
-              scannerQrCodeSimule("mission", mission);
+              scannerCodeSimule("mission", mission);
             } else {
               alert("Mission introuvable");
             }
@@ -776,7 +776,7 @@
           setCodeManuel("");
         };
 
-        // ================= SCANNER CAMÉRA QR =================
+        // ================= SCANNER CAMÉRA =================
         const ouvrirScannerCamera = React.useCallback(async () => {
           if (configGlobale.modeScanneur !== "real") {
             alert("Mode Scanner Réel non activé. Configurez-le dans l'Admin.");
@@ -790,7 +790,6 @@
             if (videoRef.current) {
               videoRef.current.srcObject = stream;
               videoRef.current.play();
-              scannerQREnBoucle(stream);
             }
           } catch (err) {
             alert("Impossible d'accéder à la caméra. " + err.message);
@@ -804,40 +803,6 @@
           }
         }, []);
 
-        const scannerQREnBoucle = (stream) => {
-          const video = videoRef.current;
-          const canvas = canvasRef.current;
-          if (!canvas || !video) return;
-          const ctx = canvas.getContext("2d");
-          let detectionEnCours = false;
-
-          const detectQR = () => {
-            if (!cameraActive) return;
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            ctx.drawImage(video, 0, 0);
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const code = jsQR(imageData.data, canvas.width, canvas.height);
-
-            if (code && !detectionEnCours) {
-              detectionEnCours = true;
-              const data = code.data;
-              if (data.startsWith("QR_")) {
-                traiterQRDetecte(data);
-              }
-              setTimeout(() => {
-                detectionEnCours = false;
-              }, 1000);
-            }
-            requestAnimationFrame(detectQR);
-          };
-          detectQR();
-        };
-
-        const traiterQRDetecte = (qrData) => {
-          validerCode(qrData.substring(0, 12));
-          fermerScannerCamera();
-        };
 
         const defausserCarte = (carteId) => {
           setJoueurs((prev) =>
@@ -2322,7 +2287,7 @@
                           finParadis: 0,
                           deck: [],
                           historique: [],
-                          qrCodesUtilises: [],
+                          codesUtilises: [],
                           missionsFaites: [],
                           produitsAchetes: [],
                           penalitesSubies: []
@@ -2654,7 +2619,7 @@
                           fontSize: "0.75rem"
                         }}
                       >
-                        {/* HAUT : Logo, Texte, QR */}
+                        {/* HAUT : Logo, Texte, Code */}
                         <div
                           style={{
                             display: "flex",
@@ -2816,7 +2781,7 @@
         // Vue d'ensemble des 7 tables, alimentée par les mêmes données que le
         // reste du jeu : elle reflète donc en direct ce que font les autres
         // appareils. Deux tables n'étaient visibles nulle part jusqu'ici : le
-        // registre des QR codes et l'historique des contrôles fiscaux.
+        // registre des codes et l'historique des contrôles fiscaux.
         if (interfaceActive === "base") {
           const cadre = {
             background: "#222",
@@ -2958,12 +2923,12 @@
 
               <div style={cadre}>
                 <h3 style={{ color: "#2196F3", marginTop: 0 }}>
-                  Table 3 — QR codes ({qrCodesRegistre.length})
+                  Table 3 — Codes ({codesRegistre.length})
                 </h3>
                 <Table
                   colonnes={["Hash", "Type", "Statut"]}
-                  vide="Aucun QR code généré. Ils apparaissent après une impression de chèques."
-                  lignes={qrCodesRegistre.map((q) => [
+                  vide="Aucun code généré. Ils apparaissent après une impression de chèques."
+                  lignes={codesRegistre.map((q) => [
                     q.hash,
                     q.type,
                     q.statut
@@ -3323,7 +3288,7 @@
                           borderColor: "#2196F3"
                         }}
                       >
-                        📷 Scanner QR Code
+                        📷 Scanner Code
                       </button>
                       <button
                         onClick={() => setSousMenuBanque("historique")}
@@ -3852,7 +3817,7 @@
                             {missions.map((m) => (
                               <button
                                 key={m.id}
-                                onClick={() => scannerQrCodeSimule("mission", m)}
+                                onClick={() => scannerCodeSimule("mission", m)}
                                 style={{
                                   padding: "12px",
                                   background: "#4CAF50",
@@ -3867,7 +3832,7 @@
                             {cartesJeu.map((c) => (
                               <button
                                 key={c.id}
-                                onClick={() => scannerQrCodeSimule("carte", c)}
+                                onClick={() => scannerCodeSimule("carte", c)}
                                 style={{
                                   padding: "12px",
                                   background: "#9C27B0",
