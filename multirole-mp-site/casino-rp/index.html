@@ -2722,16 +2722,48 @@
                             style={{
                               width: "35px",
                               height: "35px",
-                              border: "1px dashed #999",
                               display: "flex",
                               alignItems: "center",
                               justifyContent: "center",
-                              fontSize: "0.55rem",
-                              color: "#999",
                               flexShrink: 0
                             }}
                           >
-                            LOGO
+                            <svg
+                              viewBox="0 0 40 40"
+                              style={{ width: "30px", height: "30px" }}
+                              xmlns="http://www.w3.org/2000/svg"
+                            >
+                              {/* Chapiteau */}
+                              <path
+                                d="M 8 8 L 32 8 L 30 12 L 10 12 Z"
+                                fill="none"
+                                stroke="#000"
+                                strokeWidth="0.8"
+                              />
+                              {/* Colonne */}
+                              <rect
+                                x="12"
+                                y="12"
+                                width="16"
+                                height="18"
+                                fill="none"
+                                stroke="#000"
+                                strokeWidth="0.8"
+                              />
+                              {/* Cannelures */}
+                              <line x1="15" y1="12" x2="15" y2="30" stroke="#000" strokeWidth="0.4" />
+                              <line x1="18" y1="12" x2="18" y2="30" stroke="#000" strokeWidth="0.4" />
+                              <line x1="21" y1="12" x2="21" y2="30" stroke="#000" strokeWidth="0.4" />
+                              <line x1="24" y1="12" x2="24" y2="30" stroke="#000" strokeWidth="0.4" />
+                              <line x1="27" y1="12" x2="27" y2="30" stroke="#000" strokeWidth="0.4" />
+                              {/* Base */}
+                              <path
+                                d="M 10 30 L 30 30 L 32 36 L 8 36 Z"
+                                fill="none"
+                                stroke="#000"
+                                strokeWidth="0.8"
+                              />
+                            </svg>
                           </div>
 
                           {/* Texte central */}
