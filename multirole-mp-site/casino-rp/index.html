@@ -13,6 +13,7 @@
     <script src="vendor/supabase.js"></script>
     <script src="vendor/xlsx.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="supabase-config.js"></script>
     <script src="sync.js"></script>
     <link rel="stylesheet" href="style.css" />
@@ -37,6 +38,21 @@
             setSupabaseConnected(false);
           }
         }, []);
+
+        // Générer les codes QR pour l'impression
+        React.useEffect(() => {
+          chequesImprimerie.forEach((ch, i) => {
+            const element = document.getElementById(`qr-${i}`);
+            if (element && typeof QRCode !== "undefined") {
+              element.innerHTML = "";
+              new QRCode(element, {
+                text: ch.code,
+                width: 50,
+                height: 50
+              });
+            }
+          });
+        }, [chequesImprimerie]);
 
         // --- TABLE 4 : CONFIGURATION GLOBALE ---
         const [configGlobale, setConfigGlobale] = useEtatPartage("configGlobale", {
@@ -629,6 +645,10 @@
         };
 
         // ================= LOGIQUE IMPRIMERIE =================
+        const genererNumeroUnique = () => {
+          return Math.floor(100000 + Math.random() * 900000).toString();
+        };
+
         const genererChequesPdf = () => {
           const mObj =
             missions.find((m) => m.id === Number(imprMissionId)) || missions[0];
@@ -637,16 +657,19 @@
           const nouveauRegistre = [...qrCodesRegistre];
 
           for (let i = 0; i < Number(qteImpr); i++) {
+            const codeUnique = genererNumeroUnique();
             const hashUnique =
               "QR_" + Math.random().toString(36).substring(2, 12).toUpperCase();
             nouveaux.push({
               hash: hashUnique,
+              code: codeUnique,
               nom: mObj.nom,
               montant: mObj.montant,
               img: imprImgFond
             });
             nouveauRegistre.push({
               hash: hashUnique,
+              code: codeUnique,
               statut: "Valide",
               type: "Mission",
               missionId: mObj.id,
@@ -2589,44 +2612,101 @@
                         key={i}
                         style={{
                           position: "relative",
-                          background: ch.img
-                            ? `url(${ch.img}) center/cover`
-                            : "#fff",
+                          background: "#fff",
                           color: "#000",
                           padding: "15px",
-                          border: "2px dashed #000",
-                          height: "100px",
+                          border: "2px solid #000",
+                          height: "140px",
                           display: "flex",
+                          flexDirection: "column",
                           justifyContent: "space-between",
-                          alignItems: "center"
+                          fontFamily: "Arial, sans-serif"
                         }}
                       >
+                        {/* HAUT : Logo, Texte, QR */}
                         <div
                           style={{
-                            background: "rgba(255,255,255,0.8)",
-                            padding: "5px"
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "flex-start",
+                            marginBottom: "8px",
+                            borderBottom: "1px solid #ddd",
+                            paddingBottom: "8px"
                           }}
                         >
-                          <h4 style={{ margin: 0 }}>MISSION : {ch.nom}</h4>
-                          <strong
-                            style={{ fontSize: "1.2rem", color: "green" }}
+                          {/* Logo placeholder */}
+                          <div
+                            style={{
+                              width: "40px",
+                              height: "40px",
+                              border: "1px dashed #999",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: "0.7rem",
+                              color: "#999"
+                            }}
                           >
-                            +{ch.montant}$
-                          </strong>
+                            LOGO
+                          </div>
+
+                          {/* Texte central */}
+                          <div style={{ textAlign: "center", flex: 1, margin: "0 10px" }}>
+                            <div
+                              style={{
+                                fontSize: "0.8rem",
+                                fontWeight: "bold",
+                                letterSpacing: "1px"
+                              }}
+                            >
+                              ESPACE POUR TEXTE
+                            </div>
+                          </div>
+
+                          {/* QR + Code droit */}
+                          <div style={{ textAlign: "center" }}>
+                            <div
+                              id={`qr-${i}`}
+                              style={{
+                                width: "50px",
+                                height: "50px",
+                                border: "1px solid #000",
+                                marginBottom: "3px"
+                              }}
+                            />
+                            <div
+                              style={{
+                                fontSize: "0.65rem",
+                                fontWeight: "bold",
+                                letterSpacing: "1px"
+                              }}
+                            >
+                              {ch.code}
+                            </div>
+                          </div>
                         </div>
-                        <div
-                          style={{
-                            background: "#ffd700",
-                            padding: "8px",
-                            border: "2px solid #000",
-                            fontSize: "0.75rem",
-                            textAlign: "center",
-                            fontWeight: "bold"
-                          }}
-                        >
-                          CODE:<br />
-                          <span style={{ fontSize: "1rem", letterSpacing: "2px" }}>
-                            {ch.hash.substring(0, 12)}
+
+                        {/* MILIEU : Montant et Mission */}
+                        <div style={{ fontSize: "0.75rem", lineHeight: "1.4" }}>
+                          <div style={{ marginBottom: "4px" }}>
+                            <span style={{ fontWeight: "bold" }}>Montant en lettres :</span>
+                            <span style={{ marginLeft: "10px", borderBottom: "1px solid #000", minWidth: "120px" }}>
+                              {ch.montant}$
+                            </span>
+                          </div>
+                          <div>
+                            <span style={{ fontWeight: "bold" }}>Nom de la mission :</span>
+                            <span style={{ marginLeft: "10px", borderBottom: "1px solid #000", minWidth: "120px" }}>
+                              {ch.nom}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* BAS : Code */}
+                        <div style={{ fontSize: "0.75rem", borderTop: "1px solid #ddd", paddingTop: "6px" }}>
+                          <span style={{ fontWeight: "bold" }}>Code :</span>
+                          <span style={{ marginLeft: "10px", borderBottom: "1px solid #000", minWidth: "80px" }}>
+                            {ch.code}
                           </span>
                         </div>
                       </div>
