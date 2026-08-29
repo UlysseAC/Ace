@@ -13,8 +13,7 @@
     <script src="vendor/supabase.js"></script>
     <script src="vendor/xlsx.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode.react/1.0.1/qrcode.react.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
     <script src="supabase-config.js"></script>
     <script src="sync.js"></script>
     <link rel="stylesheet" href="style.css" />
@@ -43,31 +42,37 @@
         // Générer les codes QR pour l'impression
         React.useEffect(() => {
           const genererQR = async () => {
+            if (typeof QRCode === "undefined") {
+              console.error("QRCode library not loaded");
+              return;
+            }
             for (let i = 0; i < chequesImprimerie.length; i++) {
               const ch = chequesImprimerie[i];
               const element = document.getElementById(`qr-${i}`);
               if (element) {
                 try {
-                  if (typeof QRCode !== "undefined") {
-                    element.innerHTML = "";
-                    new QRCode(element, {
-                      text: ch.code,
-                      width: 50,
-                      height: 50,
-                      colorDark: "#000000",
-                      colorLight: "#ffffff",
-                      correctLevel: QRCode.CorrectLevel.H
-                    });
-                  }
+                  element.innerHTML = "";
+                  await QRCode.toCanvas(element, ch.code, {
+                    width: 50,
+                    margin: 1,
+                    color: {
+                      dark: "#000000",
+                      light: "#ffffff"
+                    }
+                  });
                 } catch (err) {
                   console.error("Erreur génération QR:", err);
+                  element.style.background = "#f0f0f0";
                   element.textContent = "QR";
-                  element.style.fontSize = "12px";
+                  element.style.fontSize = "10px";
+                  element.style.display = "flex";
+                  element.style.alignItems = "center";
+                  element.style.justifyContent = "center";
                 }
               }
             }
           };
-          setTimeout(genererQR, 100);
+          setTimeout(genererQR, 200);
         }, [chequesImprimerie]);
 
         // --- TABLE 4 : CONFIGURATION GLOBALE ---
