@@ -13,7 +13,8 @@
     <script src="vendor/supabase.js"></script>
     <script src="vendor/xlsx.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode.react/1.0.1/qrcode.react.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.js"></script>
     <script src="supabase-config.js"></script>
     <script src="sync.js"></script>
     <link rel="stylesheet" href="style.css" />
@@ -41,17 +42,32 @@
 
         // Générer les codes QR pour l'impression
         React.useEffect(() => {
-          chequesImprimerie.forEach((ch, i) => {
-            const element = document.getElementById(`qr-${i}`);
-            if (element && typeof QRCode !== "undefined") {
-              element.innerHTML = "";
-              new QRCode(element, {
-                text: ch.code,
-                width: 50,
-                height: 50
-              });
+          const genererQR = async () => {
+            for (let i = 0; i < chequesImprimerie.length; i++) {
+              const ch = chequesImprimerie[i];
+              const element = document.getElementById(`qr-${i}`);
+              if (element) {
+                try {
+                  if (typeof QRCode !== "undefined") {
+                    element.innerHTML = "";
+                    new QRCode(element, {
+                      text: ch.code,
+                      width: 50,
+                      height: 50,
+                      colorDark: "#000000",
+                      colorLight: "#ffffff",
+                      correctLevel: QRCode.CorrectLevel.H
+                    });
+                  }
+                } catch (err) {
+                  console.error("Erreur génération QR:", err);
+                  element.textContent = "QR";
+                  element.style.fontSize = "12px";
+                }
+              }
             }
-          });
+          };
+          setTimeout(genererQR, 100);
         }, [chequesImprimerie]);
 
         // --- TABLE 4 : CONFIGURATION GLOBALE ---
