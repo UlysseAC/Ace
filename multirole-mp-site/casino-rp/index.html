@@ -20,6 +20,15 @@
     <div id="root"></div>
 
     <script type="text/babel">
+      // Couleur de chaque type de face. Partagée par le tirage (qui l'envoie
+      // avec le résultat) et par l'animation (qui fait défiler les faces).
+      const COULEURS_FACE = {
+        Rouge: "#f44336",
+        Vert: "#4CAF50",
+        Don: "#2196F3",
+        Zéro: "#9C27B0"
+      };
+
       function App() {
         const [interfaceActive, setInterfaceActive] = React.useState("menu");
         const [supabaseConnected, setSupabaseConnected] = React.useState(false);
@@ -989,11 +998,24 @@
         // l'exécutent en recevant l'événement diffusé, pour que la salle voie
         // le même tirage au même moment.
         const jouerAnimation = React.useCallback((ev) => {
-          const faces = ev.faces && ev.faces.length ? ev.faces : [ev.facePct];
+          // Les faces défilent avec leur couleur. Un tirage diffusé par une
+          // version précédente n'envoyait que les pourcentages : on retombe
+          // alors sur la couleur du résultat, faute de mieux.
+          const brutes = ev.faces && ev.faces.length ? ev.faces : [ev.facePct];
+          const faces = brutes.map((f) =>
+            typeof f === "object" && f !== null
+              ? { pct: f.pct, couleur: COULEURS_FACE[f.type] || ev.couleur }
+              : { pct: f, couleur: ev.couleur }
+          );
+          const auHasard = () => faces[Math.floor(Math.random() * faces.length)];
+
+          // On part sur une face au hasard : afficher tout de suite le
+          // résultat reviendrait à l'annoncer avant que le dé ne s'arrête.
+          const depart = auHasard();
           setInfosAnimation({
             phraseAction: ev.phraseAction,
-            face: `${ev.facePct}%`,
-            couleur: ev.couleur,
+            face: `${depart.pct}%`,
+            couleur: depart.couleur,
             phraseResultat: ev.phraseResultat
           });
           setAnimationActive(true);
@@ -1001,15 +1023,22 @@
 
           let compteur = 0;
           const intervalle = setInterval(() => {
+            const tirage = auHasard();
             setInfosAnimation((prev) => ({
               ...prev,
-              face: `${faces[Math.floor(Math.random() * faces.length)]}%`
+              face: `${tirage.pct}%`,
+              couleur: tirage.couleur
             }));
             compteur += 80;
 
             if (compteur >= ev.secRoulement * 1000) {
               clearInterval(intervalle);
-              setInfosAnimation((prev) => ({ ...prev, face: `${ev.facePct}%` }));
+              // Le dé se fige enfin sur le vrai résultat, couleur comprise.
+              setInfosAnimation((prev) => ({
+                ...prev,
+                face: `${ev.facePct}%`,
+                couleur: ev.couleur
+              }));
               setEstEnRoulementFiscal(false);
               setTimeout(
                 () => setAnimationActive(false),
@@ -1058,13 +1087,6 @@
           setSousMenuBanque("animation_attente");
           const faceTiree =
             deConfig.faces[Math.floor(Math.random() * deConfig.faces.length)];
-          const couleurs = {
-            Rouge: "#f44336",
-            Vert: "#4CAF50",
-            Don: "#2196F3",
-            Zéro: "#9C27B0"
-          };
-
           let texteResultat = "";
           let valeurReelleAttaquant = 0;
           let valeurReelleCible = 0;
@@ -1101,9 +1123,9 @@
           const evenement = {
             phraseAction: phraseInitiale,
             facePct: faceTiree.pct,
-            couleur: couleurs[faceTiree.type],
+            couleur: COULEURS_FACE[faceTiree.type],
             phraseResultat: texteResultat,
-            faces: deConfig.faces.map((f) => f.pct),
+            faces: deConfig.faces.map((f) => ({ pct: f.pct, type: f.type })),
             secRoulement,
             secArret
           };
@@ -2603,7 +2625,8 @@
                             gap: "8px"
                           }}
                         >
-                          {/* Logo placeholder */}
+                          {/* Logo : le temple du chèque modèle fourni par
+                              l'organisateur, détouré depuis sa photo. */}
                           <div
                             style={{
                               width: "35px",
@@ -2614,42 +2637,15 @@
                               flexShrink: 0
                             }}
                           >
-                            <svg
-                              viewBox="0 0 40 40"
-                              style={{ width: "30px", height: "30px" }}
-                              xmlns="http://www.w3.org/2000/svg"
-                            >
-                              {/* Chapiteau */}
-                              <path
-                                d="M 8 8 L 32 8 L 30 12 L 10 12 Z"
-                                fill="none"
-                                stroke="#000"
-                                strokeWidth="0.8"
-                              />
-                              {/* Colonne */}
-                              <rect
-                                x="12"
-                                y="12"
-                                width="16"
-                                height="18"
-                                fill="none"
-                                stroke="#000"
-                                strokeWidth="0.8"
-                              />
-                              {/* Cannelures */}
-                              <line x1="15" y1="12" x2="15" y2="30" stroke="#000" strokeWidth="0.4" />
-                              <line x1="18" y1="12" x2="18" y2="30" stroke="#000" strokeWidth="0.4" />
-                              <line x1="21" y1="12" x2="21" y2="30" stroke="#000" strokeWidth="0.4" />
-                              <line x1="24" y1="12" x2="24" y2="30" stroke="#000" strokeWidth="0.4" />
-                              <line x1="27" y1="12" x2="27" y2="30" stroke="#000" strokeWidth="0.4" />
-                              {/* Base */}
-                              <path
-                                d="M 10 30 L 30 30 L 32 36 L 8 36 Z"
-                                fill="none"
-                                stroke="#000"
-                                strokeWidth="0.8"
-                              />
-                            </svg>
+                            <img
+                              src="logo-cheque.png"
+                              alt=""
+                              style={{
+                                maxWidth: "100%",
+                                maxHeight: "100%",
+                                objectFit: "contain"
+                              }}
+                            />
                           </div>
 
                           {/* Texte central */}
