@@ -25,6 +25,7 @@
         const [interfaceActive, setInterfaceActive] = React.useState("menu");
         const [supabaseConnected, setSupabaseConnected] = React.useState(false);
         const [cameraActive, setCameraActive] = React.useState(false);
+        const [codeManuel, setCodeManuel] = React.useState("");
         const videoRef = React.useRef(null);
         const canvasRef = React.useRef(null);
 
@@ -647,7 +648,9 @@
             nouveauRegistre.push({
               hash: hashUnique,
               statut: "Valide",
-              type: "Mission"
+              type: "Mission",
+              missionId: mObj.id,
+              montant: mObj.montant
             });
           }
           setChequesImprimerie(nouveaux);
@@ -718,6 +721,43 @@
           setSousMenuBanque("scanner_choix");
         };
 
+        // ================= VALIDATION DU CODE =================
+        const validerCode = (code) => {
+          if (!joueurActuel) return;
+          if (!code.trim()) {
+            alert("Veuillez entrer un code");
+            return;
+          }
+
+          // Chercher le code dans le registre
+          const codeValide = qrCodesRegistre.find(
+            (q) => q.hash.substring(0, 12) === code.trim().toUpperCase()
+          );
+
+          if (!codeValide) {
+            alert("Code invalide ou inexistant");
+            return;
+          }
+
+          // Vérifier que le code n'a pas déjà été utilisé
+          if (joueurActuel.qrCodesUtilises.includes(codeValide.hash)) {
+            alert("Ce code a déjà été utilisé !");
+            return;
+          }
+
+          // Appliquer le code selon son type
+          if (codeValide.type === "Mission") {
+            const mission = missions.find((m) => m.id === codeValide.missionId);
+            if (mission) {
+              scannerQrCodeSimule("mission", mission);
+            } else {
+              alert("Mission introuvable");
+            }
+          }
+
+          setCodeManuel("");
+        };
+
         // ================= SCANNER CAMÉRA QR =================
         const ouvrirScannerCamera = React.useCallback(async () => {
           if (!configGlobale.scannerActif) {
@@ -777,19 +817,7 @@
         };
 
         const traiterQRDetecte = (qrData) => {
-          if (qrData.includes("_MISSION_")) {
-            const missionId = parseInt(qrData.split("_")[2]);
-            const mission = missions.find((m) => m.id === missionId);
-            if (mission) {
-              scannerQrCodeSimule("mission", mission);
-            }
-          } else if (qrData.includes("_CARTE_")) {
-            const carteId = qrData.split("_")[2];
-            const carte = cartesJeu.find((c) => c.id === carteId);
-            if (carte) {
-              scannerQrCodeSimule("carte", carte);
-            }
-          }
+          validerCode(qrData.substring(0, 12));
           fermerScannerCamera();
         };
 
@@ -2588,16 +2616,18 @@
                         </div>
                         <div
                           style={{
-                            background: "#eee",
-                            padding: "10px",
-                            border: "1px solid #000",
-                            fontSize: "0.6rem",
-                            textAlign: "center"
+                            background: "#ffd700",
+                            padding: "8px",
+                            border: "2px solid #000",
+                            fontSize: "0.75rem",
+                            textAlign: "center",
+                            fontWeight: "bold"
                           }}
                         >
-                          [QR CODE]
-                          <br />
-                          {ch.hash.substring(0, 8)}
+                          CODE:<br />
+                          <span style={{ fontSize: "1rem", letterSpacing: "2px" }}>
+                            {ch.hash.substring(0, 12)}
+                          </span>
                         </div>
                       </div>
                     ))}
@@ -3602,10 +3632,50 @@
                         textAlign: "center"
                       }}
                     >
+                      <h3>📷 Scanner de Code</h3>
+                      <div style={{ marginBottom: "15px" }}>
+                        <label style={{ display: "block", marginBottom: "8px" }}>
+                          Rentrer le code du chèque :
+                        </label>
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <input
+                            type="text"
+                            value={codeManuel}
+                            onChange={(e) =>
+                              setCodeManuel(e.target.value.toUpperCase())
+                            }
+                            onKeyPress={(e) => {
+                              if (e.key === "Enter") validerCode(codeManuel);
+                            }}
+                            placeholder="Ex: QR_ABC1234AB"
+                            style={{
+                              flex: 1,
+                              padding: "10px",
+                              fontSize: "1rem",
+                              borderRadius: "4px",
+                              border: "2px solid #ffd700"
+                            }}
+                          />
+                          <button
+                            onClick={() => validerCode(codeManuel)}
+                            style={{
+                              padding: "10px 15px",
+                              background: "#4CAF50",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: "4px",
+                              fontWeight: "bold",
+                              cursor: "pointer"
+                            }}
+                          >
+                            ✓
+                          </button>
+                        </div>
+                      </div>
+
                       {configGlobale.scannerActif && !cameraActive ? (
                         <>
-                          <h3>📷 Scanner QR - Caméra</h3>
-                          <p>Cliquez pour ouvrir la caméra et scanner un code QR</p>
+                          <h4>OU Scanner avec la caméra :</h4>
                           <button
                             onClick={ouvrirScannerCamera}
                             style={{
