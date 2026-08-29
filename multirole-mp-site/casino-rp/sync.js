@@ -29,7 +29,7 @@
   const CHAMPS_TABLEAU_JOUEUR = [
     "deck",
     "historique",
-    "qrCodesUtilises",
+    "codesUtilises",
     "missionsFaites",
     "produitsAchetes",
     "penalitesSubies"
@@ -58,7 +58,7 @@
     produits: versTableau,
     penalites: versTableau,
     cartesJeu: versTableau,
-    qrCodesRegistre: versTableau,
+    codesRegistre: versTableau,
     historiqueFiscal: versTableau,
     historiqueAffichage: versTableau
   };
