@@ -23,10 +23,7 @@
       function App() {
         const [interfaceActive, setInterfaceActive] = React.useState("menu");
         const [supabaseConnected, setSupabaseConnected] = React.useState(false);
-        const [cameraActive, setCameraActive] = React.useState(false);
         const [codeManuel, setCodeManuel] = React.useState("");
-        const videoRef = React.useRef(null);
-        const canvasRef = React.useRef(null);
 
         // Vérifier la connexion Supabase
         React.useEffect(() => {
@@ -775,34 +772,6 @@
 
           setCodeManuel("");
         };
-
-        // ================= SCANNER CAMÉRA =================
-        const ouvrirScannerCamera = React.useCallback(async () => {
-          if (configGlobale.modeScanneur !== "real") {
-            alert("Mode Scanner Réel non activé. Configurez-le dans l'Admin.");
-            return;
-          }
-          try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-              video: { facingMode: "environment" }
-            });
-            setCameraActive(true);
-            if (videoRef.current) {
-              videoRef.current.srcObject = stream;
-              videoRef.current.play();
-            }
-          } catch (err) {
-            alert("Impossible d'accéder à la caméra. " + err.message);
-          }
-        }, [configGlobale.modeScanneur]);
-
-        const fermerScannerCamera = React.useCallback(() => {
-          setCameraActive(false);
-          if (videoRef.current && videoRef.current.srcObject) {
-            videoRef.current.srcObject.getTracks().forEach((t) => t.stop());
-          }
-        }, []);
-
 
         const defausserCarte = (carteId) => {
           setJoueurs((prev) =>
@@ -1602,7 +1571,11 @@
                     <label>
                       Mode Scanneur :{" "}
                       <select
-                        value={configGlobale.modeScanneur}
+                        value={
+                          configGlobale.modeScanneur === "disabled"
+                            ? "disabled"
+                            : "simulator"
+                        }
                         onChange={(e) =>
                           setConfigGlobale({
                             ...configGlobale,
@@ -1613,7 +1586,6 @@
                       >
                         <option value="disabled">🚫 Désactivé</option>
                         <option value="simulator">🎮 Simulateur (codes générés)</option>
-                        <option value="real">📷 Scanner Réel (caméra)</option>
                       </select>
                     </label>
                   </div>
@@ -3794,7 +3766,10 @@
                       </div>
 
                       {/* OPTION 2 : SIMULATEUR (si activé) */}
-                      {configGlobale.modeScanneur === "simulator" && (
+                      {/* Une partie enregistrée avant la suppression du scanner
+                          caméra peut encore porter l'ancienne valeur "real" :
+                          tout ce qui n'est pas "disabled" affiche le simulateur. */}
+                      {configGlobale.modeScanneur !== "disabled" && (
                         <div
                           style={{
                             background: "#1a1a1a",
@@ -3845,78 +3820,6 @@
                               </button>
                             ))}
                           </div>
-                        </div>
-                      )}
-
-                      {/* OPTION 3 : SCANNER RÉEL (si activé) */}
-                      {configGlobale.modeScanneur === "real" && !cameraActive && (
-                        <div
-                          style={{
-                            background: "#1a1a1a",
-                            padding: "15px",
-                            borderRadius: "8px",
-                            marginBottom: "20px",
-                            border: "2px solid #2196F3"
-                          }}
-                        >
-                          <h4 style={{ marginTop: 0, color: "#2196F3" }}>
-                            📷 Option 3 : Scanner Caméra
-                          </h4>
-                          <button
-                            onClick={ouvrirScannerCamera}
-                            style={{
-                              padding: "15px",
-                              background: "#2196F3",
-                              color: "#fff",
-                              border: "none",
-                              borderRadius: "6px",
-                              width: "100%",
-                              fontWeight: "bold",
-                              cursor: "pointer"
-                            }}
-                          >
-                            📸 OUVRIR CAMÉRA
-                          </button>
-                        </div>
-                      )}
-
-                      {/* VIDÉO SCANNER (si caméra active) */}
-                      {cameraActive && (
-                        <div
-                          style={{
-                            background: "#1a1a1a",
-                            padding: "15px",
-                            borderRadius: "8px",
-                            marginBottom: "20px",
-                            border: "2px solid #FF6B00"
-                          }}
-                        >
-                          <h3 style={{ marginTop: 0, color: "#FF6B00" }}>
-                            📷 Scanner Actif...
-                          </h3>
-                          <video
-                            ref={videoRef}
-                            style={{
-                              width: "100%",
-                              borderRadius: "8px",
-                              marginBottom: "10px"
-                            }}
-                          />
-                          <canvas ref={canvasRef} style={{ display: "none" }} />
-                          <button
-                            onClick={fermerScannerCamera}
-                            style={{
-                              padding: "12px",
-                              background: "#f44336",
-                              color: "#fff",
-                              border: "none",
-                              borderRadius: "6px",
-                              width: "100%",
-                              cursor: "pointer"
-                            }}
-                          >
-                            ✕ FERMER CAMÉRA
-                          </button>
                         </div>
                       )}
 
