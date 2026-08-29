@@ -570,6 +570,17 @@
           URL.revokeObjectURL(lien.href);
         };
 
+        const nouvellePartie = () => {
+          if (!window.confirm("Êtes-vous sûr ? Cela réinitialisera tous les joueurs et leurs soldes.")) {
+            return;
+          }
+          setJoueurs([]);
+          setChequesImprimerie([]);
+          setQrCodesRegistre([]);
+          setInterfaceActive("menu");
+          alert("Nouvelle partie initialisée !");
+        };
+
         const appliquerSauvegarde = (donnees) => {
           // Les setters passent par useEtatPartage : en mode synchronisé, la
           // restauration se propage d'elle-même à tous les appareils.
@@ -2357,7 +2368,7 @@
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
+                      gridTemplateColumns: "1fr 1fr 1fr",
                       gap: "10px"
                     }}
                   >
@@ -2374,7 +2385,23 @@
                         cursor: "pointer"
                       }}
                     >
-                      ⬇️ Télécharger une sauvegarde
+                      ⬇️ Télécharger
+                    </button>
+
+                    <button
+                      onClick={nouvellePartie}
+                      style={{
+                        padding: "14px",
+                        background: "#f44336",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "6px",
+                        fontWeight: "bold",
+                        fontSize: "1rem",
+                        cursor: "pointer"
+                      }}
+                    >
+                      🔄 Nouvelle Partie
                     </button>
 
                     <label
