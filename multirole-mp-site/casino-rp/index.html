@@ -109,7 +109,8 @@
           phraseAttaqueCible:
             "Le joueur {LANCEUR} utilise contrôle fiscal avec le dé {DE} sur le joueur {CIBLE}.",
           phraseAucunHistorique: "Aucun historique pour le moment.",
-          phraseLimiteCroupier: "Solde supérieur à la limite autorisée."
+          phraseLimiteCroupier: "Solde supérieur à la limite autorisée.",
+          espaceTexte: "ESPACE TEXTE"
         });
 
         // --- TABLE 2 : MISSIONS, PRODUITS & PÉNALITÉS ---
@@ -1718,6 +1719,22 @@
                       />
                     </label>
                   </div>
+                  <div style={{ marginTop: "15px" }}>
+                    <label>
+                      Texte de l'Espace Texte (sur les chèques) :{" "}
+                      <input
+                        type="text"
+                        value={configGlobale.espaceTexte}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            espaceTexte: e.target.value
+                          })
+                        }
+                        style={{ width: "100%", padding: "5px" }}
+                      />
+                    </label>
+                  </div>
                 </div>
 
                 {/* Table 6 : Les 3 Dés */}
@@ -2729,7 +2746,7 @@
                                 whiteSpace: "nowrap"
                               }}
                             >
-                              ESPACE TEXTE
+                              {configGlobale.espaceTexte}
                             </div>
                           </div>
 
