@@ -1569,6 +1569,23 @@
             0
           );
 
+        // Navigation d'un projet à l'autre : le bookmaker fait défiler ce que
+        // la vitrine présente, sans repasser par la liste.
+        const indexProjetPresente = () =>
+          projetsDuBloc.findIndex(
+            (pr) => String(pr.id) === String(vitrine.projetId)
+          );
+
+        const presenterProjetVoisin = (pas) => {
+          if (!projetsDuBloc.length) return;
+          const courant = indexProjetPresente();
+          const i =
+            courant < 0
+              ? 0
+              : (courant + pas + projetsDuBloc.length) % projetsDuBloc.length;
+          setVitrine({ mode: "projet", projetId: projetsDuBloc[i].id });
+        };
+
         const investir = (joueurId, projetId, montant) => {
           const projet = (configBookmaker.projets || []).find(
             (pr) => String(pr.id) === String(projetId)
@@ -6235,9 +6252,55 @@
 
               {sousMenuBk === "invest" && (
                 <div style={cadre}>
-                  <h3 style={{ marginTop: 0, color: "#9C27B0" }}>
-                    Investissements — bloc n°{blocInvest}
-                  </h3>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                      gap: "10px",
+                      marginBottom: "10px"
+                    }}
+                  >
+                    <h3 style={{ margin: 0, color: "#9C27B0" }}>
+                      Investissements — bloc n°{blocInvest}
+                    </h3>
+                    {projetsDuBloc.length > 1 && (
+                      <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                        <span style={{ color: "#888", fontSize: "0.8rem" }}>
+                          Vitrine :
+                        </span>
+                        <button
+                          onClick={() => presenterProjetVoisin(-1)}
+                          style={{
+                            padding: "6px 12px",
+                            background: "#455A64",
+                            color: "#fff",
+                            border: "none",
+                            borderRadius: "6px",
+                            cursor: "pointer",
+                            fontSize: "1rem"
+                          }}
+                        >
+                          ◀
+                        </button>
+                        <button
+                          onClick={() => presenterProjetVoisin(1)}
+                          style={{
+                            padding: "6px 12px",
+                            background: "#455A64",
+                            color: "#fff",
+                            border: "none",
+                            borderRadius: "6px",
+                            cursor: "pointer",
+                            fontSize: "1rem"
+                          }}
+                        >
+                          ▶
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   {projetsDuBloc.length === 0 ? (
                     <p style={{ color: "#888" }}>
                       Aucun projet sur ce bloc. Ajoutes-en dans les réglages.
@@ -6435,13 +6498,55 @@
                 </div>
               ) : vitrine.mode === "projet" && projetPresente ? (
                 (() => {
+                  const fleche = (pas, libelle) => (
+                    <button
+                      onClick={() => presenterProjetVoisin(pas)}
+                      title={libelle}
+                      style={{
+                        background: "#1a1a1a",
+                        border: "2px solid #00838F",
+                        color: "#00838F",
+                        borderRadius: "50%",
+                        width: "54px",
+                        height: "54px",
+                        fontSize: "1.8rem",
+                        lineHeight: 1,
+                        cursor: "pointer",
+                        flexShrink: 0
+                      }}
+                    >
+                      {pas < 0 ? "‹" : "›"}
+                    </button>
+                  );
                   const inst = instanceProjet(projetPresente.id);
                   const total = totalInvesti(inst);
                   const nb = inst ? (inst.investisseurs || []).length : 0;
                   return (
-                    <div style={carte}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "16px"
+                      }}
+                    >
+                      {projetsDuBloc.length > 1 && fleche(-1, "Projet précédent")}
+                      <div style={{ ...carte, flex: 1 }}>
                       <h2 style={{ color: "#CE93D8", marginTop: 0 }}>
                         💼 {projetPresente.titre}
+                        {projetsDuBloc.length > 1 && (
+                          <span
+                            style={{
+                              float: "right",
+                              fontSize: "0.9rem",
+                              color: "#888",
+                              fontWeight: "normal"
+                            }}
+                          >
+                            {Math.max(1, indexProjetPresente() + 1)} /{" "}
+                            {projetsDuBloc.length}
+                          </span>
+                        )}
                       </h2>
                       <div style={{ fontSize: "1.15rem", lineHeight: 1.9 }}>
                         <div>
@@ -6513,6 +6618,8 @@
                           </div>
                         ))}
                       </div>
+                      </div>
+                      {projetsDuBloc.length > 1 && fleche(1, "Projet suivant")}
                     </div>
                   );
                 })()
