@@ -6498,21 +6498,22 @@
                 </div>
               ) : vitrine.mode === "projet" && projetPresente ? (
                 (() => {
+                  // Petites flèches en haut de la fiche, uniquement pour les
+                  // projets : c'est le seul écran où il y a plusieurs choses
+                  // à faire défiler.
                   const fleche = (pas, libelle) => (
                     <button
                       onClick={() => presenterProjetVoisin(pas)}
                       title={libelle}
                       style={{
                         background: "#1a1a1a",
-                        border: "2px solid #00838F",
-                        color: "#00838F",
-                        borderRadius: "50%",
-                        width: "54px",
-                        height: "54px",
-                        fontSize: "1.8rem",
-                        lineHeight: 1,
-                        cursor: "pointer",
-                        flexShrink: 0
+                        border: "1px solid #00838F",
+                        color: "#4DD0E1",
+                        borderRadius: "6px",
+                        padding: "2px 12px",
+                        fontSize: "1.1rem",
+                        lineHeight: 1.4,
+                        cursor: "pointer"
                       }}
                     >
                       {pas < 0 ? "‹" : "›"}
@@ -6522,31 +6523,27 @@
                   const total = totalInvesti(inst);
                   const nb = inst ? (inst.investisseurs || []).length : 0;
                   return (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: "16px"
-                      }}
-                    >
-                      {projetsDuBloc.length > 1 && fleche(-1, "Projet précédent")}
-                      <div style={{ ...carte, flex: 1 }}>
-                      <h2 style={{ color: "#CE93D8", marginTop: 0 }}>
-                        💼 {projetPresente.titre}
-                        {projetsDuBloc.length > 1 && (
-                          <span
-                            style={{
-                              float: "right",
-                              fontSize: "0.9rem",
-                              color: "#888",
-                              fontWeight: "normal"
-                            }}
-                          >
-                            {Math.max(1, indexProjetPresente() + 1)} /{" "}
+                    <div style={carte}>
+                      {projetsDuBloc.length > 1 && (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "flex-end",
+                            gap: "8px",
+                            marginBottom: "10px"
+                          }}
+                        >
+                          {fleche(-1, "Projet précédent")}
+                          <span style={{ color: "#888", fontSize: "0.9rem" }}>
+                            Projet {Math.max(1, indexProjetPresente() + 1)} sur{" "}
                             {projetsDuBloc.length}
                           </span>
-                        )}
+                          {fleche(1, "Projet suivant")}
+                        </div>
+                      )}
+                      <h2 style={{ color: "#CE93D8", marginTop: 0 }}>
+                        💼 {projetPresente.titre}
                       </h2>
                       <div style={{ fontSize: "1.15rem", lineHeight: 1.9 }}>
                         <div>
@@ -6618,8 +6615,6 @@
                           </div>
                         ))}
                       </div>
-                      </div>
-                      {projetsDuBloc.length > 1 && fleche(1, "Projet suivant")}
                     </div>
                   );
                 })()
