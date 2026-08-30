@@ -60,7 +60,28 @@
     cartesJeu: versTableau,
     codesRegistre: versTableau,
     historiqueFiscal: versTableau,
-    historiqueAffichage: versTableau
+    historiqueAffichage: versTableau,
+    croupiers: versTableau,
+    parisJoueurs: versTableau,
+    parisCourse: versTableau,
+    investissements: (v) =>
+      versTableau(v).map((i) => ({
+        ...i,
+        investisseurs: versTableau(i && i.investisseurs)
+      })),
+    // Les réglages du bookmaker portent plusieurs listes : la base peut les
+    // renvoyer indexées, il faut les rétablir en tableaux comme les autres.
+    configBookmaker: (v) => ({
+      ...v,
+      seuilsPari: versTableau(v && v.seuilsPari),
+      chevaux: versTableau(v && v.chevaux),
+      protectionPertes: versTableau(v && v.protectionPertes),
+      protectionGains: versTableau(v && v.protectionGains),
+      projets: versTableau(v && v.projets).map((p) => ({
+        ...p,
+        gains: versTableau(p && p.gains)
+      }))
+    })
   };
 
   /*
