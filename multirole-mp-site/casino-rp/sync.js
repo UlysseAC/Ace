@@ -395,11 +395,13 @@
     React.useEffect(() => {
       if (!Sync.actif) return;
       return Sync.ecouter(cle, (brut) => {
-        const vide =
-          brut === null ||
-          brut === undefined ||
-          (Array.isArray(brut) && brut.length === 0);
-        if (vide) {
+        // Une liste vide est une VALEUR, pas une absence : c'est le résultat
+        // d'une remise à zéro. La confondre avec une base vierge faisait que
+        // l'effacement ne se propageait pas — chaque appareil gardait sa
+        // vieille copie, et les données réapparaissaient. Seule une clé
+        // absente signale une base encore vierge.
+        const absent = brut === null || brut === undefined;
+        if (absent) {
           // Base vide : le premier appareil connecté y dépose l'état initial.
           if (!dejaSeme.current) {
             dejaSeme.current = true;
