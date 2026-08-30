@@ -30,6 +30,7 @@
     "deck",
     "historique",
     "codesUtilises",
+    "avisBookmaker",
     "missionsFaites",
     "produitsAchetes",
     "penalitesSubies"

@@ -1196,6 +1196,29 @@
         const bloqueParJetons = (joueur) =>
           !!(joueur && nombreSur(joueur.jetonsEnJeu, 0) > 0);
 
+        // Annonce sur l'écran de la salle. Sans elle, un joueur ne saurait
+        // jamais qu'il a gagné : ses gains se dénouent quand il n'est pas là
+        // — au retour des jetons d'un autre, à l'arrivée d'une course, à
+        // l'échéance d'un projet. Les montants restent privés, ils ne
+        // figurent que dans l'avis personnel sur la borne.
+        const annoncerSalle = React.useCallback(
+          (lignes) => {
+            const nouvelles = (Array.isArray(lignes) ? lignes : [lignes]).filter(
+              Boolean
+            );
+            if (!nouvelles.length) return;
+            setHistoriqueAffichage((prev) =>
+              [
+                ...nouvelles,
+                ...(prev || []).filter(
+                  (x) => x && x !== configGlobale.phraseAucunHistorique
+                )
+              ].slice(0, 4)
+            );
+          },
+          [setHistoriqueAffichage, configGlobale.phraseAucunHistorique]
+        );
+
         // ================= PARIS SUR UN JOUEUR =================
         const parisOuvertsSur = (joueurId) =>
           parisJoueurs.filter(
@@ -1389,6 +1412,7 @@
 
             const gains = {};
             const lignes = {};
+            const gagnantsSalle = new Set();
             aRegler.forEach((p) => {
               const gagne = String(p.chevalId) === String(gagnant.id);
               const gain = gagne
@@ -1401,6 +1425,7 @@
                   : `Course n°${numero} perdue : −${p.mise}$`,
                 ...(lignes[p.joueurId] || [])
               ];
+              if (gagne) gagnantsSalle.add(p.joueurId);
             });
 
             const ids = new Set(aRegler.map((p) => p.id));
@@ -1426,12 +1451,19 @@
                 return {
                   ...j,
                   solde: j.solde + gain,
-                  historique: [...(l || []), ...j.historique]
+                  historique: [...(l || []), ...j.historique],
+                  avisBookmaker: [...(l || []), ...(j.avisBookmaker || [])]
                 };
               })
             );
+            annoncerSalle(
+              [...gagnantsSalle].map((id) => {
+                const j = joueurs.find((x) => x.id === id);
+                return `🏇 ${(j || {}).nom || "Un joueur"} remporte son pari sur ${gagnant.nom}`;
+              })
+            );
           },
-          [parisCourse, chevauxCourse, configBookmaker, setParisCourse, setJoueurs]
+          [parisCourse, chevauxCourse, configBookmaker, setParisCourse, setJoueurs, joueurs, annoncerSalle]
         );
 
         // ================= INVESTISSEMENTS =================
@@ -1577,12 +1609,18 @@
                 return {
                   ...j,
                   solde: j.solde + gain,
-                  historique: [...(l || []), ...j.historique]
+                  historique: [...(l || []), ...j.historique],
+                  avisBookmaker: [...(l || []), ...(j.avisBookmaker || [])]
                 };
               })
             );
+            annoncerSalle(
+              reussi
+                ? `💼 « ${projet.titre} » a réussi — les investisseurs encaissent`
+                : `💼 « ${projet.titre} » a échoué`
+            );
           },
-          [setInvestissements, setJoueurs]
+          [setInvestissements, setJoueurs, annoncerSalle]
         );
 
         // Passe en revue les projets ouverts et solde ceux qui doivent l'être.
@@ -1906,6 +1944,7 @@
 
           const gainsParParieur = {};
           const lignesParieur = {};
+          const annoncesSalle = [];
           parisSurLui.forEach((pari) => {
             const gagne = pariGagne(pari);
             const gain = gagne ? Math.round(nombreSur(pari.mise, 0) * nombreSur(pari.cote, 1)) : 0;
@@ -1921,6 +1960,12 @@
                 : `Pari perdu sur ${jC.nom} (${sens}) : −${pari.mise}$`,
               ...(lignesParieur[pari.parieurId] || [])
             ];
+            if (gagne) {
+              const parieur = joueurs.find((j) => j.id === pari.parieurId);
+              annoncesSalle.push(
+                `🎯 ${(parieur || {}).nom || "Un joueur"} remporte son pari sur ${jC.nom}`
+              );
+            }
           });
 
           if (parisSurLui.length > 0) {
@@ -1961,7 +2006,10 @@
                 return {
                   ...j,
                   solde: j.solde + gain,
-                  historique: [...(lignes || []), ...j.historique]
+                  historique: [...(lignes || []), ...j.historique],
+                  // Avis à lire à sa prochaine connexion : le parieur n'était
+                  // pas là au moment du dénouement.
+                  avisBookmaker: [...(lignes || []), ...(j.avisBookmaker || [])]
                 };
               }
               const bilan =
@@ -1992,6 +2040,8 @@
               };
             })
           );
+
+          annoncerSalle(annoncesSalle);
 
           setCroupierStack([]);
           setSaisieCroupierManuelle("");
@@ -4410,6 +4460,55 @@
                         gap: "10px"
                       }}
                     >
+                      {/* Ce qui s'est dénoué en son absence : paris et
+                          investissements se règlent quand le joueur n'est pas
+                          devant la borne. L'avis reste jusqu'à ce qu'il le
+                          lise, montants compris — ils ne figurent pas sur
+                          l'écran de la salle. */}
+                      {(joueurActuel.avisBookmaker || []).length > 0 && (
+                        <div
+                          style={{
+                            background: "#004D40",
+                            border: "2px solid #00BFA5",
+                            padding: "14px",
+                            borderRadius: "10px",
+                            marginBottom: "6px"
+                          }}
+                        >
+                          <strong>🎩 Pendant votre absence</strong>
+                          <div style={{ marginTop: "8px", fontSize: "0.92rem" }}>
+                            {(joueurActuel.avisBookmaker || []).map((a, i) => (
+                              <div key={i} style={{ marginBottom: "4px" }}>
+                                • {a}
+                              </div>
+                            ))}
+                          </div>
+                          <button
+                            onClick={() =>
+                              setJoueurs((prev) =>
+                                prev.map((j) =>
+                                  j.id === joueurActuel.id
+                                    ? { ...j, avisBookmaker: [] }
+                                    : j
+                                )
+                              )
+                            }
+                            style={{
+                              marginTop: "10px",
+                              padding: "8px 14px",
+                              background: "#00BFA5",
+                              color: "#000",
+                              border: "none",
+                              borderRadius: "6px",
+                              fontWeight: "bold",
+                              cursor: "pointer"
+                            }}
+                          >
+                            J'ai lu
+                          </button>
+                        </div>
+                      )}
+
                       {/* Annonce de la course à la connexion : le joueur qui
                           n'a pas encore parié est invité à passer voir le
                           bookmaker. S'il a déjà parié, on lui rappelle sur
