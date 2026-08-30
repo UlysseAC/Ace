@@ -29,6 +29,386 @@
         Zéro: "#9C27B0"
       };
 
+      // ================= OUTILS DU BOOKMAKER =================
+
+      // Générateur pseudo-aléatoire semé. Toute la course en découle : à
+      // partir du même numéro de course, chaque appareil calcule le même
+      // vainqueur et le même déroulé, sans rien échanger sur le réseau.
+      // C'est ce qui permet à la salle de voir la même course même si le
+      // wifi lâche pendant la minute.
+      const semer = (graine) => {
+        let a = graine >>> 0;
+        return () => {
+          a += 0x6d2b79f5;
+          let t = a;
+          t = Math.imul(t ^ (t >>> 15), t | 1);
+          t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+      };
+
+      const nombreSur = (v, secours) => {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : secours;
+      };
+
+      // Cote d'un pari sur un joueur. Proportionnelle aux jetons engagés par
+      // la cible et au pourcentage visé : viser gros sur un gros stack paie
+      // gros. Bornée pour que le bookmaker ne se retrouve jamais à devoir
+      // dix fois la mise.
+      const calculerCote = (jetons, pct, cfg) => {
+        const refJ = nombreSur(cfg.refJetons, 2000) || 1;
+        const refP = nombreSur(cfg.refPourcentage, 20) || 1;
+        const facteur = nombreSur(cfg.facteurCote, 0.8);
+        const plancher = nombreSur(cfg.cotePlancher, 1.1);
+        const plafond = nombreSur(cfg.cotePlafond, 3);
+        const brute =
+          1 + (nombreSur(jetons, 0) / refJ) * (nombreSur(pct, 0) / refP) * facteur;
+        return Math.round(Math.min(plafond, Math.max(plancher, brute)) * 100) / 100;
+      };
+
+      // Protection accordée à une cible visée par des paris. Dégressive : le
+      // deuxième pari protège moins que le premier, le troisième encore
+      // moins, et au-delà plus rien.
+      const protectionCumulee = (nbParis, cfg) => {
+        const pertes = cfg.protectionPertes || [];
+        const gains = cfg.protectionGains || [];
+        let perte = 0;
+        let gain = 0;
+        for (let i = 0; i < Math.min(nbParis, pertes.length); i++) {
+          perte += nombreSur(pertes[i], 0);
+        }
+        for (let i = 0; i < Math.min(nbParis, gains.length); i++) {
+          gain += nombreSur(gains[i], 0);
+        }
+        return { perte, gain };
+      };
+
+      // ---- Horloge des courses ----
+      // Tout se déduit de l'heure de départ de la soirée : numéro de la
+      // course en cours, phase, secondes restantes. Aucun appareil n'a
+      // besoin d'être prévenu, ils lisent la même horloge.
+      const PHASES = {
+        AUCUNE: "aucune",
+        ANNONCE: "annonce",
+        TOP: "top",
+        COURSE: "course",
+        RESULTAT: "resultat"
+      };
+
+      const infosCourse = (maintenant, debutSoiree, cfg) => {
+        if (!debutSoiree) return { active: false, phase: PHASES.AUCUNE };
+        const intervalle = nombreSur(cfg.courseIntervalleMin, 30) * 60000;
+        if (intervalle <= 0) return { active: false, phase: PHASES.AUCUNE };
+        const topSec = nombreSur(cfg.courseTopDepartSec, 15) * 1000;
+        const dureeSec = nombreSur(cfg.courseDureeSec, 60) * 1000;
+        const annonce = nombreSur(cfg.courseAnnonceMin, 10) * 60000;
+        const apres = nombreSur(cfg.courseBlocageApresMin, 1) * 60000;
+
+        const ecoule = maintenant - debutSoiree;
+        // La première course a lieu au bout d'un intervalle, pas au démarrage.
+        const numeroSuivant = Math.floor(ecoule / intervalle) + 1;
+
+        // Tant que la course précédente n'est pas finie — course puis temps
+        // de résultat — c'est elle qui compte. Sans ça, l'horloge annoncerait
+        // la course suivante alors que les chevaux sont encore en piste.
+        const numeroPrecedent = numeroSuivant - 1;
+        const departPrecedent = debutSoiree + numeroPrecedent * intervalle;
+        const depuisPrecedent = maintenant - departPrecedent;
+        if (numeroPrecedent >= 1 && depuisPrecedent < dureeSec + apres) {
+          const enCourse = depuisPrecedent < dureeSec;
+          return {
+            active: true,
+            numero: numeroPrecedent,
+            depart: departPrecedent,
+            avantDepart: -depuisPrecedent,
+            phase: enCourse ? PHASES.COURSE : PHASES.RESULTAT,
+            avancement: enCourse
+              ? Math.min(1, Math.max(0, depuisPrecedent / dureeSec))
+              : 1,
+            parisOuverts: false
+          };
+        }
+
+        const depart = debutSoiree + numeroSuivant * intervalle;
+        const avantDepart = depart - maintenant;
+        let phase = PHASES.AUCUNE;
+        if (avantDepart <= topSec) phase = PHASES.TOP;
+        else if (avantDepart <= annonce) phase = PHASES.ANNONCE;
+
+        return {
+          active: true,
+          numero: numeroSuivant,
+          depart,
+          avantDepart,
+          phase,
+          avancement: 0,
+          // Les paris ferment au top départ.
+          parisOuverts: avantDepart > topSec
+        };
+      };
+
+      // Le vainqueur est tiré à partir du numéro de course : identique
+      // partout, sans échange réseau.
+      const trameCourse = (numero, chevaux, cfg) => {
+        const alea = semer(numero * 7919 + 13);
+        const n = chevaux.length || 1;
+        const gagnant = Math.floor(alea() * n);
+        // Chaque cheval reçoit une allure et deux oscillations. Le terme
+        // d'oscillation s'annule au départ et à l'arrivée : les places
+        // changent en cours de route, mais l'ordre d'arrivée reste celui
+        // qu'on vient de tirer.
+        const profils = chevaux.map((c, i) => ({
+          cheval: c,
+          retard: i === gagnant ? 0 : 0.02 + alea() * 0.1,
+          amplitude: 0.05 + alea() * 0.12,
+          frequence: 1 + Math.floor(alea() * 3),
+          dephasage: alea() * Math.PI * 2
+        }));
+        return { gagnant, profils };
+      };
+
+      // Avancement d'un cheval à l'instant t (0 à 1) de la course.
+      const avancementCheval = (profil, t) =>
+        Math.max(
+          0,
+          Math.min(
+            1,
+            t * (1 - profil.retard) +
+              profil.amplitude *
+                Math.sin(profil.frequence * Math.PI * 2 * t + profil.dephasage) *
+                t *
+                (1 - t)
+          )
+        );
+
+      // ---- Horloge des blocs d'investissement ----
+      const blocActuel = (maintenant, debutSoiree, cfg) => {
+        if (!debutSoiree) return 0;
+        const duree = nombreSur(cfg.blocDureeMin, 45) * 60000;
+        if (duree <= 0) return 0;
+        return Math.floor((maintenant - debutSoiree) / duree) + 1;
+      };
+
+      // ================= L'HIPPODROME =================
+      // Un ovale parcouru à vitesse constante : l'angle ne suffit pas, un
+      // point avance deux fois plus vite dans les virages que dans les
+      // lignes droites. On tabule donc la longueur d'arc une fois, et on
+      // s'en sert pour placer le cheval à la bonne distance parcourue.
+      const tableOvale = (rx, ry, n = 720) => {
+        const pts = [{ a: 0, l: 0 }];
+        let L = 0;
+        let prev = [rx, 0];
+        for (let i = 1; i <= n; i++) {
+          const a = (i / n) * Math.PI * 2;
+          const p = [rx * Math.cos(a), ry * Math.sin(a)];
+          L += Math.hypot(p[0] - prev[0], p[1] - prev[1]);
+          pts.push({ a, l: L });
+          prev = p;
+        }
+        return { pts, L };
+      };
+
+      const pointOvale = (table, rx, ry, s) => {
+        const cible = (((s % 1) + 1) % 1) * table.L;
+        let lo = 0;
+        let hi = table.pts.length - 1;
+        while (lo < hi - 1) {
+          const mid = (lo + hi) >> 1;
+          if (table.pts[mid].l < cible) lo = mid;
+          else hi = mid;
+        }
+        const p0 = table.pts[lo];
+        const p1 = table.pts[hi];
+        const f = p1.l === p0.l ? 0 : (cible - p0.l) / (p1.l - p0.l);
+        const a = p0.a + (p1.a - p0.a) * f;
+        return { x: rx * Math.cos(a), y: ry * Math.sin(a) };
+      };
+
+      function PisteCourse({ numero, chevaux, cfg, depart, compact }) {
+        const [t, setT] = React.useState(0);
+        const [changements, setChangements] = React.useState({});
+        const ordrePrecedent = React.useRef(null);
+
+        const duree = (Number(cfg.courseDureeSec) || 60) * 1000;
+        const tours = Number(cfg.courseTours) || 3;
+        const trame = React.useMemo(
+          () => trameCourse(numero, chevaux, cfg),
+          [numero, chevaux, cfg]
+        );
+
+        // Boucle d'animation propre : l'horloge du jeu bat à la seconde, bien
+        // trop lentement pour une course.
+        React.useEffect(() => {
+          let brut;
+          const pas = () => {
+            const avance = Math.min(1, Math.max(0, (Date.now() - depart) / duree));
+            setT(avance);
+            if (avance < 1) brut = requestAnimationFrame(pas);
+          };
+          pas();
+          return () => cancelAnimationFrame(brut);
+        }, [depart, duree]);
+
+        const positions = trame.profils.map((pr, i) => ({
+          index: i,
+          cheval: pr.cheval,
+          avance: avancementCheval(pr, t)
+        }));
+        const classement = [...positions].sort((a, b) => b.avance - a.avance);
+
+        // Dépassement : la ligne qui gagne une place passe au vert, celle qui
+        // en perd une au rouge, une seconde durant.
+        React.useEffect(() => {
+          const ordre = classement.map((p) => p.index).join(",");
+          const avant = ordrePrecedent.current;
+          if (avant && avant !== ordre) {
+            const rangAvant = {};
+            avant.split(",").forEach((id, r) => (rangAvant[id] = r));
+            const nouveaux = {};
+            classement.forEach((p, r) => {
+              const ra = rangAvant[String(p.index)];
+              if (ra === undefined || ra === r) return;
+              nouveaux[p.index] = r < ra ? "gagne" : "perd";
+            });
+            if (Object.keys(nouveaux).length) {
+              setChangements((c) => ({ ...c, ...nouveaux }));
+              const cles = Object.keys(nouveaux);
+              setTimeout(() => {
+                setChangements((c) => {
+                  const copie = { ...c };
+                  cles.forEach((k) => delete copie[k]);
+                  return copie;
+                });
+              }, 1000);
+            }
+          }
+          ordrePrecedent.current = ordre;
+        }, [classement.map((p) => p.index).join(",")]);
+
+        const rx = 330;
+        const ry = 128;
+        const ecart = 26;
+        const tables = React.useMemo(
+          () =>
+            chevaux.map((_, i) =>
+              tableOvale(rx - i * ecart, ry - i * (ecart * 0.42))
+            ),
+          [chevaux.length]
+        );
+
+        return (
+          <div
+            style={{
+              display: "flex",
+              gap: compact ? "12px" : "24px",
+              alignItems: "center",
+              justifyContent: "center",
+              flexWrap: "wrap"
+            }}
+          >
+            <svg
+              viewBox="-370 -170 740 340"
+              style={{
+                width: compact ? "420px" : "min(70vw, 760px)",
+                maxWidth: "100%",
+                background: "#14321a",
+                borderRadius: "16px"
+              }}
+            >
+              {chevaux.map((c, i) => (
+                <ellipse
+                  key={`piste-${c.id}`}
+                  cx="0"
+                  cy="0"
+                  rx={rx - i * ecart}
+                  ry={ry - i * (ecart * 0.42)}
+                  fill="none"
+                  stroke={c.couleur}
+                  strokeOpacity="0.35"
+                  strokeWidth="16"
+                />
+              ))}
+              {/* Ligne d'arrivée, à droite, là où les chevaux s'élancent */}
+              <line
+                x1={rx - chevaux.length * ecart}
+                y1="0"
+                x2={rx + 10}
+                y2="0"
+                stroke="#fff"
+                strokeWidth="3"
+                strokeDasharray="6 5"
+              />
+              {positions.map((p) => {
+                const table = tables[p.index];
+                if (!table) return null;
+                const pt = pointOvale(
+                  table,
+                  rx - p.index * ecart,
+                  ry - p.index * (ecart * 0.42),
+                  p.avance * tours
+                );
+                return (
+                  <g key={`cheval-${p.cheval.id}`}>
+                    <circle
+                      cx={pt.x}
+                      cy={pt.y}
+                      r="15"
+                      fill={p.cheval.couleur}
+                      stroke="#000"
+                      strokeWidth="1.5"
+                    />
+                    <text
+                      x={pt.x}
+                      y={pt.y}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      style={{ fontSize: "20px" }}
+                    >
+                      🏇
+                    </text>
+                  </g>
+                );
+              })}
+            </svg>
+
+            <div style={{ minWidth: compact ? "180px" : "220px" }}>
+              {classement.map((p, rang) => {
+                const etat = changements[p.index];
+                return (
+                  <div
+                    key={`rang-${p.cheval.id}`}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      padding: "8px 10px",
+                      marginBottom: "6px",
+                      borderRadius: "8px",
+                      background:
+                        etat === "gagne"
+                          ? "#1B5E20"
+                          : etat === "perd"
+                            ? "#7f1d1d"
+                            : "#1a1a1a",
+                      transition: "background 250ms",
+                      borderLeft: `6px solid ${p.cheval.couleur}`,
+                      fontWeight: rang === 0 ? "bold" : "normal"
+                    }}
+                  >
+                    <span style={{ width: "22px" }}>{rang + 1}.</span>
+                    <span style={{ flex: 1 }}>{p.cheval.nom}</span>
+                    <span style={{ color: "#888", fontSize: "0.8rem" }}>
+                      {Math.round(p.avance * 100)} %
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      }
+
       function App() {
         const [interfaceActive, setInterfaceActive] = React.useState("menu");
         const [supabaseConnected, setSupabaseConnected] = React.useState(false);
@@ -235,6 +615,110 @@
           }
         ]);
 
+        // --- TABLE 7 : RÉGLAGES DU BOOKMAKER ---
+        // Tout ce qui porte un chiffre est ici, pour que l'organisateur puisse
+        // rééquilibrer la soirée sans toucher au code.
+        const [configBookmaker, setConfigBookmaker] = useEtatPartage(
+          "configBookmaker",
+          {
+            codeBookmaker: "77",
+
+            // --- Paris sur un joueur ---
+            // Les seuils proposés au bookmaker, plutôt qu'un pourcentage libre.
+            seuilsPari: [
+              { id: 1, sens: "gain", pct: 20 },
+              { id: 2, sens: "gain", pct: 50 },
+              { id: 3, sens: "perte", pct: 30 },
+              { id: 4, sens: "perte", pct: 50 }
+            ],
+            // Cote proportionnelle aux jetons de la cible ET au pourcentage
+            // visé : gros stack et gros objectif donnent une grosse cote.
+            refJetons: 2000,
+            refPourcentage: 20,
+            facteurCote: 0.8,
+            cotePlancher: 1.1,
+            cotePlafond: 3,
+            misePlafondPari: 100,
+            misePlafondCumul: 0, // 0 = pas de plafond cumulé
+            // Protection accordée à la cible, dégressive, 3 paris au plus.
+            protectionPertes: [25, 15, 10],
+            protectionGains: [3, 2, 1],
+
+            // --- Course de chevaux ---
+            courseIntervalleMin: 30,
+            courseAnnonceMin: 10,
+            courseTopDepartSec: 15,
+            courseDureeSec: 60,
+            courseTours: 3,
+            courseCote: 3,
+            courseMisePlafond: 100,
+            courseBlocageAvantMin: 2,
+            courseBlocageApresMin: 1,
+            chevaux: [
+              { id: 1, nom: "Éclair", couleur: "#f44336" },
+              { id: 2, nom: "Tonnerre", couleur: "#2196F3" },
+              { id: 3, nom: "Mistral", couleur: "#4CAF50" },
+              { id: 4, nom: "Zéphyr", couleur: "#FFC107" }
+            ],
+
+            // --- Investissements ---
+            blocDureeMin: 45,
+            projets: [
+              {
+                id: 1,
+                titre: "Restaurant rue des Clefs d'Or",
+                bloc: 1,
+                type: "garanti",
+                probabilite: 100,
+                montantRequis: 700,
+                investisseursMax: 5,
+                delaiMin: 30,
+                gains: [40, 35, 30, 25, 20],
+                remboursement: 0
+              },
+              {
+                id: 2,
+                titre: "Mine d'or de Sierra Blanca",
+                bloc: 1,
+                type: "aleatoire",
+                probabilite: 55,
+                montantRequis: 1200,
+                investisseursMax: 4,
+                delaiMin: 30,
+                gains: [80, 60, 45, 30],
+                remboursement: 50
+              }
+            ]
+          }
+        );
+
+        // --- TABLE 8 : CROUPIERS ---
+        // Le rôle croupier n'avait aucune identité : impossible de dire qui
+        // avait vendu des jetons, ni à qui adresser une alerte de pari.
+        const [croupiers, setCroupiers] = useEtatPartage("croupiers", [
+          { numero: "1", nom: "Croupier 1" },
+          { numero: "2", nom: "Croupier 2" },
+          { numero: "3", nom: "Croupier 3" }
+        ]);
+
+        // --- TABLE 9 : PARIS SUR LES JOUEURS ---
+        const [parisJoueurs, setParisJoueurs] = useEtatPartage("parisJoueurs", []);
+
+        // --- TABLE 10 : PARIS SUR LES COURSES ---
+        const [parisCourse, setParisCourse] = useEtatPartage("parisCourse", []);
+
+        // --- TABLE 11 : INVESTISSEMENTS EN COURS ---
+        const [investissements, setInvestissements] = useEtatPartage(
+          "investissements",
+          []
+        );
+
+        // --- TABLE 12 : DÉBUT DE LA SOIRÉE ---
+        // Point de départ commun à toutes les horloges. Sans lui, chaque
+        // appareil compterait les courses et les blocs depuis un instant
+        // différent. Un seul bouton le pose, tous les écrans s'y accordent.
+        const [soireeDebut, setSoireeDebut] = useEtatPartage("soireeDebut", 0);
+
         // --- TABLE 3 : REGISTRE DES CODES ---
         const [codesRegistre, setCodesRegistre] = useEtatPartage("codesRegistre", []);
         // --- TABLE 5 : HISTORIQUE CONTRÔLES FISCAUX ---
@@ -254,12 +738,35 @@
           React.useState("");
         const [deFiscalSelectionne, setDeFiscalSelectionne] = React.useState(1);
 
+        // États Bookmaker
+        // La vitrine est partagée : c'est ce que le second écran, retourné
+        // vers les joueurs, affiche. Le bookmaker la pilote depuis son poste.
+        const [vitrine, setVitrine] = useEtatPartage("vitrine", { mode: "accueil" });
+        const [bookmakerOuvert, setBookmakerOuvert] = React.useState(false);
+        const [codeBkSaisi, setCodeBkSaisi] = React.useState("");
+        const [sousMenuBk, setSousMenuBk] = React.useState("joueur");
+        const [bkParieurId, setBkParieurId] = React.useState("");
+        const [bkCibleId, setBkCibleId] = React.useState("");
+        const [bkSeuilId, setBkSeuilId] = React.useState("");
+        const [bkMise, setBkMise] = React.useState("");
+        const [bkCourseJoueurId, setBkCourseJoueurId] = React.useState("");
+        const [bkCourseChevalId, setBkCourseChevalId] = React.useState("");
+        const [bkCourseMise, setBkCourseMise] = React.useState("");
+        const [bkInvJoueurId, setBkInvJoueurId] = React.useState("");
+        const [bkInvProjetId, setBkInvProjetId] = React.useState("");
+        const [bkInvMontant, setBkInvMontant] = React.useState("");
+
         // États Croupier
         const [tableCroupier, setTableCroupier] = React.useState("Roulette");
         const [joueurCroupierId, setJoueurCroupierId] = React.useState("steph");
         const [saisieCroupierManuelle, setSaisieCroupierManuelle] =
           React.useState("");
         const [croupierStack, setCroupierStack] = React.useState([]);
+        // Le croupier s'identifie par son numéro en ouvrant son interface :
+        // sans ça, impossible de savoir qui a vendu des jetons, ni à qui
+        // adresser l'alerte quand un pari est pris sur un de ses joueurs.
+        const [croupierIdentifie, setCroupierIdentifie] = React.useState("");
+        const [saisieNumeroCroupier, setSaisieNumeroCroupier] = React.useState("");
 
         // États Banquier & Boutique
         const [joueurASupprimer, setJoueurASupprimer] = React.useState(null);
@@ -649,6 +1156,497 @@
           }
         };
 
+        // ================= HORLOGE ET ÉTAT DU BOOKMAKER =================
+        // Un battement par seconde suffit aux décomptes. Toutes les échéances
+        // — courses, blocs d'investissement, délais des projets — se lisent
+        // sur cette horloge, elle-même calée sur l'heure de début de soirée
+        // partagée par tous les appareils.
+        const [maintenant, setMaintenant] = React.useState(Date.now());
+        React.useEffect(() => {
+          const t = setInterval(() => setMaintenant(Date.now()), 1000);
+          return () => clearInterval(t);
+        }, []);
+
+        const course = infosCourse(maintenant, soireeDebut, configBookmaker);
+        const blocInvest = blocActuel(maintenant, soireeDebut, configBookmaker);
+
+        // Le contrôle fiscal est interdit autour de la course : on veut la
+        // salle devant l'hippodrome, pas devant deux animations qui se
+        // disputent l'écran. Renvoie les secondes restantes, ou 0.
+        const secondesBlocageFiscal = (() => {
+          if (!course.active || !course.numero) return 0;
+          const avant =
+            nombreSur(configBookmaker.courseBlocageAvantMin, 2) * 60000;
+          const duree = nombreSur(configBookmaker.courseDureeSec, 60) * 1000;
+          const apres =
+            nombreSur(configBookmaker.courseBlocageApresMin, 1) * 60000;
+          const fin = course.depart + duree + apres;
+          if (course.avantDepart > avant) return 0;
+          if (maintenant >= fin) return 0;
+          return Math.ceil((fin - maintenant) / 1000);
+        })();
+
+        // ================= JETONS EN JEU : GARDE-FOU =================
+        // Un joueur assis à une table ne touche plus à ses cartes : ni
+        // ramassage, ni activation. Sans cette règle, il pourrait se faire
+        // parier dessus puis sortir un Veinard pour fausser le pari.
+        const MESSAGE_JETONS_EN_JEU =
+          "Vous avez des jetons en jeu, veuillez régulariser votre situation avant de continuer à jouer.";
+
+        const bloqueParJetons = (joueur) =>
+          !!(joueur && nombreSur(joueur.jetonsEnJeu, 0) > 0);
+
+        // ================= PARIS SUR UN JOUEUR =================
+        const parisOuvertsSur = (joueurId) =>
+          parisJoueurs.filter(
+            (p) => p.statut === "ouvert" && p.cibleId === joueurId
+          );
+
+        // Un joueur est « pariable » tant qu'il est à table sans Veinard.
+        const raisonRefusPari = (cible) => {
+          if (!cible) return "Aucun joueur sélectionné.";
+          if (!(cible.jetonsEnJeu > 0))
+            return `${cible.nom} n'a pas de jetons en jeu : aucune cote n'est calculable.`;
+          if ((cible.deck || []).some((c) => c.id === "veinard"))
+            return `${cible.nom} détient une carte Veinard : les paris sur ce joueur sont interdits.`;
+          return null;
+        };
+
+        const libelleSeuil = (seuil) =>
+          seuil.sens === "gain"
+            ? `ressort avec +${seuil.pct} % de bénéfice`
+            : `ressort avec −${seuil.pct} % de perte`;
+
+        const placerPariJoueur = (parieurId, cibleId, seuilId, mise) => {
+          const cfg = configBookmaker;
+          const parieur = joueurs.find((j) => j.id === parieurId);
+          const cible = joueurs.find((j) => j.id === cibleId);
+          const seuil = (cfg.seuilsPari || []).find(
+            (x) => String(x.id) === String(seuilId)
+          );
+          if (!parieur || !cible || !seuil) {
+            alert("Sélection incomplète.");
+            return;
+          }
+          if (parieur.id === cible.id) {
+            alert("Un joueur ne peut pas parier sur lui-même.");
+            return;
+          }
+          const refus = raisonRefusPari(cible);
+          if (refus) {
+            alert(refus);
+            return;
+          }
+          const m = Number(mise);
+          if (!(m > 0)) {
+            alert("Montant invalide.");
+            return;
+          }
+          const plafond = nombreSur(cfg.misePlafondPari, 100);
+          if (m > plafond) {
+            alert(`La mise ne peut pas dépasser ${plafond} par pari.`);
+            return;
+          }
+          const cumulMax = nombreSur(cfg.misePlafondCumul, 0);
+          if (cumulMax > 0) {
+            const deja = parisJoueurs
+              .filter(
+                (p) =>
+                  p.statut === "ouvert" &&
+                  p.parieurId === parieurId &&
+                  p.cibleId === cibleId
+              )
+              .reduce((t, p) => t + nombreSur(p.mise, 0), 0);
+            if (deja + m > cumulMax) {
+              alert(
+                `Plafond cumulé de ${cumulMax} sur ce joueur : ${deja} déjà misés.`
+              );
+              return;
+            }
+          }
+          if (m > parieur.solde) {
+            alert("Solde insuffisant.");
+            return;
+          }
+
+          const cote = calculerCote(cible.jetonsEnJeu, seuil.pct, cfg);
+          const pari = {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            parieurId,
+            cibleId,
+            sens: seuil.sens,
+            pct: nombreSur(seuil.pct, 0),
+            mise: m,
+            cote,
+            statut: "ouvert",
+            ts: Date.now()
+          };
+          setParisJoueurs((prev) => [...prev, pari]);
+          setJoueurs((prev) =>
+            prev.map((j) =>
+              j.id === parieurId
+                ? {
+                    ...j,
+                    solde: Math.max(0, j.solde - m),
+                    historique: [
+                      `Pari ${m}$ sur ${cible.nom} (${libelleSeuil(seuil)}) — cote ${cote}`,
+                      ...j.historique
+                    ]
+                  }
+                : j
+            )
+          );
+          alert(
+            `Pari enregistré : ${parieur.nom} mise ${m}$ sur ${cible.nom}\n` +
+              `${libelleSeuil(seuil)} — cote ${cote}, gain possible ${Math.round(m * cote)}$`
+          );
+        };
+
+        // ================= PARIS SUR LA COURSE =================
+        const chevauxCourse = configBookmaker.chevaux || [];
+
+        const chevalGagnant = (numero) => {
+          if (!numero || !chevauxCourse.length) return null;
+          const { gagnant } = trameCourse(numero, chevauxCourse, configBookmaker);
+          return chevauxCourse[gagnant] || null;
+        };
+
+        const placerPariCourse = (joueurId, chevalId, mise) => {
+          const joueur = joueurs.find((j) => j.id === joueurId);
+          const cheval = chevauxCourse.find(
+            (c) => String(c.id) === String(chevalId)
+          );
+          if (!joueur || !cheval) {
+            alert("Sélection incomplète.");
+            return;
+          }
+          if (!soireeDebut) {
+            alert("La soirée n'a pas démarré : aucune course n'est programmée.");
+            return;
+          }
+          if (!course.parisOuverts) {
+            alert("Les paris sont fermés : la course est imminente ou en cours.");
+            return;
+          }
+          const m = Number(mise);
+          if (!(m > 0)) {
+            alert("Montant invalide.");
+            return;
+          }
+          const plafond = nombreSur(configBookmaker.courseMisePlafond, 100);
+          if (m > plafond) {
+            alert(`La mise ne peut pas dépasser ${plafond} par pari.`);
+            return;
+          }
+          if (m > joueur.solde) {
+            alert("Solde insuffisant.");
+            return;
+          }
+          const cote = nombreSur(configBookmaker.courseCote, 3);
+          setParisCourse((prev) => [
+            ...prev,
+            {
+              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              numero: course.numero,
+              joueurId,
+              chevalId: cheval.id,
+              mise: m,
+              cote,
+              statut: "ouvert",
+              ts: Date.now()
+            }
+          ]);
+          setJoueurs((prev) =>
+            prev.map((j) =>
+              j.id === joueurId
+                ? {
+                    ...j,
+                    solde: Math.max(0, j.solde - m),
+                    historique: [
+                      `Pari course n°${course.numero} : ${m}$ sur ${cheval.nom} (cote ${cote})`,
+                      ...j.historique
+                    ]
+                  }
+                : j
+            )
+          );
+          alert(
+            `Pari enregistré : ${joueur.nom}, ${m}$ sur ${cheval.nom}\n` +
+              `Course n°${course.numero} — gain possible ${Math.round(m * cote)}$`
+          );
+        };
+
+        // Règle les paris d'une course terminée. Un seul appareil s'en charge
+        // — celui du bookmaker — sinon deux écrans paieraient le même gain.
+        const reglerCourse = React.useCallback(
+          (numero) => {
+            const aRegler = parisCourse.filter(
+              (p) => p.numero === numero && p.statut === "ouvert"
+            );
+            if (!aRegler.length) return;
+            const gagnant = chevalGagnant(numero);
+            if (!gagnant) return;
+
+            const gains = {};
+            const lignes = {};
+            aRegler.forEach((p) => {
+              const gagne = String(p.chevalId) === String(gagnant.id);
+              const gain = gagne
+                ? Math.round(nombreSur(p.mise, 0) * nombreSur(p.cote, 1))
+                : 0;
+              if (gain > 0) gains[p.joueurId] = (gains[p.joueurId] || 0) + gain;
+              lignes[p.joueurId] = [
+                gagne
+                  ? `Course n°${numero} gagnée avec ${gagnant.nom} : +${gain}$`
+                  : `Course n°${numero} perdue : −${p.mise}$`,
+                ...(lignes[p.joueurId] || [])
+              ];
+            });
+
+            const ids = new Set(aRegler.map((p) => p.id));
+            setParisCourse((prev) =>
+              prev.map((p) =>
+                ids.has(p.id)
+                  ? {
+                      ...p,
+                      statut:
+                        String(p.chevalId) === String(gagnant.id)
+                          ? "gagne"
+                          : "perdu",
+                      regleTs: Date.now()
+                    }
+                  : p
+              )
+            );
+            setJoueurs((prev) =>
+              prev.map((j) => {
+                const gain = gains[j.id] || 0;
+                const l = lignes[j.id];
+                if (!gain && !l) return j;
+                return {
+                  ...j,
+                  solde: j.solde + gain,
+                  historique: [...(l || []), ...j.historique]
+                };
+              })
+            );
+          },
+          [parisCourse, chevauxCourse, configBookmaker, setParisCourse, setJoueurs]
+        );
+
+        // ================= INVESTISSEMENTS =================
+        const projetsDuBloc = (configBookmaker.projets || []).filter(
+          (pr) => Number(pr.bloc) === Number(blocInvest)
+        );
+
+        const instanceProjet = (projetId) =>
+          investissements.find(
+            (i) =>
+              String(i.projetId) === String(projetId) &&
+              Number(i.bloc) === Number(blocInvest)
+          );
+
+        const totalInvesti = (inst) =>
+          (inst && inst.investisseurs ? inst.investisseurs : []).reduce(
+            (t, x) => t + nombreSur(x.montant, 0),
+            0
+          );
+
+        const investir = (joueurId, projetId, montant) => {
+          const projet = (configBookmaker.projets || []).find(
+            (pr) => String(pr.id) === String(projetId)
+          );
+          const joueur = joueurs.find((j) => j.id === joueurId);
+          if (!projet || !joueur) {
+            alert("Sélection incomplète.");
+            return;
+          }
+          const m = Number(montant);
+          if (!(m > 0)) {
+            alert("Montant invalide.");
+            return;
+          }
+          if (m > joueur.solde) {
+            alert("Solde insuffisant.");
+            return;
+          }
+          const inst = instanceProjet(projetId);
+          if (inst && inst.statut !== "ouvert") {
+            alert("Ce projet est clos.");
+            return;
+          }
+          const dejaLa = inst
+            ? (inst.investisseurs || []).some((x) => x.joueurId === joueurId)
+            : false;
+          if (dejaLa) {
+            alert(`${joueur.nom} a déjà investi dans ce projet.`);
+            return;
+          }
+          const nb = inst ? (inst.investisseurs || []).length : 0;
+          const max = nombreSur(projet.investisseursMax, 5);
+          if (nb >= max) {
+            alert(`Ce projet a déjà ses ${max} investisseurs.`);
+            return;
+          }
+
+          const entree = { joueurId, montant: m, ts: Date.now() };
+          if (inst) {
+            setInvestissements((prev) =>
+              prev.map((i) =>
+                i.id === inst.id
+                  ? { ...i, investisseurs: [...(i.investisseurs || []), entree] }
+                  : i
+              )
+            );
+          } else {
+            // Le délai ne court qu'à partir du premier investisseur.
+            setInvestissements((prev) => [
+              ...prev,
+              {
+                id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                projetId: projet.id,
+                bloc: blocInvest,
+                premierTs: Date.now(),
+                statut: "ouvert",
+                investisseurs: [entree]
+              }
+            ]);
+          }
+          setJoueurs((prev) =>
+            prev.map((j) =>
+              j.id === joueurId
+                ? {
+                    ...j,
+                    solde: Math.max(0, j.solde - m),
+                    historique: [
+                      `Investissement ${m}$ dans « ${projet.titre} » (rang ${nb + 1})`,
+                      ...j.historique
+                    ]
+                  }
+                : j
+            )
+          );
+          alert(
+            `${joueur.nom} investit ${m}$ dans « ${projet.titre} » — rang ${nb + 1}.`
+          );
+        };
+
+        // Solde un projet : réussite, échec, remboursement. Comme pour la
+        // course, un seul appareil s'en charge.
+        const reglerProjet = React.useCallback(
+          (inst, projet, reussi) => {
+            const gains = projet.gains || [];
+            const remb = nombreSur(projet.remboursement, 0);
+            const mouvements = {};
+            const lignes = {};
+            (inst.investisseurs || []).forEach((x, rang) => {
+              const mise = nombreSur(x.montant, 0);
+              if (reussi) {
+                const pct = nombreSur(gains[rang], 0);
+                const total = mise + Math.round((mise * pct) / 100);
+                mouvements[x.joueurId] = (mouvements[x.joueurId] || 0) + total;
+                lignes[x.joueurId] = [
+                  `« ${projet.titre} » a réussi — rang ${rang + 1}, +${pct} % : +${total}$`,
+                  ...(lignes[x.joueurId] || [])
+                ];
+              } else {
+                const rendu = Math.round((mise * remb) / 100);
+                if (rendu > 0)
+                  mouvements[x.joueurId] = (mouvements[x.joueurId] || 0) + rendu;
+                lignes[x.joueurId] = [
+                  remb > 0
+                    ? `« ${projet.titre} » a échoué — ${remb} % remboursés : +${rendu}$`
+                    : `« ${projet.titre} » a échoué — mise perdue : −${mise}$`,
+                  ...(lignes[x.joueurId] || [])
+                ];
+              }
+            });
+
+            setInvestissements((prev) =>
+              prev.map((i) =>
+                i.id === inst.id
+                  ? { ...i, statut: reussi ? "reussi" : "echoue", regleTs: Date.now() }
+                  : i
+              )
+            );
+            setJoueurs((prev) =>
+              prev.map((j) => {
+                const gain = mouvements[j.id] || 0;
+                const l = lignes[j.id];
+                if (!gain && !l) return j;
+                return {
+                  ...j,
+                  solde: j.solde + gain,
+                  historique: [...(l || []), ...j.historique]
+                };
+              })
+            );
+          },
+          [setInvestissements, setJoueurs]
+        );
+
+        // Passe en revue les projets ouverts et solde ceux qui doivent l'être.
+        const reglerInvestissementsSiBesoin = React.useCallback(() => {
+          investissements
+            .filter((i) => i.statut === "ouvert")
+            .forEach((inst) => {
+              const projet = (configBookmaker.projets || []).find(
+                (pr) => String(pr.id) === String(inst.projetId)
+              );
+              if (!projet) return;
+              const total = totalInvesti(inst);
+              const requis = nombreSur(projet.montantRequis, 0);
+              const nb = (inst.investisseurs || []).length;
+              const max = nombreSur(projet.investisseursMax, 5);
+              const echeance =
+                nombreSur(inst.premierTs, 0) +
+                nombreSur(projet.delaiMin, 30) * 60000;
+
+              if (total >= requis) {
+                // Conditions réunies : garanti passe, aléatoire tire au sort.
+                const reussi =
+                  projet.type === "aleatoire"
+                    ? semer(
+                        Number(String(inst.id).replace(/\D/g, "").slice(-9)) || 1
+                      )() *
+                        100 <
+                      nombreSur(projet.probabilite, 100)
+                    : true;
+                reglerProjet(inst, projet, reussi);
+                return;
+              }
+              // Plus de place et objectif non atteint : c'est perdu d'avance.
+              if (nb >= max || maintenant >= echeance) {
+                reglerProjet(inst, projet, false);
+              }
+            });
+        }, [investissements, configBookmaker, maintenant, reglerProjet]);
+
+        // Le poste du bookmaker fait office d'arbitre : c'est lui, et lui
+        // seul, qui solde les courses terminées et les projets échus. Si
+        // chaque écran le faisait, le même gain serait payé plusieurs fois.
+        React.useEffect(() => {
+          if (interfaceActive !== "bookmaker") return;
+          // On solde toutes les courses terminées, pas seulement la dernière :
+          // si ce poste était fermé pendant une course, ses paris seraient
+          // restés en suspens sans jamais être payés.
+          const aSolder = [
+            ...new Set(
+              parisCourse
+                .filter((x) => x.statut === "ouvert")
+                .map((x) => x.numero)
+            )
+          ].filter(
+            (n) =>
+              n < course.numero ||
+              (n === course.numero && course.phase === PHASES.RESULTAT)
+          );
+          aSolder.forEach(reglerCourse);
+          reglerInvestissementsSiBesoin();
+          // Volontairement sans les fonctions en dépendance : elles changent
+          // d'identité à chaque rendu, l'horloge suffit à cadencer l'arbitrage.
+        }, [interfaceActive, course.phase, course.numero, maintenant]);
+
         // ================= LOGIQUE IMPRIMERIE =================
         const genererNumeroUnique = () => {
           return Math.floor(100000 + Math.random() * 900000).toString();
@@ -696,6 +1694,10 @@
             alert(
               "Mode Local activé : Le scan des cartes physiques est temporairement bloqué !"
             );
+            return;
+          }
+          if (type === "carte" && bloqueParJetons(joueurActuel)) {
+            alert(MESSAGE_JETONS_EN_JEU);
             return;
           }
 
@@ -845,8 +1847,11 @@
                       solde: Math.max(0, j.solde - montant),
                       totalJeux: j.totalJeux - montant,
                       jetonsEnJeu: jetonsAvant + montant,
+                      // On retient qui a vendu : c'est ce croupier qu'il
+                      // faudra prévenir si un pari est pris sur ce joueur.
+                      croupierVendeur: croupierIdentifie || j.croupierVendeur || null,
                       historique: [
-                        `Croupier [${tableCroupier}] : achat de ${montant}$ de jetons`,
+                        `Croupier ${croupierIdentifie ? "n°" + croupierIdentifie + " " : ""}[${tableCroupier}] : achat de ${montant}$ de jetons`,
                         ...j.historique
                       ]
                     }
@@ -861,29 +1866,104 @@
           // Retour des jetons : le résultat de la partie est la différence
           // entre ce que le joueur rapporte et ce qu'il avait pris.
           const resultat = montant - jetonsAvant;
+          const pctReel = jetonsAvant > 0 ? (resultat / jetonsAvant) * 100 : 0;
+
+          // ---- Paris pris sur ce joueur ----
+          // Le pari se juge sur le résultat brut, avant toute bonification :
+          // la protection ci-dessous change ce que le joueur empoche, pas
+          // l'issue du pari.
+          const parisSurLui = parisOuvertsSur(jC.id);
+          const protection = protectionCumulee(
+            parisSurLui.length,
+            configBookmaker
+          );
+
           let bonus = 0;
           if (aLeVeinard && resultat < 0) {
-            bonus = Math.round(
+            bonus += Math.round(
               (-resultat * configGlobale.bonusVeinardPertes) / 100
             );
           } else if (aLeVeinard && resultat > 0) {
-            bonus = Math.round(
+            bonus += Math.round(
               (resultat * configGlobale.bonusVeinardGain) / 100
             );
           }
+          // Un joueur visé par un pari ne peut pas détenir de Veinard : les
+          // deux effets ne se rencontrent jamais. On les additionne quand
+          // même, pour que le crédit reste juste si la règle changeait.
+          if (parisSurLui.length > 0 && resultat < 0) {
+            bonus += Math.round((-resultat * protection.perte) / 100);
+          } else if (parisSurLui.length > 0 && resultat > 0) {
+            bonus += Math.round((resultat * protection.gain) / 100);
+          }
           const credite = montant + bonus;
 
+          // Un pari est gagné si le seuil est atteint dans le sens visé.
+          const pariGagne = (pari) =>
+            pari.sens === "gain"
+              ? pctReel >= nombreSur(pari.pct, 0)
+              : pctReel <= -nombreSur(pari.pct, 0);
+
+          const gainsParParieur = {};
+          const lignesParieur = {};
+          parisSurLui.forEach((pari) => {
+            const gagne = pariGagne(pari);
+            const gain = gagne ? Math.round(nombreSur(pari.mise, 0) * nombreSur(pari.cote, 1)) : 0;
+            if (gain > 0) {
+              gainsParParieur[pari.parieurId] =
+                (gainsParParieur[pari.parieurId] || 0) + gain;
+            }
+            const sens =
+              pari.sens === "gain" ? `+${pari.pct} %` : `−${pari.pct} %`;
+            lignesParieur[pari.parieurId] = [
+              gagne
+                ? `Pari gagné sur ${jC.nom} (${sens}) : +${gain}$`
+                : `Pari perdu sur ${jC.nom} (${sens}) : −${pari.mise}$`,
+              ...(lignesParieur[pari.parieurId] || [])
+            ];
+          });
+
+          if (parisSurLui.length > 0) {
+            const ids = new Set(parisSurLui.map((p) => p.id));
+            setParisJoueurs((prev) =>
+              prev.map((p) =>
+                ids.has(p.id)
+                  ? {
+                      ...p,
+                      statut: pariGagne(p) ? "gagne" : "perdu",
+                      pctReel: Math.round(pctReel * 10) / 10,
+                      regleTs: Date.now()
+                    }
+                  : p
+              )
+            );
+          }
+
           if (bonus > 0) {
+            const origine =
+              parisSurLui.length > 0
+                ? `Protection (${parisSurLui.length} pari${parisSurLui.length > 1 ? "s" : ""})`
+                : "Effet [Le Veinard]";
             alert(
               resultat < 0
-                ? `Effet [Le Veinard] : perte de ${-resultat}$ réduite à ${-resultat - bonus}$. Crédit : ${credite}$`
-                : `Effet [Le Veinard] : gain de ${resultat}$ porté à ${resultat + bonus}$. Crédit : ${credite}$`
+                ? `${origine} : perte de ${-resultat}$ réduite à ${-resultat - bonus}$. Crédit : ${credite}$`
+                : `${origine} : gain de ${resultat}$ porté à ${resultat + bonus}$. Crédit : ${credite}$`
             );
           }
 
           setJoueurs((prev) =>
             prev.map((j) => {
-              if (j.id !== jC.id) return j;
+              // Les parieurs encaissent leur gain au passage.
+              if (j.id !== jC.id) {
+                const gain = gainsParParieur[j.id] || 0;
+                const lignes = lignesParieur[j.id];
+                if (!gain && !lignes) return j;
+                return {
+                  ...j,
+                  solde: j.solde + gain,
+                  historique: [...(lignes || []), ...j.historique]
+                };
+              }
               const bilan =
                 resultat === 0
                   ? "à l'équilibre"
@@ -895,15 +1975,17 @@
                 ...j.historique
               ];
               // La carte n'est consommée que si elle a réellement joué.
-              if (bonus > 0) nvHist.unshift("Carte [Le Veinard] consommée");
+              if (aLeVeinard && bonus > 0)
+                nvHist.unshift("Carte [Le Veinard] consommée");
               return {
                 ...j,
                 solde: Math.max(0, j.solde + credite),
                 totalJeux: j.totalJeux + credite,
                 jetonsEnJeu: 0,
-            veinardActif: false,
+                croupierVendeur: null,
+                veinardActif: false,
                 deck:
-                  bonus > 0
+                  aLeVeinard && bonus > 0
                     ? j.deck.filter((c) => c.id !== "veinard")
                     : j.deck,
                 historique: nvHist
@@ -1070,6 +2152,20 @@
         }, [jouerAnimation]);
 
         const lancerControleFiscal = () => {
+          // Le contrôle fiscal est une activation de carte : elle tombe sous
+          // la même règle que les autres quand le joueur est à table.
+          if (bloqueParJetons(joueurActuel)) {
+            alert(MESSAGE_JETONS_EN_JEU);
+            return;
+          }
+          // Et il est suspendu autour de la course : la salle doit avoir les
+          // yeux sur l'hippodrome, pas sur deux animations concurrentes.
+          if (secondesBlocageFiscal > 0) {
+            alert(
+              `Une course de chevaux est imminente ou en cours : le contrôle fiscal est impossible pendant encore ${secondesBlocageFiscal} secondes.`
+            );
+            return;
+          }
           if (!cibleFiscaleSelectionnee) {
             alert("Choisissez une cible.");
             return;
@@ -1388,6 +2484,20 @@
                 >
                   🏦 Banquier & Boutique
                 </button>
+                <button
+                  onClick={() => setInterfaceActive("bookmaker")}
+                  className="checkbox-btn"
+                  style={{ background: "#00838F" }}
+                >
+                  🎩 Bookmaker
+                </button>
+                <button
+                  onClick={() => setInterfaceActive("vitrine")}
+                  className="checkbox-btn"
+                  style={{ background: "#455A64" }}
+                >
+                  🪧 Vitrine bookmaker (écran joueurs)
+                </button>
               </div>
             </div>
           );
@@ -1411,20 +2521,62 @@
                 <h1 style={{ color: "#FF9800", margin: 0 }}>
                   🛠️ Interface Admin
                 </h1>
-                <button
-                  onClick={() => setInterfaceActive("base")}
-                  style={{
-                    padding: "10px 18px",
-                    background: "#2196F3",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: "6px",
-                    fontWeight: "bold",
-                    cursor: "pointer"
-                  }}
-                >
-                  🗄️ Voir la base de données
-                </button>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  <button
+                    onClick={() => setInterfaceActive("base")}
+                    style={{
+                      padding: "10px 18px",
+                      background: "#2196F3",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "6px",
+                      fontWeight: "bold",
+                      cursor: "pointer"
+                    }}
+                  >
+                    🗄️ Voir la base de données
+                  </button>
+                  <button
+                    onClick={() => setInterfaceActive("adminBookmaker")}
+                    style={{
+                      padding: "10px 18px",
+                      background: "#00838F",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "6px",
+                      fontWeight: "bold",
+                      cursor: "pointer"
+                    }}
+                  >
+                    🎩 Réglages Bookmaker
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (soireeDebut) {
+                        if (
+                          !confirm(
+                            "La soirée a déjà démarré. Remettre les horloges à zéro ? Les courses et les blocs d'investissement repartiront de maintenant."
+                          )
+                        )
+                          return;
+                      }
+                      setSoireeDebut(Date.now());
+                    }}
+                    style={{
+                      padding: "10px 18px",
+                      background: soireeDebut ? "#455A64" : "#4CAF50",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "6px",
+                      fontWeight: "bold",
+                      cursor: "pointer"
+                    }}
+                  >
+                    {soireeDebut
+                      ? `⏱️ Soirée en cours — bloc ${blocInvest}`
+                      : "▶️ Démarrer la soirée"}
+                  </button>
+                </div>
               </div>
 
               <div
@@ -3258,6 +4410,47 @@
                         gap: "10px"
                       }}
                     >
+                      {/* Annonce de la course à la connexion : le joueur qui
+                          n'a pas encore parié est invité à passer voir le
+                          bookmaker. S'il a déjà parié, on lui rappelle sur
+                          quel cheval. */}
+                      {soireeDebut &&
+                        course.active &&
+                        course.phase === PHASES.ANNONCE &&
+                        (() => {
+                          const sien = parisCourse.find(
+                            (x) =>
+                              x.numero === course.numero &&
+                              x.joueurId === joueurActuel.id &&
+                              x.statut === "ouvert"
+                          );
+                          const cheval = sien
+                            ? chevauxCourse.find(
+                                (c) => String(c.id) === String(sien.chevalId)
+                              )
+                            : null;
+                          return (
+                            <div
+                              style={{
+                                background: sien ? "#1B5E20" : "#01579B",
+                                padding: "12px 14px",
+                                borderRadius: "10px",
+                                marginBottom: "6px"
+                              }}
+                            >
+                              <strong>
+                                🏇 Course n°{course.numero} dans{" "}
+                                {Math.max(0, Math.ceil(course.avantDepart / 60000))} min
+                              </strong>
+                              <div style={{ fontSize: "0.9rem", marginTop: "4px" }}>
+                                {sien
+                                  ? `Votre pari : ${sien.mise}$ sur ${(cheval || {}).nom || "?"}.`
+                                  : "Passez voir le bookmaker pour placer votre pari !"}
+                              </div>
+                            </div>
+                          );
+                        })()}
+
                       <button
                         onClick={() => setSousMenuBanque("compte")}
                         className="checkbox-btn"
@@ -3431,6 +4624,10 @@
                             ) : c.id === "paradis_fiscal" ? (
                               <button
                                 onClick={() => {
+                                  if (bloqueParJetons(joueurActuel)) {
+                                    alert(MESSAGE_JETONS_EN_JEU);
+                                    return;
+                                  }
                                   setJoueurs((prev) =>
                                     prev.map((j) =>
                                       j.id === joueurActuel.id
@@ -3517,6 +4714,10 @@
                               ) : (
                                 <button
                                   onClick={() => {
+                                    if (bloqueParJetons(joueurActuel)) {
+                                      alert(MESSAGE_JETONS_EN_JEU);
+                                      return;
+                                    }
                                     setJoueurs((prev) =>
                                       prev.map((j) =>
                                         j.id === joueurActuel.id
@@ -3951,8 +5152,1366 @@
         }
 
         // 4. INTERFACE CROUPIER
+        // --- RÉGLAGES DU BOOKMAKER ---
+        // Tout ce qui porte un chiffre se règle ici, pour rééquilibrer la
+        // soirée sans toucher au code.
+        if (interfaceActive === "adminBookmaker") {
+          const majCfg = (cle, valeur) =>
+            setConfigBookmaker({ ...configBookmaker, [cle]: valeur });
+
+          const cadre = {
+            background: "#222",
+            padding: "18px",
+            borderRadius: "10px",
+            marginBottom: "18px"
+          };
+          const champ = {
+            width: "100%",
+            padding: "8px",
+            marginTop: "3px",
+            borderRadius: "5px"
+          };
+          const grille = {
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+            gap: "12px"
+          };
+
+          // Une fonction, pas un composant : un composant défini dans le
+          // rendu est recréé à chaque frappe, l'input serait remonté et le
+          // curseur perdrait le focus à chaque caractère saisi.
+          const champNombre = (libelle, cle, aide) => (
+            <label key={cle} style={{ display: "block", fontSize: "0.85rem" }}>
+              {libelle}
+              <input
+                type="number"
+                value={configBookmaker[cle]}
+                onChange={(e) => majCfg(cle, e.target.value)}
+                style={champ}
+              />
+              {aide && (
+                <span style={{ color: "#888", fontSize: "0.75rem" }}>{aide}</span>
+              )}
+            </label>
+          );
+
+          const nbChevaux = (configBookmaker.chevaux || []).length || 1;
+          const coteEquitable = nbChevaux;
+          const coteActuelle = nombreSur(configBookmaker.courseCote, 3);
+          const marge = Math.round((1 - coteActuelle / coteEquitable) * 100);
+
+          return (
+            <div style={{ padding: "26px", maxWidth: "980px", margin: "0 auto" }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "18px"
+                }}
+              >
+                <h1 style={{ color: "#00838F", margin: 0 }}>
+                  🎩 Réglages Bookmaker
+                </h1>
+                <button
+                  onClick={() => setInterfaceActive("admin")}
+                  className="checkbox-btn"
+                >
+                  Retour à l'admin
+                </button>
+              </div>
+
+              {/* ---- Accès ---- */}
+              <div style={cadre}>
+                <h3 style={{ marginTop: 0, color: "#4DD0E1" }}>Accès</h3>
+                <label style={{ display: "block", fontSize: "0.85rem" }}>
+                  Code de l'interface bookmaker
+                  <input
+                    value={configBookmaker.codeBookmaker}
+                    onChange={(e) => majCfg("codeBookmaker", e.target.value)}
+                    style={champ}
+                  />
+                </label>
+              </div>
+
+              {/* ---- Paris sur un joueur ---- */}
+              <div style={cadre}>
+                <h3 style={{ marginTop: 0, color: "#81C784" }}>
+                  Paris sur un joueur
+                </h3>
+                <div style={grille}>
+                  {champNombre("Jetons de référence", "refJetons", "Stack qui sert d'étalon")}
+                  {champNombre("Pourcentage de référence", "refPourcentage", "Seuil qui sert d'étalon")}
+                  {champNombre("Facteur de cote", "facteurCote")}
+                  {champNombre("Cote plancher", "cotePlancher")}
+                  {champNombre("Cote plafond", "cotePlafond")}
+                  {champNombre("Mise max par pari", "misePlafondPari")}
+                  {champNombre("Plafond cumulé par cible", "misePlafondCumul", "0 = pas de plafond")}
+                </div>
+
+                <p style={{ color: "#888", fontSize: "0.8rem", marginTop: "12px" }}>
+                  Exemple avec les valeurs actuelles : un joueur avec{" "}
+                  {nombreSur(configBookmaker.refJetons, 2000)}$ de jetons, pari à{" "}
+                  {nombreSur(configBookmaker.refPourcentage, 20)} % → cote{" "}
+                  <strong>
+                    {calculerCote(
+                      nombreSur(configBookmaker.refJetons, 2000),
+                      nombreSur(configBookmaker.refPourcentage, 20),
+                      configBookmaker
+                    )}
+                  </strong>
+                  . Le double de jetons → cote{" "}
+                  <strong>
+                    {calculerCote(
+                      nombreSur(configBookmaker.refJetons, 2000) * 2,
+                      nombreSur(configBookmaker.refPourcentage, 20),
+                      configBookmaker
+                    )}
+                  </strong>
+                  .
+                </p>
+
+                <h4 style={{ color: "#81C784" }}>
+                  Protection de la cible (dégressive, 3 paris au plus)
+                </h4>
+                <div style={grille}>
+                  {[0, 1, 2].map((i) => (
+                    <label key={`pp${i}`} style={{ fontSize: "0.85rem" }}>
+                      Pertes réduites — pari {i + 1} (%)
+                      <input
+                        type="number"
+                        value={(configBookmaker.protectionPertes || [])[i]}
+                        onChange={(e) => {
+                          const t = [...(configBookmaker.protectionPertes || [])];
+                          t[i] = e.target.value;
+                          majCfg("protectionPertes", t);
+                        }}
+                        style={champ}
+                      />
+                    </label>
+                  ))}
+                  {[0, 1, 2].map((i) => (
+                    <label key={`pg${i}`} style={{ fontSize: "0.85rem" }}>
+                      Gains majorés — pari {i + 1} (%)
+                      <input
+                        type="number"
+                        value={(configBookmaker.protectionGains || [])[i]}
+                        onChange={(e) => {
+                          const t = [...(configBookmaker.protectionGains || [])];
+                          t[i] = e.target.value;
+                          majCfg("protectionGains", t);
+                        }}
+                        style={champ}
+                      />
+                    </label>
+                  ))}
+                </div>
+
+                <h4 style={{ color: "#81C784" }}>Seuils proposés</h4>
+                {(configBookmaker.seuilsPari || []).map((x, i) => (
+                  <div
+                    key={x.id}
+                    style={{ display: "flex", gap: "8px", marginBottom: "6px" }}
+                  >
+                    <select
+                      value={x.sens}
+                      onChange={(e) => {
+                        const t = [...configBookmaker.seuilsPari];
+                        t[i] = { ...x, sens: e.target.value };
+                        majCfg("seuilsPari", t);
+                      }}
+                      style={{ padding: "8px", flex: 1 }}
+                    >
+                      <option value="gain">Bénéfice de</option>
+                      <option value="perte">Perte de</option>
+                    </select>
+                    <input
+                      type="number"
+                      value={x.pct}
+                      onChange={(e) => {
+                        const t = [...configBookmaker.seuilsPari];
+                        t[i] = { ...x, pct: e.target.value };
+                        majCfg("seuilsPari", t);
+                      }}
+                      style={{ padding: "8px", width: "90px" }}
+                    />
+                    <button
+                      onClick={() =>
+                        majCfg(
+                          "seuilsPari",
+                          configBookmaker.seuilsPari.filter((y) => y.id !== x.id)
+                        )
+                      }
+                      style={{ padding: "8px 12px", background: "#7f1d1d", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer" }}
+                    >
+                      X
+                    </button>
+                  </div>
+                ))}
+                <button
+                  onClick={() =>
+                    majCfg("seuilsPari", [
+                      ...(configBookmaker.seuilsPari || []),
+                      { id: Date.now(), sens: "gain", pct: 25 }
+                    ])
+                  }
+                  className="checkbox-btn"
+                  style={{ background: "#2E7D32", marginTop: "6px" }}
+                >
+                  + Ajouter un seuil
+                </button>
+              </div>
+
+              {/* ---- Course ---- */}
+              <div style={cadre}>
+                <h3 style={{ marginTop: 0, color: "#FFC107" }}>
+                  Course de chevaux
+                </h3>
+                <div style={grille}>
+                  {champNombre("Intervalle entre courses (min)", "courseIntervalleMin")}
+                  {champNombre("Annonce avant la course (min)", "courseAnnonceMin")}
+                  {champNombre("Top départ (s)", "courseTopDepartSec")}
+                  {champNombre("Durée de la course (s)", "courseDureeSec")}
+                  {champNombre("Nombre de tours", "courseTours")}
+                  {champNombre("Cote", "courseCote")}
+                  {champNombre("Mise max par pari", "courseMisePlafond")}
+                  {champNombre("Contrôle fiscal bloqué avant (min)", "courseBlocageAvantMin")}
+                  {champNombre("Contrôle fiscal bloqué après (min)", "courseBlocageApresMin")}
+                </div>
+
+                <div
+                  style={{
+                    background: marge < 0 ? "#7f1d1d" : "#1a1a1a",
+                    padding: "12px",
+                    borderRadius: "8px",
+                    marginTop: "12px",
+                    fontSize: "0.85rem"
+                  }}
+                >
+                  Avec {nbChevaux} chevaux, la cote équitable serait{" "}
+                  <strong>{coteEquitable}</strong>. À {coteActuelle}, la maison
+                  garde <strong>{marge} %</strong> des mises en moyenne.
+                  {marge < 0 &&
+                    " ⚠️ Cote supérieure à l'équitable : la maison perd de l'argent sur la durée."}
+                  {marge >= 50 &&
+                    " ⚠️ Marge très élevée : les joueurs vont se lasser vite."}
+                </div>
+
+                <h4 style={{ color: "#FFC107" }}>Les chevaux</h4>
+                {(configBookmaker.chevaux || []).map((c, i) => (
+                  <div
+                    key={c.id}
+                    style={{ display: "flex", gap: "8px", marginBottom: "6px" }}
+                  >
+                    <input
+                      value={c.nom}
+                      onChange={(e) => {
+                        const t = [...configBookmaker.chevaux];
+                        t[i] = { ...c, nom: e.target.value };
+                        majCfg("chevaux", t);
+                      }}
+                      style={{ padding: "8px", flex: 1 }}
+                    />
+                    <input
+                      type="color"
+                      value={c.couleur}
+                      onChange={(e) => {
+                        const t = [...configBookmaker.chevaux];
+                        t[i] = { ...c, couleur: e.target.value };
+                        majCfg("chevaux", t);
+                      }}
+                      style={{ width: "50px", padding: "2px" }}
+                    />
+                    <button
+                      onClick={() =>
+                        majCfg(
+                          "chevaux",
+                          configBookmaker.chevaux.filter((y) => y.id !== c.id)
+                        )
+                      }
+                      style={{ padding: "8px 12px", background: "#7f1d1d", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer" }}
+                    >
+                      X
+                    </button>
+                  </div>
+                ))}
+                <button
+                  onClick={() =>
+                    majCfg("chevaux", [
+                      ...(configBookmaker.chevaux || []),
+                      { id: Date.now(), nom: "Nouveau", couleur: "#9C27B0" }
+                    ])
+                  }
+                  className="checkbox-btn"
+                  style={{ background: "#2E7D32", marginTop: "6px" }}
+                >
+                  + Ajouter un cheval
+                </button>
+              </div>
+
+              {/* ---- Croupiers ---- */}
+              <div style={cadre}>
+                <h3 style={{ marginTop: 0, color: "#CE93D8" }}>Croupiers</h3>
+                {croupiers.map((c, i) => (
+                  <div
+                    key={i}
+                    style={{ display: "flex", gap: "8px", marginBottom: "6px" }}
+                  >
+                    <input
+                      value={c.numero}
+                      onChange={(e) => {
+                        const t = [...croupiers];
+                        t[i] = { ...c, numero: e.target.value };
+                        setCroupiers(t);
+                      }}
+                      style={{ padding: "8px", width: "80px" }}
+                    />
+                    <input
+                      value={c.nom}
+                      onChange={(e) => {
+                        const t = [...croupiers];
+                        t[i] = { ...c, nom: e.target.value };
+                        setCroupiers(t);
+                      }}
+                      style={{ padding: "8px", flex: 1 }}
+                    />
+                    <button
+                      onClick={() => setCroupiers(croupiers.filter((_, k) => k !== i))}
+                      style={{ padding: "8px 12px", background: "#7f1d1d", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer" }}
+                    >
+                      X
+                    </button>
+                  </div>
+                ))}
+                <button
+                  onClick={() =>
+                    setCroupiers([
+                      ...croupiers,
+                      { numero: String(croupiers.length + 1), nom: "Croupier" }
+                    ])
+                  }
+                  className="checkbox-btn"
+                  style={{ background: "#2E7D32", marginTop: "6px" }}
+                >
+                  + Ajouter un croupier
+                </button>
+              </div>
+
+              {/* ---- Investissements ---- */}
+              <div style={cadre}>
+                <h3 style={{ marginTop: 0, color: "#CE93D8" }}>Investissements</h3>
+                <div style={grille}>
+                  {champNombre("Durée d'un bloc (min)", "blocDureeMin", "45 min = 3 quarts d'heure")}
+                </div>
+
+                {(configBookmaker.projets || []).map((pr, i) => {
+                  const maj = (champNom, valeur) => {
+                    const t = [...configBookmaker.projets];
+                    t[i] = { ...pr, [champNom]: valeur };
+                    majCfg("projets", t);
+                  };
+                  return (
+                    <div
+                      key={pr.id}
+                      style={{
+                        background: "#1a1a1a",
+                        padding: "14px",
+                        borderRadius: "8px",
+                        marginTop: "12px"
+                      }}
+                    >
+                      <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
+                        <input
+                          value={pr.titre}
+                          onChange={(e) => maj("titre", e.target.value)}
+                          style={{ padding: "8px", flex: 1, fontWeight: "bold" }}
+                        />
+                        <button
+                          onClick={() =>
+                            majCfg(
+                              "projets",
+                              configBookmaker.projets.filter((y) => y.id !== pr.id)
+                            )
+                          }
+                          style={{ padding: "8px 12px", background: "#7f1d1d", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer" }}
+                        >
+                          Supprimer
+                        </button>
+                      </div>
+                      <div style={grille}>
+                        <label style={{ fontSize: "0.85rem" }}>
+                          Bloc de 45 min
+                          <input
+                            type="number"
+                            value={pr.bloc}
+                            onChange={(e) => maj("bloc", e.target.value)}
+                            style={champ}
+                          />
+                        </label>
+                        <label style={{ fontSize: "0.85rem" }}>
+                          Type
+                          <select
+                            value={pr.type}
+                            onChange={(e) => maj("type", e.target.value)}
+                            style={champ}
+                          >
+                            <option value="garanti">Réussite garantie</option>
+                            <option value="aleatoire">Au hasard</option>
+                          </select>
+                        </label>
+                        <label style={{ fontSize: "0.85rem" }}>
+                          Probabilité (%)
+                          <input
+                            type="number"
+                            value={pr.probabilite}
+                            onChange={(e) => maj("probabilite", e.target.value)}
+                            disabled={pr.type !== "aleatoire"}
+                            style={champ}
+                          />
+                        </label>
+                        <label style={{ fontSize: "0.85rem" }}>
+                          Montant requis
+                          <input
+                            type="number"
+                            value={pr.montantRequis}
+                            onChange={(e) => maj("montantRequis", e.target.value)}
+                            style={champ}
+                          />
+                        </label>
+                        <label style={{ fontSize: "0.85rem" }}>
+                          Investisseurs max
+                          <input
+                            type="number"
+                            value={pr.investisseursMax}
+                            onChange={(e) => maj("investisseursMax", e.target.value)}
+                            style={champ}
+                          />
+                        </label>
+                        <label style={{ fontSize: "0.85rem" }}>
+                          Délai après le 1er (min)
+                          <input
+                            type="number"
+                            value={pr.delaiMin}
+                            onChange={(e) => maj("delaiMin", e.target.value)}
+                            style={champ}
+                          />
+                        </label>
+                        <label style={{ fontSize: "0.85rem" }}>
+                          Remboursement si échec (%)
+                          <input
+                            type="number"
+                            value={pr.remboursement}
+                            onChange={(e) => maj("remboursement", e.target.value)}
+                            style={champ}
+                          />
+                        </label>
+                        <label style={{ fontSize: "0.85rem", gridColumn: "span 2" }}>
+                          Bénéfices par rang (%), séparés par des virgules
+                          <input
+                            value={(pr.gains || []).join(", ")}
+                            onChange={(e) =>
+                              maj(
+                                "gains",
+                                e.target.value
+                                  .split(",")
+                                  .map((x) => x.trim())
+                                  .filter((x) => x !== "")
+                                  .map(Number)
+                              )
+                            }
+                            style={champ}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                <button
+                  onClick={() =>
+                    majCfg("projets", [
+                      ...(configBookmaker.projets || []),
+                      {
+                        id: Date.now(),
+                        titre: "Nouveau projet",
+                        bloc: blocInvest || 1,
+                        type: "garanti",
+                        probabilite: 100,
+                        montantRequis: 500,
+                        investisseursMax: 5,
+                        delaiMin: 30,
+                        gains: [40, 35, 30, 25, 20],
+                        remboursement: 0
+                      }
+                    ])
+                  }
+                  className="checkbox-btn"
+                  style={{ background: "#2E7D32", marginTop: "12px" }}
+                >
+                  + Ajouter un projet
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        // --- INTERFACE BOOKMAKER ---
+        // Deux écrans : celui-ci, où le bookmaker travaille, et la vitrine
+        // qu'il retourne vers les joueurs. La vitrine suit ses clics.
+        if (interfaceActive === "bookmaker") {
+          if (!bookmakerOuvert) {
+            return (
+              <div style={{ padding: "40px", maxWidth: "420px", margin: "0 auto" }}>
+                <h1 style={{ color: "#00838F" }}>🎩 Bookmaker</h1>
+                <p style={{ color: "#aaa" }}>Code d'accès :</p>
+                <input
+                  type="password"
+                  value={codeBkSaisi}
+                  onChange={(e) => setCodeBkSaisi(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === "Enter") {
+                      if (codeBkSaisi === String(configBookmaker.codeBookmaker)) {
+                        setBookmakerOuvert(true);
+                        setCodeBkSaisi("");
+                      } else alert("Code incorrect.");
+                    }
+                  }}
+                  style={{ width: "100%", padding: "12px", fontSize: "1.1rem" }}
+                />
+                <button
+                  onClick={() => {
+                    if (codeBkSaisi === String(configBookmaker.codeBookmaker)) {
+                      setBookmakerOuvert(true);
+                      setCodeBkSaisi("");
+                    } else alert("Code incorrect.");
+                  }}
+                  className="checkbox-btn"
+                  style={{ marginTop: "12px", background: "#00838F" }}
+                >
+                  Entrer
+                </button>
+                <button
+                  onClick={() => setInterfaceActive("menu")}
+                  className="checkbox-btn"
+                  style={{ marginTop: "10px" }}
+                >
+                  Retour
+                </button>
+              </div>
+            );
+          }
+
+          const cible = joueurs.find((j) => j.id === bkCibleId);
+          const seuilChoisi = (configBookmaker.seuilsPari || []).find(
+            (x) => String(x.id) === String(bkSeuilId)
+          );
+          const refus = bkCibleId ? raisonRefusPari(cible) : null;
+          const cotePrevue =
+            cible && seuilChoisi && !refus
+              ? calculerCote(cible.jetonsEnJeu, seuilChoisi.pct, configBookmaker)
+              : null;
+
+          const onglet = (cle, libelle) => (
+            <button
+              onClick={() => setSousMenuBk(cle)}
+              style={{
+                padding: "10px 16px",
+                background: sousMenuBk === cle ? "#00838F" : "#333",
+                color: "#fff",
+                border: "none",
+                borderRadius: "6px",
+                fontWeight: "bold",
+                cursor: "pointer"
+              }}
+            >
+              {libelle}
+            </button>
+          );
+
+          const cadre = {
+            background: "#222",
+            padding: "18px",
+            borderRadius: "10px",
+            marginBottom: "16px"
+          };
+          const champ = {
+            width: "100%",
+            padding: "10px",
+            marginTop: "4px",
+            marginBottom: "12px",
+            borderRadius: "6px"
+          };
+
+          return (
+            <div style={{ padding: "24px", maxWidth: "980px", margin: "0 auto" }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: "10px",
+                  marginBottom: "16px"
+                }}
+              >
+                <h1 style={{ color: "#00838F", margin: 0 }}>🎩 Bookmaker</h1>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  <button
+                    onClick={() => setVitrine({ mode: "accueil" })}
+                    className="checkbox-btn"
+                    style={{ background: "#455A64" }}
+                  >
+                    🪧 Vitrine : accueil
+                  </button>
+                  <button
+                    onClick={() => setInterfaceActive("menu")}
+                    className="checkbox-btn"
+                  >
+                    Retour
+                  </button>
+                </div>
+              </div>
+
+              {!soireeDebut && (
+                <div
+                  style={{
+                    ...cadre,
+                    background: "#5D4037",
+                    fontWeight: "bold"
+                  }}
+                >
+                  ⚠️ La soirée n'a pas démarré. Courses et projets d'investissement
+                  restent en sommeil tant que l'admin n'a pas appuyé sur
+                  « Démarrer la soirée ».
+                </div>
+              )}
+
+              {soireeDebut && course.active && (
+                <div style={{ ...cadre, background: "#01579B" }}>
+                  <strong>Course n°{course.numero}</strong> —{" "}
+                  {course.phase === PHASES.COURSE
+                    ? "en cours !"
+                    : course.phase === PHASES.RESULTAT
+                      ? `terminée, vainqueur : ${(chevalGagnant(course.numero) || {}).nom || "?"}`
+                      : `départ dans ${Math.max(0, Math.ceil(course.avantDepart / 1000))} s`}
+                  {" · "}
+                  Paris {course.parisOuverts ? "ouverts" : "fermés"}
+                  {" · Bloc d'investissement n°"}
+                  {blocInvest}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: "8px", marginBottom: "16px", flexWrap: "wrap" }}>
+                {onglet("joueur", "🎯 Pari sur un joueur")}
+                {onglet("course", "🏇 Pari sportif")}
+                {onglet("invest", "💼 Investissement")}
+              </div>
+
+              {sousMenuBk === "joueur" && (
+                <div style={cadre}>
+                  <h3 style={{ marginTop: 0, color: "#4CAF50" }}>
+                    Pari sur un joueur
+                  </h3>
+                  <label>Le parieur</label>
+                  <select
+                    value={bkParieurId}
+                    onChange={(e) => setBkParieurId(e.target.value)}
+                    style={champ}
+                  >
+                    <option value="">-- Choisir --</option>
+                    {joueurs.map((j) => (
+                      <option key={j.id} value={j.id}>
+                        {j.nom} ({j.solde}$)
+                      </option>
+                    ))}
+                  </select>
+
+                  <label>Parie sur</label>
+                  <select
+                    value={bkCibleId}
+                    onChange={(e) => setBkCibleId(e.target.value)}
+                    style={champ}
+                  >
+                    <option value="">-- Choisir --</option>
+                    {joueurs
+                      .filter((j) => j.id !== bkParieurId)
+                      .map((j) => (
+                        <option key={j.id} value={j.id}>
+                          {j.nom} — {j.jetonsEnJeu > 0 ? `${j.jetonsEnJeu}$ de jetons` : "pas à table"}
+                        </option>
+                      ))}
+                  </select>
+
+                  {refus && (
+                    <div
+                      style={{
+                        background: "#5D4037",
+                        padding: "10px",
+                        borderRadius: "6px",
+                        marginBottom: "12px"
+                      }}
+                    >
+                      ⛔ {refus}
+                    </div>
+                  )}
+
+                  <label>Le pari</label>
+                  <select
+                    value={bkSeuilId}
+                    onChange={(e) => setBkSeuilId(e.target.value)}
+                    style={champ}
+                  >
+                    <option value="">-- Choisir --</option>
+                    {(configBookmaker.seuilsPari || []).map((x) => (
+                      <option key={x.id} value={x.id}>
+                        {libelleSeuil(x)}
+                      </option>
+                    ))}
+                  </select>
+
+                  {cotePrevue && (
+                    <div
+                      style={{
+                        background: "#1B5E20",
+                        padding: "12px",
+                        borderRadius: "6px",
+                        marginBottom: "12px",
+                        fontWeight: "bold"
+                      }}
+                    >
+                      Cote : {cotePrevue}
+                      {bkMise
+                        ? ` — gain possible ${Math.round(Number(bkMise) * cotePrevue)}$`
+                        : ""}
+                    </div>
+                  )}
+
+                  <label>
+                    Mise (max {nombreSur(configBookmaker.misePlafondPari, 100)})
+                  </label>
+                  <input
+                    type="number"
+                    value={bkMise}
+                    onChange={(e) => setBkMise(e.target.value)}
+                    style={champ}
+                  />
+
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                    <button
+                      onClick={() => {
+                        placerPariJoueur(bkParieurId, bkCibleId, bkSeuilId, bkMise);
+                        setBkMise("");
+                      }}
+                      className="checkbox-btn"
+                      style={{ background: "#4CAF50" }}
+                    >
+                      ✓ Valider le pari
+                    </button>
+                    <button
+                      onClick={() =>
+                        setVitrine({ mode: "joueur", joueurId: bkCibleId })
+                      }
+                      className="checkbox-btn"
+                      style={{ background: "#455A64" }}
+                    >
+                      🪧 Présenter les cotes
+                    </button>
+                  </div>
+
+                  <h4 style={{ marginTop: "20px" }}>Paris en cours</h4>
+                  {parisJoueurs.filter((x) => x.statut === "ouvert").length === 0 ? (
+                    <p style={{ color: "#888" }}>Aucun pari en cours.</p>
+                  ) : (
+                    parisJoueurs
+                      .filter((x) => x.statut === "ouvert")
+                      .map((x) => {
+                        const pa = joueurs.find((j) => j.id === x.parieurId);
+                        const ci = joueurs.find((j) => j.id === x.cibleId);
+                        return (
+                          <div
+                            key={x.id}
+                            style={{
+                              background: "#1a1a1a",
+                              padding: "8px 12px",
+                              borderRadius: "6px",
+                              marginBottom: "6px",
+                              fontSize: "0.9rem"
+                            }}
+                          >
+                            {(pa || {}).nom} → {(ci || {}).nom} :{" "}
+                            {x.sens === "gain" ? `+${x.pct} %` : `−${x.pct} %`},{" "}
+                            {x.mise}$ à {x.cote}
+                          </div>
+                        );
+                      })
+                  )}
+                </div>
+              )}
+
+              {sousMenuBk === "course" && (
+                <div style={cadre}>
+                  <h3 style={{ marginTop: 0, color: "#FFC107" }}>
+                    Pari sur la course
+                  </h3>
+                  <label>Le joueur</label>
+                  <select
+                    value={bkCourseJoueurId}
+                    onChange={(e) => setBkCourseJoueurId(e.target.value)}
+                    style={champ}
+                  >
+                    <option value="">-- Choisir --</option>
+                    {joueurs.map((j) => (
+                      <option key={j.id} value={j.id}>
+                        {j.nom} ({j.solde}$)
+                      </option>
+                    ))}
+                  </select>
+
+                  <label>Le cheval</label>
+                  <select
+                    value={bkCourseChevalId}
+                    onChange={(e) => setBkCourseChevalId(e.target.value)}
+                    style={champ}
+                  >
+                    <option value="">-- Choisir --</option>
+                    {chevauxCourse.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nom} — cote {nombreSur(configBookmaker.courseCote, 3)}
+                      </option>
+                    ))}
+                  </select>
+
+                  <label>
+                    Mise (max {nombreSur(configBookmaker.courseMisePlafond, 100)})
+                  </label>
+                  <input
+                    type="number"
+                    value={bkCourseMise}
+                    onChange={(e) => setBkCourseMise(e.target.value)}
+                    style={champ}
+                  />
+
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                    <button
+                      onClick={() => {
+                        placerPariCourse(
+                          bkCourseJoueurId,
+                          bkCourseChevalId,
+                          bkCourseMise
+                        );
+                        setBkCourseMise("");
+                      }}
+                      className="checkbox-btn"
+                      style={{ background: "#FFC107", color: "#000" }}
+                    >
+                      ✓ Valider le pari
+                    </button>
+                    <button
+                      onClick={() => setVitrine({ mode: "course" })}
+                      className="checkbox-btn"
+                      style={{ background: "#455A64" }}
+                    >
+                      🪧 Présenter la course
+                    </button>
+                  </div>
+
+                  <h4 style={{ marginTop: "20px" }}>
+                    Paris sur la course n°{course.numero || "-"}
+                  </h4>
+                  {parisCourse.filter(
+                    (x) => x.numero === course.numero && x.statut === "ouvert"
+                  ).length === 0 ? (
+                    <p style={{ color: "#888" }}>Aucun pari.</p>
+                  ) : (
+                    parisCourse
+                      .filter((x) => x.numero === course.numero && x.statut === "ouvert")
+                      .map((x) => {
+                        const j = joueurs.find((y) => y.id === x.joueurId);
+                        const c = chevauxCourse.find(
+                          (y) => String(y.id) === String(x.chevalId)
+                        );
+                        return (
+                          <div
+                            key={x.id}
+                            style={{
+                              background: "#1a1a1a",
+                              padding: "8px 12px",
+                              borderRadius: "6px",
+                              marginBottom: "6px",
+                              fontSize: "0.9rem"
+                            }}
+                          >
+                            {(j || {}).nom} : {x.mise}$ sur {(c || {}).nom}
+                          </div>
+                        );
+                      })
+                  )}
+                </div>
+              )}
+
+              {sousMenuBk === "invest" && (
+                <div style={cadre}>
+                  <h3 style={{ marginTop: 0, color: "#9C27B0" }}>
+                    Investissements — bloc n°{blocInvest}
+                  </h3>
+                  {projetsDuBloc.length === 0 ? (
+                    <p style={{ color: "#888" }}>
+                      Aucun projet sur ce bloc. Ajoutes-en dans les réglages.
+                    </p>
+                  ) : (
+                    projetsDuBloc.map((pr) => {
+                      const inst = instanceProjet(pr.id);
+                      const total = totalInvesti(inst);
+                      const nb = inst ? (inst.investisseurs || []).length : 0;
+                      const clos = inst && inst.statut !== "ouvert";
+                      return (
+                        <div
+                          key={pr.id}
+                          style={{
+                            background: "#1a1a1a",
+                            padding: "12px",
+                            borderRadius: "8px",
+                            marginBottom: "10px",
+                            opacity: clos ? 0.55 : 1
+                          }}
+                        >
+                          <div style={{ fontWeight: "bold" }}>
+                            {pr.titre}{" "}
+                            {clos && `— ${inst.statut === "reussi" ? "réussi ✅" : "échoué ❌"}`}
+                          </div>
+                          <div style={{ fontSize: "0.85rem", color: "#bbb" }}>
+                            {total} / {pr.montantRequis}$ · {nb} /{" "}
+                            {pr.investisseursMax} investisseurs ·{" "}
+                            {pr.type === "aleatoire"
+                              ? `aléatoire (${pr.probabilite} %)`
+                              : "réussite garantie"}
+                            {inst && inst.statut === "ouvert" && (
+                              <>
+                                {" · reste "}
+                                {Math.max(
+                                  0,
+                                  Math.ceil(
+                                    (nombreSur(inst.premierTs, 0) +
+                                      nombreSur(pr.delaiMin, 30) * 60000 -
+                                      maintenant) /
+                                      60000
+                                  )
+                                )}
+                                {" min"}
+                              </>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => setVitrine({ mode: "projet", projetId: pr.id })}
+                            style={{
+                              marginTop: "8px",
+                              padding: "6px 10px",
+                              background: "#455A64",
+                              color: "#fff",
+                              border: "none",
+                              borderRadius: "5px",
+                              cursor: "pointer",
+                              fontSize: "0.8rem"
+                            }}
+                          >
+                            🪧 Présenter ce projet
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+
+                  <label>L'investisseur</label>
+                  <select
+                    value={bkInvJoueurId}
+                    onChange={(e) => setBkInvJoueurId(e.target.value)}
+                    style={champ}
+                  >
+                    <option value="">-- Choisir --</option>
+                    {joueurs.map((j) => (
+                      <option key={j.id} value={j.id}>
+                        {j.nom} ({j.solde}$)
+                      </option>
+                    ))}
+                  </select>
+
+                  <label>Le projet</label>
+                  <select
+                    value={bkInvProjetId}
+                    onChange={(e) => setBkInvProjetId(e.target.value)}
+                    style={champ}
+                  >
+                    <option value="">-- Choisir --</option>
+                    {projetsDuBloc.map((pr) => (
+                      <option key={pr.id} value={pr.id}>
+                        {pr.titre}
+                      </option>
+                    ))}
+                  </select>
+
+                  <label>Montant</label>
+                  <input
+                    type="number"
+                    value={bkInvMontant}
+                    onChange={(e) => setBkInvMontant(e.target.value)}
+                    style={champ}
+                  />
+
+                  <button
+                    onClick={() => {
+                      investir(bkInvJoueurId, bkInvProjetId, bkInvMontant);
+                      setBkInvMontant("");
+                    }}
+                    className="checkbox-btn"
+                    style={{ background: "#9C27B0" }}
+                  >
+                    ✓ Enregistrer l'investissement
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        // --- VITRINE BOOKMAKER ---
+        // L'écran retourné vers les joueurs. Il suit ce que le bookmaker
+        // présente, et ne montre jamais les affaires des autres : ni mises,
+        // ni soldes, ni paris déjà pris.
+        if (interfaceActive === "vitrine") {
+          const enCourse =
+            course.active &&
+            (course.phase === PHASES.COURSE || course.phase === PHASES.TOP);
+          const projetPresente = (configBookmaker.projets || []).find(
+            (pr) => String(pr.id) === String(vitrine.projetId)
+          );
+          const joueurPresente = joueurs.find((j) => j.id === vitrine.joueurId);
+
+          const carte = {
+            background: "#111",
+            border: "2px solid #00838F",
+            borderRadius: "16px",
+            padding: "28px",
+            maxWidth: "900px",
+            margin: "0 auto"
+          };
+
+          return (
+            <div style={{ padding: "26px", minHeight: "100vh" }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: "18px"
+                }}
+              >
+                <h1 style={{ color: "#00838F", margin: 0 }}>🎩 Le Bookmaker</h1>
+                <button
+                  onClick={() => setInterfaceActive("menu")}
+                  className="no-print"
+                  style={{
+                    padding: "6px 12px",
+                    background: "#333",
+                    color: "#777",
+                    border: "none",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    fontSize: "0.75rem"
+                  }}
+                >
+                  quitter
+                </button>
+              </div>
+
+              {/* La course prend le dessus dès le top départ : c'est le moment
+                  fort, tout le monde doit avoir les yeux dessus. */}
+              {enCourse ? (
+                <div style={carte}>
+                  {course.phase === PHASES.TOP ? (
+                    <div style={{ textAlign: "center" }}>
+                      <h2 style={{ color: "#FFC107" }}>🏇 Course n°{course.numero}</h2>
+                      <div style={{ fontSize: "5rem", fontWeight: "bold" }}>
+                        {Math.max(0, Math.ceil(course.avantDepart / 1000))}
+                      </div>
+                      <p style={{ color: "#aaa" }}>Les paris sont clos !</p>
+                    </div>
+                  ) : (
+                    <>
+                      <h2 style={{ color: "#FFC107", textAlign: "center" }}>
+                        🏇 Course n°{course.numero}
+                      </h2>
+                      <PisteCourse
+                        numero={course.numero}
+                        chevaux={chevauxCourse}
+                        cfg={configBookmaker}
+                        depart={course.depart}
+                      />
+                    </>
+                  )}
+                </div>
+              ) : vitrine.mode === "projet" && projetPresente ? (
+                (() => {
+                  const inst = instanceProjet(projetPresente.id);
+                  const total = totalInvesti(inst);
+                  const nb = inst ? (inst.investisseurs || []).length : 0;
+                  return (
+                    <div style={carte}>
+                      <h2 style={{ color: "#CE93D8", marginTop: 0 }}>
+                        💼 {projetPresente.titre}
+                      </h2>
+                      <div style={{ fontSize: "1.15rem", lineHeight: 1.9 }}>
+                        <div>
+                          <strong>Montant à réunir :</strong>{" "}
+                          {projetPresente.montantRequis}$ — déjà réuni : {total}$
+                        </div>
+                        <div>
+                          <strong>Investisseurs :</strong> {nb} sur{" "}
+                          {projetPresente.investisseursMax}
+                        </div>
+                        <div>
+                          <strong>Délai :</strong> {projetPresente.delaiMin} min à
+                          partir du premier investisseur
+                          {inst && inst.statut === "ouvert" && (
+                            <>
+                              {" — reste "}
+                              {Math.max(
+                                0,
+                                Math.ceil(
+                                  (nombreSur(inst.premierTs, 0) +
+                                    nombreSur(projetPresente.delaiMin, 30) * 60000 -
+                                    maintenant) /
+                                    60000
+                                )
+                              )}
+                              {" min"}
+                            </>
+                          )}
+                        </div>
+                        <div>
+                          <strong>Nature :</strong>{" "}
+                          {projetPresente.type === "aleatoire"
+                            ? `risquée — ${projetPresente.probabilite} % de réussite`
+                            : "sûre — réussit dès les conditions réunies"}
+                        </div>
+                        <div>
+                          <strong>En cas d'échec :</strong>{" "}
+                          {nombreSur(projetPresente.remboursement, 0) > 0
+                            ? `${projetPresente.remboursement} % remboursés`
+                            : "mise perdue"}
+                        </div>
+                      </div>
+                      <h3 style={{ color: "#CE93D8", marginTop: "22px" }}>
+                        Bénéfice selon votre rang
+                      </h3>
+                      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                        {(projetPresente.gains || []).map((g, i) => (
+                          <div
+                            key={i}
+                            style={{
+                              background: i < nb ? "#333" : "#1B5E20",
+                              padding: "14px 18px",
+                              borderRadius: "10px",
+                              minWidth: "110px",
+                              textAlign: "center",
+                              opacity: i < nb ? 0.5 : 1
+                            }}
+                          >
+                            <div style={{ fontSize: "0.8rem", color: "#bbb" }}>
+                              {i + 1}
+                              {i === 0 ? "er" : "e"} investisseur
+                            </div>
+                            <div style={{ fontSize: "1.6rem", fontWeight: "bold" }}>
+                              +{g} %
+                            </div>
+                            {i < nb && (
+                              <div style={{ fontSize: "0.7rem" }}>déjà pris</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()
+              ) : vitrine.mode === "joueur" && joueurPresente ? (
+                <div style={carte}>
+                  <h2 style={{ color: "#81C784", marginTop: 0 }}>
+                    🎯 Parier sur {joueurPresente.nom}
+                  </h2>
+                  {raisonRefusPari(joueurPresente) ? (
+                    <p style={{ fontSize: "1.2rem" }}>
+                      Aucun pari possible sur ce joueur pour le moment.
+                    </p>
+                  ) : (
+                    <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+                      {(configBookmaker.seuilsPari || []).map((x) => (
+                        <div
+                          key={x.id}
+                          style={{
+                            background: "#1a1a1a",
+                            padding: "18px 22px",
+                            borderRadius: "12px",
+                            minWidth: "200px"
+                          }}
+                        >
+                          <div style={{ fontSize: "1rem" }}>{libelleSeuil(x)}</div>
+                          <div
+                            style={{
+                              fontSize: "2.2rem",
+                              fontWeight: "bold",
+                              color: "#FFC107"
+                            }}
+                          >
+                            × {calculerCote(joueurPresente.jetonsEnJeu, x.pct, configBookmaker)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <p style={{ color: "#888", marginTop: "18px" }}>
+                    Mise maximale : {nombreSur(configBookmaker.misePlafondPari, 100)} par pari.
+                  </p>
+                </div>
+              ) : vitrine.mode === "course" ? (
+                <div style={carte}>
+                  <h2 style={{ color: "#FFC107", marginTop: 0 }}>
+                    🏇 Course n°{course.numero || "-"}
+                  </h2>
+                  {course.active && (
+                    <p style={{ fontSize: "1.3rem" }}>
+                      Départ dans{" "}
+                      <strong>
+                        {Math.max(0, Math.ceil(course.avantDepart / 60000))} min
+                      </strong>{" "}
+                      — paris {course.parisOuverts ? "ouverts" : "clos"}
+                    </p>
+                  )}
+                  <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+                    {chevauxCourse.map((c) => (
+                      <div
+                        key={c.id}
+                        style={{
+                          background: "#1a1a1a",
+                          borderLeft: `8px solid ${c.couleur}`,
+                          padding: "18px 22px",
+                          borderRadius: "12px",
+                          minWidth: "170px"
+                        }}
+                      >
+                        <div style={{ fontSize: "1.6rem" }}>🏇 {c.nom}</div>
+                        <div
+                          style={{
+                            fontSize: "2rem",
+                            fontWeight: "bold",
+                            color: "#FFC107"
+                          }}
+                        >
+                          × {nombreSur(configBookmaker.courseCote, 3)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p style={{ color: "#888", marginTop: "18px" }}>
+                    Mise maximale : {nombreSur(configBookmaker.courseMisePlafond, 100)} par pari.
+                  </p>
+                </div>
+              ) : (
+                <div style={carte}>
+                  <h2 style={{ marginTop: 0 }}>Bienvenue chez le bookmaker</h2>
+                  <p style={{ fontSize: "1.15rem", color: "#bbb" }}>
+                    Paris sur les joueurs · Courses de chevaux · Investissements
+                  </p>
+                  {course.active && soireeDebut && (
+                    <p style={{ fontSize: "1.3rem" }}>
+                      🏇 Prochaine course dans{" "}
+                      <strong>
+                        {Math.max(0, Math.ceil(course.avantDepart / 60000))} min
+                      </strong>
+                    </p>
+                  )}
+                  {projetsDuBloc.length > 0 && (
+                    <>
+                      <h3 style={{ color: "#CE93D8" }}>Projets ouverts</h3>
+                      {projetsDuBloc.map((pr) => {
+                        const inst = instanceProjet(pr.id);
+                        if (inst && inst.statut !== "ouvert") return null;
+                        return (
+                          <div
+                            key={pr.id}
+                            style={{
+                              background: "#1a1a1a",
+                              padding: "12px 16px",
+                              borderRadius: "10px",
+                              marginBottom: "8px",
+                              fontSize: "1.05rem"
+                            }}
+                          >
+                            {pr.titre} — {totalInvesti(inst)} / {pr.montantRequis}$
+                          </div>
+                        );
+                      })}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        }
+
         if (interfaceActive === "croupier") {
+          // Le croupier s'identifie d'abord : c'est ce numéro qu'on inscrit
+          // sur les jetons vendus, et à qui les alertes de pari s'adressent.
+          if (!croupierIdentifie) {
+            return (
+              <div style={{ padding: "40px", maxWidth: "420px", margin: "0 auto" }}>
+                <h1 style={{ color: "#9C27B0" }}>🎲 Croupier</h1>
+                <p style={{ color: "#aaa" }}>Votre numéro de croupier :</p>
+                <select
+                  value={saisieNumeroCroupier}
+                  onChange={(e) => setSaisieNumeroCroupier(e.target.value)}
+                  style={{ width: "100%", padding: "12px", fontSize: "1.1rem" }}
+                >
+                  <option value="">-- Choisir --</option>
+                  {croupiers.map((c) => (
+                    <option key={c.numero} value={c.numero}>
+                      n°{c.numero} — {c.nom}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => {
+                    if (!saisieNumeroCroupier) {
+                      alert("Choisissez votre numéro.");
+                      return;
+                    }
+                    setCroupierIdentifie(saisieNumeroCroupier);
+                  }}
+                  className="checkbox-btn"
+                  style={{ marginTop: "14px", background: "#9C27B0" }}
+                >
+                  Ouvrir ma table
+                </button>
+                <button
+                  onClick={() => setInterfaceActive("menu")}
+                  className="checkbox-btn"
+                  style={{ marginTop: "10px" }}
+                >
+                  Retour
+                </button>
+              </div>
+            );
+          }
+
           const jC = joueursActifs.find((j) => j.id === joueurCroupierId);
+          // Les paris pris sur le joueur sélectionné : celui qui lui a vendu
+          // ses jetons doit le savoir, et celui qui le sert aussi.
+          const parisSurJC = jC ? parisOuvertsSur(jC.id) : [];
+          const protectionJC = protectionCumulee(parisSurJC.length, configBookmaker);
+          const vendeurJC = jC ? jC.croupierVendeur : null;
+          const jetonsDehors = joueurs.filter(
+            (j) =>
+              nombreSur(j.jetonsEnJeu, 0) > 0 &&
+              String(j.croupierVendeur) === String(croupierIdentifie)
+          );
           // Le croupier doit voir la carte que le joueur possède, pour lui
           // proposer de l'utiliser sur cette table : le joueur est devant lui,
           // pas devant une borne.
@@ -3965,7 +6524,86 @@
             <div
               style={{ padding: "30px", maxWidth: "600px", margin: "0 auto" }}
             >
-              <h1 style={{ color: "#9C27B0" }}>🎲 Croupier</h1>
+                <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: "10px"
+                }}
+              >
+                <h1 style={{ color: "#9C27B0", margin: 0 }}>
+                  🎲 Croupier n°{croupierIdentifie}
+                </h1>
+                <button
+                  onClick={() => {
+                    if (jetonsDehors.length) {
+                      alert(
+                        "Impossible de fermer : ces joueurs ont encore des jetons de votre table.\n\n" +
+                          jetonsDehors
+                            .map((j) => `• ${j.nom} — ${j.jetonsEnJeu}$`)
+                            .join("\n")
+                      );
+                      return;
+                    }
+                    setCroupierIdentifie("");
+                    setSaisieNumeroCroupier("");
+                  }}
+                  style={{
+                    padding: "8px 14px",
+                    background: jetonsDehors.length ? "#5D4037" : "#333",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    fontSize: "0.85rem"
+                  }}
+                >
+                  🔒 Fermer ma table
+                  {jetonsDehors.length ? ` (${jetonsDehors.length} en cours)` : ""}
+                </button>
+              </div>
+
+              {parisSurJC.length > 0 && jC && (
+                <div
+                  style={{
+                    background:
+                      String(vendeurJC) === String(croupierIdentifie)
+                        ? "#B71C1C"
+                        : "#5D4037",
+                    padding: "14px",
+                    borderRadius: "10px",
+                    marginBottom: "16px",
+                    fontSize: "0.95rem"
+                  }}
+                >
+                  <strong>
+                    ⚠️ {parisSurJC.length} pari
+                    {parisSurJC.length > 1 ? "s" : ""} en cours sur {jC.nom}
+                  </strong>
+                  <div style={{ marginTop: "6px" }}>
+                    {parisSurJC.map((x, i) => (
+                      <div key={x.id}>
+                        • Il {x.sens === "gain" ? "doit ressortir avec" : "doit ressortir en perte de"}{" "}
+                        {x.sens === "gain" ? `+${x.pct} %` : `${x.pct} %`}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ marginTop: "8px", opacity: 0.9 }}>
+                    Protection en cours : pertes réduites de {protectionJC.perte} %,
+                    gains majorés de {protectionJC.gain} %. Elle s'applique toute
+                    seule au retour des jetons.
+                  </div>
+                  <div style={{ marginTop: "6px", fontStyle: "italic" }}>
+                    {vendeurJC
+                      ? String(vendeurJC) === String(croupierIdentifie)
+                        ? "Vous lui avez vendu ses jetons."
+                        : `Jetons vendus par le croupier n°${vendeurJC}.`
+                      : "Vendeur des jetons inconnu."}
+                  </div>
+                </div>
+              )}
               <div
                 style={{
                   background: "#222",
@@ -4232,6 +6870,14 @@
 
         // 5. ÉCRAN D'AFFICHAGE
         if (interfaceActive === "affichage") {
+          const courseAuTableau =
+            course.active &&
+            (course.phase === PHASES.TOP ||
+              course.phase === PHASES.COURSE ||
+              course.phase === PHASES.RESULTAT);
+          const vainqueur =
+            course.phase === PHASES.RESULTAT ? chevalGagnant(course.numero) : null;
+
           return (
             <div
               style={{
@@ -4241,6 +6887,93 @@
                 position: "relative"
               }}
             >
+              {/* Décompte discret, dans un coin, seulement à l'approche. */}
+              {course.active &&
+                soireeDebut &&
+                course.phase === PHASES.ANNONCE && (
+                  <div
+                    style={{
+                      position: "fixed",
+                      bottom: "12px",
+                      right: "12px",
+                      background: "rgba(0,0,0,0.75)",
+                      border: "1px solid #FFC107",
+                      color: "#FFC107",
+                      padding: "6px 12px",
+                      borderRadius: "16px",
+                      fontSize: "0.8rem",
+                      zIndex: 5
+                    }}
+                  >
+                    🏇 Course n°{course.numero} dans{" "}
+                    {Math.max(0, Math.ceil(course.avantDepart / 60000))} min
+                  </div>
+                )}
+
+              {/* La course occupe tout l'écran : c'est le moment fort. */}
+              {courseAuTableau && (
+                <div
+                  style={{
+                    position: "fixed",
+                    top: 0,
+                    left: 0,
+                    width: "100vw",
+                    height: "100vh",
+                    background: "#000",
+                    zIndex: 20,
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    gap: "18px"
+                  }}
+                >
+                  <h2 style={{ color: "#FFC107", margin: 0 }}>
+                    🏇 Course n°{course.numero}
+                  </h2>
+                  {course.phase === PHASES.TOP && (
+                    <>
+                      <div
+                        style={{
+                          fontSize: "9rem",
+                          fontWeight: "bold",
+                          color: "#fff",
+                          lineHeight: 1
+                        }}
+                      >
+                        {Math.max(0, Math.ceil(course.avantDepart / 1000))}
+                      </div>
+                      <div style={{ color: "#aaa", fontSize: "1.2rem" }}>
+                        Les paris sont clos
+                      </div>
+                    </>
+                  )}
+                  {course.phase === PHASES.COURSE && (
+                    <PisteCourse
+                      numero={course.numero}
+                      chevaux={chevauxCourse}
+                      cfg={configBookmaker}
+                      depart={course.depart}
+                    />
+                  )}
+                  {course.phase === PHASES.RESULTAT && vainqueur && (
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: "5rem" }}>🏆</div>
+                      <div
+                        style={{
+                          fontSize: "3rem",
+                          fontWeight: "bold",
+                          color: vainqueur.couleur
+                        }}
+                      >
+                        {vainqueur.nom}
+                      </div>
+                      <div style={{ color: "#aaa" }}>remporte la course</div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {animationActive && (
                 <div
                   style={{
@@ -4296,6 +7029,45 @@
                       {infosAnimation.phraseResultat}
                     </h3>
                   )}
+                </div>
+              )}
+
+              {/* Les projets d'investissement ouverts, pour que la salle les
+                  voie sans passer devant la vitrine du bookmaker. */}
+              {soireeDebut && projetsDuBloc.length > 0 && (
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "10px",
+                    flexWrap: "wrap",
+                    justifyContent: "center",
+                    marginBottom: "18px"
+                  }}
+                >
+                  {projetsDuBloc.map((pr) => {
+                    const inst = instanceProjet(pr.id);
+                    if (inst && inst.statut !== "ouvert") return null;
+                    const total = totalInvesti(inst);
+                    const nb = inst ? (inst.investisseurs || []).length : 0;
+                    return (
+                      <div
+                        key={pr.id}
+                        style={{
+                          background: "#1a1a1a",
+                          border: "1px solid #7B1FA2",
+                          borderRadius: "10px",
+                          padding: "8px 14px",
+                          fontSize: "0.85rem"
+                        }}
+                      >
+                        <strong>💼 {pr.titre}</strong>
+                        <div style={{ color: "#bbb" }}>
+                          {total} / {pr.montantRequis}$ · {nb} /{" "}
+                          {pr.investisseursMax} investisseurs
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
