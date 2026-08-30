@@ -101,7 +101,7 @@
         const intervalle = nombreSur(cfg.courseIntervalleMin, 30) * 60000;
         if (intervalle <= 0) return { active: false, phase: PHASES.AUCUNE };
         const topSec = nombreSur(cfg.courseTopDepartSec, 15) * 1000;
-        const dureeSec = nombreSur(cfg.courseDureeSec, 60) * 1000;
+        const dureeSec = nombreSur(cfg.courseDureeSec, 45) * 1000;
         const annonce = nombreSur(cfg.courseAnnonceMin, 10) * 60000;
         const apres = nombreSur(cfg.courseBlocageApresMin, 1) * 60000;
 
@@ -150,37 +150,69 @@
 
       // Le vainqueur est tiré à partir du numéro de course : identique
       // partout, sans échange réseau.
+      //
+      // On modélise la VITESSE de chaque cheval, pas sa position. La position
+      // est ensuite la distance parcourue, c'est-à-dire l'intégrale de cette
+      // vitesse : elle ne peut donc que croître. Un cheval ne recule jamais,
+      // et comme la vitesse reste bornée autour de sa moyenne, il ne part pas
+      // non plus en sprint ni ne s'arrête pour attendre les autres.
+      const PAS_COURSE = 240;
+
       const trameCourse = (numero, chevaux, cfg) => {
         const alea = semer(numero * 7919 + 13);
         const n = chevaux.length || 1;
         const gagnant = Math.floor(alea() * n);
-        // Chaque cheval reçoit une allure et deux oscillations. Le terme
-        // d'oscillation s'annule au départ et à l'arrivée : les places
-        // changent en cours de route, mais l'ordre d'arrivée reste celui
-        // qu'on vient de tirer.
-        const profils = chevaux.map((c, i) => ({
-          cheval: c,
-          retard: i === gagnant ? 0 : 0.02 + alea() * 0.1,
-          amplitude: 0.05 + alea() * 0.12,
-          frequence: 1 + Math.floor(alea() * 3),
-          dephasage: alea() * Math.PI * 2
-        }));
+
+        const profils = chevaux.map((c, i) => {
+          // La dérive donne son tempérament au cheval : négative, il part
+          // vite et s'essouffle ; positive, il finit fort. C'est ce qui
+          // produit les remontées, sans à-coup.
+          const derive = (alea() - 0.5) * 0.5;
+          const a1 = 0.04 + alea() * 0.06;
+          const a2 = 0.02 + alea() * 0.04;
+          const f1 = 0.7 + alea() * 0.8;
+          const f2 = 1.5 + alea() * 1.0;
+          const p1 = alea() * Math.PI * 2;
+          const p2 = alea() * Math.PI * 2;
+          // Écart à l'arrivée : quelques longueurs, pas la moitié de la piste.
+          const ecart = i === gagnant ? 0 : 0.012 + alea() * 0.05;
+
+          const vitesse = (t) =>
+            1 +
+            derive * (t - 0.5) +
+            a1 * Math.sin(f1 * Math.PI * 2 * t + p1) +
+            a2 * Math.sin(f2 * Math.PI * 2 * t + p2);
+
+          // Intégration au trapèze, une fois pour toute la course.
+          const cumul = [0];
+          for (let k = 1; k <= PAS_COURSE; k++) {
+            const t0 = (k - 1) / PAS_COURSE;
+            const t1 = k / PAS_COURSE;
+            const moyenne =
+              (Math.max(0.1, vitesse(t0)) + Math.max(0.1, vitesse(t1))) / 2;
+            cumul.push(cumul[k - 1] + moyenne / PAS_COURSE);
+          }
+
+          return {
+            cheval: c,
+            cumul,
+            total: cumul[PAS_COURSE] || 1,
+            arrivee: 1 - ecart
+          };
+        });
         return { gagnant, profils };
       };
 
-      // Avancement d'un cheval à l'instant t (0 à 1) de la course.
-      const avancementCheval = (profil, t) =>
-        Math.max(
-          0,
-          Math.min(
-            1,
-            t * (1 - profil.retard) +
-              profil.amplitude *
-                Math.sin(profil.frequence * Math.PI * 2 * t + profil.dephasage) *
-                t *
-                (1 - t)
-          )
-        );
+      // Avancement d'un cheval à l'instant t (0 à 1) de la course, entre 0 et
+      // sa position d'arrivée. Toujours croissant.
+      const avancementCheval = (profil, t) => {
+        const x = Math.max(0, Math.min(1, t)) * PAS_COURSE;
+        const k = Math.min(PAS_COURSE - 1, Math.floor(x));
+        const f = x - k;
+        const c = profil.cumul;
+        const parcouru = c[k] + (c[k + 1] - c[k]) * f;
+        return (parcouru / profil.total) * profil.arrivee;
+      };
 
       // ---- Horloge des blocs d'investissement ----
       const blocActuel = (maintenant, debutSoiree, cfg) => {
@@ -230,7 +262,7 @@
         const [changements, setChangements] = React.useState({});
         const ordrePrecedent = React.useRef(null);
 
-        const duree = (Number(cfg.courseDureeSec) || 60) * 1000;
+        const duree = (Number(cfg.courseDureeSec) || 45) * 1000;
         const tours = Number(cfg.courseTours) || 3;
         const trame = React.useMemo(
           () => trameCourse(numero, chevaux, cfg),
@@ -250,11 +282,17 @@
           return () => cancelAnimationFrame(brut);
         }, [depart, duree]);
 
-        const positions = trame.profils.map((pr, i) => ({
-          index: i,
-          cheval: pr.cheval,
-          avance: avancementCheval(pr, t)
-        }));
+        const positions = trame.profils.map((pr, i) => {
+          const avance = avancementCheval(pr, t);
+          return {
+            index: i,
+            cheval: pr.cheval,
+            avance,
+            // Au dernier mètre on est encore dans le dernier tour, pas dans
+            // un tour de plus : d'où le plafond.
+            tour: Math.min(tours, Math.floor(avance * tours) + 1)
+          };
+        });
         const classement = [...positions].sort((a, b) => b.avance - a.avance);
 
         // Dépassement : la ligne qui gagne une place passe au vert, celle qui
@@ -307,8 +345,26 @@
               flexWrap: "wrap"
             }}
           >
-            <svg
-              viewBox="-370 -170 740 340"
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "8px"
+              }}
+            >
+              <div
+                style={{
+                  fontSize: compact ? "1rem" : "1.4rem",
+                  fontWeight: "bold",
+                  letterSpacing: "1px",
+                  color: "#FFC107"
+                }}
+              >
+                TOUR {classement.length ? classement[0].tour : 1} / {tours}
+              </div>
+              <svg
+                viewBox="-370 -170 740 340"
               style={{
                 width: compact ? "420px" : "min(70vw, 760px)",
                 maxWidth: "100%",
@@ -370,7 +426,8 @@
                   </g>
                 );
               })}
-            </svg>
+              </svg>
+            </div>
 
             <div style={{ minWidth: compact ? "180px" : "220px" }}>
               {classement.map((p, rang) => {
@@ -398,8 +455,8 @@
                   >
                     <span style={{ width: "22px" }}>{rang + 1}.</span>
                     <span style={{ flex: 1 }}>{p.cheval.nom}</span>
-                    <span style={{ color: "#888", fontSize: "0.8rem" }}>
-                      {Math.round(p.avance * 100)} %
+                    <span style={{ color: "#888", fontSize: "0.78rem" }}>
+                      tour {p.tour}
                     </span>
                   </div>
                 );
@@ -648,7 +705,7 @@
             courseIntervalleMin: 30,
             courseAnnonceMin: 10,
             courseTopDepartSec: 15,
-            courseDureeSec: 60,
+            courseDureeSec: 45,
             courseTours: 3,
             courseCote: 3,
             courseMisePlafond: 100,
@@ -1177,7 +1234,7 @@
           if (!course.active || !course.numero) return 0;
           const avant =
             nombreSur(configBookmaker.courseBlocageAvantMin, 2) * 60000;
-          const duree = nombreSur(configBookmaker.courseDureeSec, 60) * 1000;
+          const duree = nombreSur(configBookmaker.courseDureeSec, 45) * 1000;
           const apres =
             nombreSur(configBookmaker.courseBlocageApresMin, 1) * 60000;
           const fin = course.depart + duree + apres;
