@@ -322,7 +322,28 @@
     // sur le téléphone du lanceur : on la diffuse comme un événement.
     diffuser(evenement) {
       if (!disponible) return;
-      Sync.ecrire("evenement", { ...evenement, ts: Date.now() });
+      // L'horodatage est fixé une fois : les autres appareils s'en servent
+      // pour ignorer un tirage déjà vu, il ne doit pas bouger d'un essai à
+      // l'autre.
+      const valeur = { ...evenement, ts: Date.now() };
+      // Un tirage perdu ne laisse aucune trace : personne ne voit
+      // l'animation, et rien ne signale l'absence. Sur un réseau capricieux
+      // on réessaie donc avant d'abandonner, au lieu d'écrire une seule fois.
+      enfiler(async () => {
+        let dernierEchec;
+        for (let essai = 0; essai < 3; essai++) {
+          const { error } = await client
+            .from("etat")
+            .upsert(
+              { cle: "evenement", valeur, modifie_le: new Date().toISOString() },
+              { onConflict: "cle" }
+            );
+          if (!error) return;
+          dernierEchec = error;
+          await new Promise((r) => setTimeout(r, 400 * (essai + 1)));
+        }
+        throw dernierEchec;
+      });
     },
 
     // Exposée pour pouvoir vérifier la politique de fusion indépendamment du

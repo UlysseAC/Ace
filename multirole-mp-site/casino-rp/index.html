@@ -269,6 +269,10 @@
 
         // États Affichage Public & Animation Globale
         const [animationActive, setAnimationActive] = React.useState(false);
+        // Tirages déjà joués sur cet appareil. Le lanceur joue le sien sans
+        // attendre le réseau ; quand la base le lui renvoie, il ne doit pas
+        // le rejouer une seconde fois.
+        const tiragesJoues = React.useRef([]);
         const [infosAnimation, setInfosAnimation] = React.useState({
           phraseAction: "",
           face: "",
@@ -998,6 +1002,9 @@
         // l'exécutent en recevant l'événement diffusé, pour que la salle voie
         // le même tirage au même moment.
         const jouerAnimation = React.useCallback((ev) => {
+          if (ev.id) {
+            tiragesJoues.current = [ev.id, ...tiragesJoues.current].slice(0, 20);
+          }
           // Les faces défilent avec leur couleur. Un tirage diffusé par une
           // version précédente n'envoyait que les pourcentages : on retombe
           // alors sur la couleur du résultat, faute de mieux.
@@ -1056,6 +1063,8 @@
           return Sync.ecouter("evenement", (ev) => {
             if (!ev || !ev.ts || ev.ts <= dernierVu) return;
             dernierVu = ev.ts;
+            // Le lanceur a déjà joué ce tirage sans attendre la base.
+            if (ev.id && tiragesJoues.current.includes(ev.id)) return;
             jouerAnimation(ev);
           });
         }, [jouerAnimation]);
@@ -1121,6 +1130,7 @@
             .replace("{DE}", deConfig.nom)
             .replace("{CIBLE}", jC.nom);
           const evenement = {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             phraseAction: phraseInitiale,
             facePct: faceTiree.pct,
             couleur: COULEURS_FACE[faceTiree.type],
@@ -1129,9 +1139,13 @@
             secRoulement,
             secArret
           };
-          // Hors ligne, aucun appareil ne recevra la diffusion : on joue ici.
+          // Le lanceur joue son animation tout de suite, sans attendre que la
+          // base la lui renvoie : sur un réseau capricieux cet aller-retour
+          // peut tarder, ou ne jamais revenir, et il resterait devant un écran
+          // vide. Les autres appareils la reçoivent par la diffusion, et
+          // l'identifiant empêche qu'elle rejoue ici au retour de l'écho.
+          jouerAnimation(evenement);
           if (Sync.actif) Sync.diffuser(evenement);
-          else jouerAnimation(evenement);
 
           // Seul l'appareil lanceur touche aux comptes, sinon les huit
           // appareils appliqueraient chacun le même transfert.
