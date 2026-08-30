@@ -1128,15 +1128,43 @@
           URL.revokeObjectURL(lien.href);
         };
 
+        // Remet à zéro tout ce qui appartient à la partie jouée, et rien de
+        // ce qui a été réglé pour la soirée : missions, produits, pénalités,
+        // cartes, dés, chevaux, croupiers et surtout les projets
+        // d'investissement restent en place. On efface les parties d'argent
+        // en cours, pas le travail de préparation.
         const nouvellePartie = () => {
-          if (!window.confirm("Êtes-vous sûr ? Cela réinitialisera tous les joueurs et leurs soldes.")) {
+          if (
+            !window.confirm(
+              "Nouvelle partie ?\n\n" +
+                "Seront effacés : les joueurs et leurs soldes, les paris en cours, " +
+                "les investissements engagés, les chèques imprimés, l'historique " +
+                "et l'heure de début de soirée.\n\n" +
+                "Seront conservés : vos réglages — missions, produits, pénalités, " +
+                "cartes, dés, chevaux, croupiers et vos projets d'investissement."
+            )
+          ) {
             return;
           }
           setJoueurs([]);
           setChequesImprimerie([]);
           setCodesRegistre([]);
+          // Le bookmaker : paris en cours, argent engagé dans les projets, et
+          // l'horloge de la soirée qui cadence courses et blocs.
+          setParisJoueurs([]);
+          setParisCourse([]);
+          setInvestissements([]);
+          setSoireeDebut(0);
+          setVitrine({ mode: "accueil" });
+          // Les traces de la partie précédente.
+          setHistoriqueFiscal([]);
+          setHistoriqueAffichage([configGlobale.phraseAucunHistorique]);
           setInterfaceActive("menu");
-          alert("Nouvelle partie initialisée !");
+          alert(
+            "Nouvelle partie initialisée !\n\n" +
+              "Pensez à appuyer sur « Démarrer la soirée » pour relancer les " +
+              "courses et les blocs d'investissement."
+          );
         };
 
         const appliquerSauvegarde = (donnees) => {
