@@ -2606,19 +2606,28 @@
                     style={{
                       display: "grid",
                       gridTemplateColumns: "1fr 1fr",
-                      gap: "10px",
+                      // Aucun espace : deux chèques voisins partagent le même
+                      // trait, qu'un seul coup de ciseau sépare. Le conteneur
+                      // ne porte que les bords haut et gauche ; chaque chèque
+                      // porte les siens à droite et en bas. Chaque ligne de
+                      // découpe n'est donc tracée qu'une fois.
+                      gap: 0,
+                      borderTop: "2px solid #000",
+                      borderLeft: "2px solid #000",
                       marginTop: "20px"
                     }}
                   >
                     {chequesImprimerie.map((ch, i) => (
                       <div
                         key={i}
+                        className="cheque-a-decouper"
                         style={{
                           position: "relative",
                           background: "#fff",
                           color: "#000",
                           padding: "12px",
-                          border: "2px solid #000",
+                          borderRight: "2px solid #000",
+                          borderBottom: "2px solid #000",
                           height: "160px",
                           display: "flex",
                           flexDirection: "column",
