@@ -2606,14 +2606,14 @@
                     style={{
                       display: "grid",
                       gridTemplateColumns: "1fr 1fr",
-                      // Aucun espace : deux chèques voisins partagent le même
-                      // trait, qu'un seul coup de ciseau sépare. Le conteneur
-                      // ne porte que les bords haut et gauche ; chaque chèque
-                      // porte les siens à droite et en bas. Chaque ligne de
-                      // découpe n'est donc tracée qu'une fois.
+                      // Aucun espace : les chèques se touchent. Chacun porte
+                      // ses quatre bords, et se chevauche de 2 px avec ses
+                      // voisins (voir .cheque-a-decouper dans style.css) : les
+                      // deux bordures tombent l'une sur l'autre et ne font
+                      // qu'un seul trait à couper. Le conteneur, lui, n'a plus
+                      // de bordure — la sienne traînait dans l'espace resté
+                      // libre en bas de page et s'y faisait trancher.
                       gap: 0,
-                      borderTop: "2px solid #000",
-                      borderLeft: "2px solid #000",
                       marginTop: "20px"
                     }}
                   >
@@ -2626,8 +2626,7 @@
                           background: "#fff",
                           color: "#000",
                           padding: "12px",
-                          borderRight: "2px solid #000",
-                          borderBottom: "2px solid #000",
+                          border: "2px solid #000",
                           height: "160px",
                           display: "flex",
                           flexDirection: "column",

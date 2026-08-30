@@ -69,21 +69,52 @@ body {
   }
 }
 
+/* Découpe des chèques : chaque chèque porte ses quatre bords, et empiète de
+   2 px sur son voisin de droite et sur celui du dessous. Les deux bordures
+   se superposent exactement : on ne voit qu'un trait, et un seul coup de
+   ciseau sépare les deux chèques. Chacun restant complet, la première ligne
+   d'une nouvelle page a bien un trait en haut, ce qu'une bordure portée par
+   le conteneur ne donnait pas. */
+.cheque-a-decouper {
+  margin-bottom: -2px;
+}
+
+.cheque-a-decouper:nth-child(odd) {
+  margin-right: -2px;
+}
+
 /* Impression des chèques de mission : seule la planche sort sur le papier */
 @media print {
-  body * {
-    visibility: hidden;
+  /* La planche doit rester dans le flux normal du document : un élément
+     en position absolue n'est pas découpé proprement en pages, et le
+     navigateur ignore alors la consigne de ne pas trancher les chèques.
+     On masque donc tout le reste au lieu de sortir la planche du flux :
+     seuls la planche, son contenu et ses parents survivent. */
+  body *:not(:has(#printable-area)):not(#printable-area):not(#printable-area *) {
+    display: none !important;
   }
 
-  #printable-area,
-  #printable-area * {
-    visibility: visible;
+  /* Les parents ne servent plus qu'à porter la planche : on efface leurs
+     marges et leurs largeurs, pour que la feuille soit utilisée en entier. */
+  body:has(#printable-area),
+  body *:has(#printable-area) {
+    display: block !important;
+    position: static !important;
+    float: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: auto !important;
+    box-sizing: border-box !important;
+    background: #fff !important;
+    color: #000 !important;
   }
 
   #printable-area {
-    position: absolute;
-    top: 0;
-    left: 0;
+    margin: 0 !important;
     width: 100%;
     background: white;
     color: black;
