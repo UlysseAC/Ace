@@ -89,6 +89,21 @@ body {
     color: black;
   }
 
+  /* Un chèque coupé en deux par un saut de page ruinerait la découpe :
+     la planche doit rester une grille régulière sur chaque feuille. */
+  .cheque-a-decouper {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Les bordures sont les lignes de découpe : sans ça, certains
+     navigateurs les effacent pour économiser de l'encre. */
+  #printable-area,
+  #printable-area * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
   .no-print {
     display: none !important;
   }
