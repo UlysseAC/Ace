@@ -1151,6 +1151,9 @@
         const [configGlobale, setConfigGlobale] = useEtatPartage("configGlobale", {
           codeAdmin: "26",
           limitTop: 3,
+          // Ce que le grand écran montre du joueur : son nom, ou son
+          // identifiant si l'on préfère ne pas afficher les vrais noms.
+          topAffiche: "nom",
           dureeParadisFiscalMin: 15,
           limiteRetraitCroupier: 5000,
           dureeRoulement: 3,
@@ -1551,6 +1554,45 @@
         const nbParadisActifs = joueursActifs.filter(
           (j) => j.paradisActif
         ).length;
+
+        // Les places gagnées ou perdues au classement. On compte les rangs sur
+        // TOUS les joueurs, pas seulement ceux qu'on affiche : sinon un joueur
+        // qui file au paradis fiscal ferait monter tout le monde d'un cran
+        // pour rien.
+        const DUREE_BOUGE = 25000;
+        const [bougesClassement, setBougesClassement] = React.useState({});
+        const rangsPrecedents = React.useRef(null);
+        const rangsReels = {};
+        [...joueursActifs]
+          .sort((a, b) => b.solde - a.solde)
+          .forEach((j, i) => (rangsReels[j.id] = i));
+        const empreinteRangs = Object.keys(rangsReels)
+          .map((id) => id + ":" + rangsReels[id])
+          .join(",");
+        React.useEffect(() => {
+          const avant = rangsPrecedents.current;
+          rangsPrecedents.current = rangsReels;
+          if (!avant) return;
+          const bouges = {};
+          Object.keys(rangsReels).forEach((id) => {
+            // Un joueur qui vient d'être créé n'a pas « gagné » de places.
+            if (avant[id] === undefined) return;
+            const places = avant[id] - rangsReels[id];
+            if (places !== 0)
+              bouges[id] = { places, jusqua: Date.now() + DUREE_BOUGE };
+          });
+          if (!Object.keys(bouges).length) return;
+          setBougesClassement((prec) => {
+            const maintenant = Date.now();
+            const suite = {};
+            // On jette au passage les mouvements périmés, sinon la liste
+            // enflerait toute la soirée.
+            Object.keys(prec).forEach((id) => {
+              if (prec[id].jusqua > maintenant) suite[id] = prec[id];
+            });
+            return { ...suite, ...bouges };
+          });
+        }, [empreinteRangs]);
         const joueurActuel = joueursActifs.find(
           (j) => j.id === joueurConnecteId
         );
@@ -3557,6 +3599,22 @@
                         }
                         style={{ width: "100%", padding: "5px" }}
                       />
+                    </label>
+                    <label>
+                      Dans le Top, afficher :{" "}
+                      <select
+                        value={configGlobale.topAffiche || "nom"}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            topAffiche: e.target.value
+                          })
+                        }
+                        style={{ width: "100%", padding: "5px" }}
+                      >
+                        <option value="nom">Le nom du joueur</option>
+                        <option value="id">L'identifiant du joueur</option>
+                      </select>
                     </label>
                     <label>
                       Durée Paradis Fiscal (Min) :{" "}
@@ -6567,9 +6625,12 @@
                       key={pr.id}
                       style={{
                         background: "#1a1a1a",
-                        padding: "14px",
+                        padding: "16px",
                         borderRadius: "8px",
-                        marginTop: "12px"
+                        border: "1px solid #333",
+                        // Un blanc franc entre deux projets : enchaînés sans
+                        // respiration, on ne voyait plus où l'un finissait.
+                        marginTop: "22px"
                       }}
                     >
                       <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
@@ -8300,7 +8361,27 @@
                         }}
                       >
                         <span>
-                          <strong>#{i + 1}</strong> {j.nom}
+                          <strong>#{i + 1}</strong>{" "}
+                          {configGlobale.topAffiche === "id" ? j.id : j.nom}
+                          {(() => {
+                            const bouge = bougesClassement[j.id];
+                            if (!bouge || bouge.jusqua <= timeNow) return null;
+                            const monte = bouge.places > 0;
+                            return (
+                              <span
+                                style={{
+                                  marginLeft: "12px",
+                                  // L'écran d'affichage se regarde de loin :
+                                  // une flèche discrète ne se verrait pas.
+                                  fontSize: "1.05rem",
+                                  fontWeight: "bold",
+                                  color: monte ? "#4CAF50" : "#EF5350"
+                                }}
+                              >
+                                {monte ? "▲" : "▼"} {Math.abs(bouge.places)}
+                              </span>
+                            );
+                          })()}
                         </span>
                         <strong style={{ color: "#4CAF50" }}>
                           {j.solde.toLocaleString()} $
