@@ -34,7 +34,7 @@
       const COULEURS_CHEVAUX = [
         "#C62828", // rouge
         "#1565C0", // bleu roi
-        "#2E7D32", // vert bouteille
+        "#EF6C00", // orange
         "#6A1B9A", // violet
         "#00838F", // bleu canard
         "#AD1457" // framboise
@@ -379,12 +379,23 @@
       // Les couleurs de l'hippodrome : du sable, pas du gazon. Le sable est
       // clair, alors les couleurs des chevaux sont franches et sombres --
       // c'est ce qui les detache le mieux du fond.
-      const SABLE = {
-        horsPiste: "#D9C293", // le sable clair, tout autour
-        piste: "#BE9058", // la surface courue, damee, plus soutenue
-        centre: "#E7D6AC", // le rond central
-        lisse: "rgba(255,255,255,0.85)", // les barrieres blanches
-        bordure: "#5F4327" // le bord sombre qui detache chaque couloir
+      // Le domaine, vu du ciel : du gazon partout, un anneau de sable damé
+      // cerné de lisses blanches, un rond central avec sa pièce d'eau et ses
+      // bosquets, et une haie d'arbres tout autour de la propriété.
+      const DOMAINE = {
+        gazon: "#7CB342", // l'herbe autour de la piste
+        gazonCentre: "#6BA436", // le rond central, un ton plus soutenu
+        tonte: "#8BC34A", // la trace de tonte, plus claire
+        sable: "#E3C89C", // la piste
+        sableOmbre: "#CBA877", // le bord de piste, tassé
+        lisse: "#FFFFFF", // les barrières
+        bordure: "#7A5A33", // le bord sombre qui détache chaque couloir
+        eau: "#4FC3F7",
+        eauBord: "#039BE5",
+        arbre: "#2E7D32",
+        arbreClair: "#4CAF50",
+        tribuneMur: "#ECEFF1",
+        tribuneToit: "#E65100"
       };
 
       const PISTE = {
@@ -526,6 +537,79 @@
         return lo + f;
       };
 
+      // Sème des points régulièrement espacés le long d'un tracé : c'est ce
+      // qui plante la haie d'arbres autour de la propriété.
+      const semerLeLong = (trace, pas) => {
+        const nb = Math.max(4, Math.round(trace.L / pas));
+        const points = [];
+        let k = 1;
+        for (let i = 0; i < nb; i++) {
+          const cible = (i / nb) * trace.L;
+          while (k < trace.cumul.length - 1 && trace.cumul[k] < cible) k++;
+          points.push(trace.pts[k]);
+        }
+        return points;
+      };
+
+      // Le décor : la haie qui ceinture le domaine, la pièce d'eau et les
+      // bosquets du rond central. Tout est calé sur les dimensions de la
+      // piste, donc cela suit si l'on change le nombre de chevaux.
+      const decorPiste = (piste) => {
+        const rHaie = piste.rayonExterieur + 40;
+        const haie = traceCouloir(
+          rHaie,
+          rHaie,
+          { depart: 0, large: 1 },
+          decoupePiste(rHaie)
+        );
+        const h = Math.max(20, piste.rayonInterieur - 26);
+        const l = PISTE.demiDroite + h;
+        // Les bosquets se tiennent aux deux bouts du rond central et autour de
+        // la pièce d'eau : le milieu reste dégagé, sinon le regard ne suit
+        // plus les chevaux.
+        // On plante par bouquets serrés plutôt qu'arbre par arbre : isolés,
+        // ils faisaient des taches sur la pelouse.
+        const centres = [
+          [-0.9, -0.1], [-0.76, 0.42], [-0.68, -0.46], [-0.34, 0.58],
+          [0.28, -0.6], [0.62, 0.54], [0.76, -0.36], [0.9, 0.24],
+          [0.95, -0.56]
+        ];
+        const bouquet = [
+          [0, 0, 15], [17, -10, 11], [-15, 12, 12], [9, 15, 10]
+        ];
+        const bosquets = [];
+        centres.forEach(([fx, fy], g) =>
+          bouquet.slice(0, 3 + (g % 2)).forEach(([dx, dy, r], k) =>
+            bosquets.push([fx, fy, r, dx, dy, g + "-" + k])
+          )
+        );
+        // La tonte : des bandes alternées, comme sur une pelouse entretenue.
+        const largeurBande = 52;
+        const bandes = [];
+        for (let x = -l; x < l; x += largeurBande)
+          bandes.push({ cle: String(Math.round(x)), x, w: largeurBande });
+        return {
+          arbresHaie: semerLeLong(haie, 42).map((a, i) => ({
+            x: a.x,
+            y: a.y,
+            // Trois tailles qui alternent : une haie parfaitement régulière
+            // ferait collier de perles.
+            r: 11 + ((i * 5) % 3) * 3
+          })),
+          rayonHaie: rHaie,
+          bassin: { cx: -l * 0.5, cy: h * 0.1, rx: l * 0.17, ry: h * 0.4 },
+          bandes,
+          bosquets: bosquets.map(([fx, fy, r, dx, dy, cle]) => ({
+            cle,
+            x: l * fx + dx,
+            y: h * fy + dy,
+            r
+          })),
+          demiHauteurCentre: h,
+          demiLargeurCentre: l
+        };
+      };
+
       const pointCouloir = (couloir, phase) => {
         const i = Math.max(0, Math.min(couloir.pts.length - 2, Math.floor(phase)));
         const f = phase - i;
@@ -533,6 +617,19 @@
         const b = couloir.pts[i + 1];
         return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
       };
+
+      // Un arbre vu du ciel : une couronne sombre, et sa partie éclairée.
+      const Arbre = ({ x, y, r }) => (
+        <g>
+          <circle cx={x} cy={y} r={r} fill={DOMAINE.arbre} />
+          <circle
+            cx={x - r * 0.22}
+            cy={y - r * 0.22}
+            r={r * 0.62}
+            fill={DOMAINE.arbreClair}
+          />
+        </g>
+      );
 
       function PisteCourse({ numero, chevaux, cfg, depart, compact }) {
         const [t, setT] = React.useState(0);
@@ -627,6 +724,7 @@
           return { cases, x0, largeur: x1 - x0, hauteur: rangees * pas };
         }, [piste]);
         const rayonPion = Math.max(11, piste.largeur * 1.35);
+        const decor = React.useMemo(() => decorPiste(piste), [piste]);
 
         return (
           <div
@@ -657,35 +755,127 @@
                 TOUR {classement.length ? classement[0].tour : 1} / {tours}
               </div>
               <svg
-                viewBox="-422 -212 844 424"
+                viewBox="-478 -268 956 536"
                 style={{
                   width: compact ? "420px" : "min(70vw, 760px)",
                   maxWidth: "100%",
-                  background: SABLE.horsPiste,
+                  background: DOMAINE.gazon,
                   borderRadius: "16px"
                 }}
               >
-                {/* L'anneau de piste, puis le rond central */}
+                <defs>
+                  <clipPath id={`rond-central-${numero}`}>
+                    <rect
+                      x={-decor.demiLargeurCentre}
+                      y={-decor.demiHauteurCentre}
+                      width={2 * decor.demiLargeurCentre}
+                      height={2 * decor.demiHauteurCentre}
+                      rx={decor.demiHauteurCentre}
+                    />
+                  </clipPath>
+                </defs>
+
+                {/* Le rideau d'arbres qui ceinture le domaine */}
                 <rect
-                  x={-(PISTE.demiDroite + piste.rayonExterieur + 14)}
-                  y={-(piste.rayonExterieur + 14)}
-                  width={2 * (PISTE.demiDroite + piste.rayonExterieur + 14)}
-                  height={2 * (piste.rayonExterieur + 14)}
-                  rx={piste.rayonExterieur + 14}
-                  fill={SABLE.piste}
-                  stroke={SABLE.lisse}
-                  strokeWidth="2.5"
+                  x={-(PISTE.demiDroite + decor.rayonHaie)}
+                  y={-decor.rayonHaie}
+                  width={2 * (PISTE.demiDroite + decor.rayonHaie)}
+                  height={2 * decor.rayonHaie}
+                  rx={decor.rayonHaie}
+                  fill="none"
+                  stroke={DOMAINE.arbre}
+                  strokeWidth="20"
+                  strokeOpacity="0.55"
+                />
+                {decor.arbresHaie.map((a, i) => (
+                  <Arbre key={`haie-${i}`} x={a.x} y={a.y} r={a.r} />
+                ))}
+
+                {/* L'anneau de sable, cerné de ses deux lisses blanches */}
+                <rect
+                  x={-(PISTE.demiDroite + piste.rayonExterieur + 24)}
+                  y={-(piste.rayonExterieur + 24)}
+                  width={2 * (PISTE.demiDroite + piste.rayonExterieur + 24)}
+                  height={2 * (piste.rayonExterieur + 24)}
+                  rx={piste.rayonExterieur + 24}
+                  fill={DOMAINE.sableOmbre}
                 />
                 <rect
-                  x={-(PISTE.demiDroite + piste.rayonInterieur - 14)}
-                  y={-Math.max(4, piste.rayonInterieur - 14)}
-                  width={2 * (PISTE.demiDroite + piste.rayonInterieur - 14)}
-                  height={2 * Math.max(4, piste.rayonInterieur - 14)}
-                  rx={Math.max(4, piste.rayonInterieur - 14)}
-                  fill={SABLE.centre}
-                  stroke={SABLE.lisse}
-                  strokeWidth="2.5"
+                  x={-(PISTE.demiDroite + piste.rayonExterieur + 20)}
+                  y={-(piste.rayonExterieur + 20)}
+                  width={2 * (PISTE.demiDroite + piste.rayonExterieur + 20)}
+                  height={2 * (piste.rayonExterieur + 20)}
+                  rx={piste.rayonExterieur + 20}
+                  fill={DOMAINE.sable}
+                  stroke={DOMAINE.lisse}
+                  strokeWidth="3"
                 />
+
+                {/* Le rond central : gazon, trace de tonte, pièce d'eau */}
+                <rect
+                  x={-decor.demiLargeurCentre}
+                  y={-decor.demiHauteurCentre}
+                  width={2 * decor.demiLargeurCentre}
+                  height={2 * decor.demiHauteurCentre}
+                  rx={decor.demiHauteurCentre}
+                  fill={DOMAINE.gazonCentre}
+                  stroke={DOMAINE.lisse}
+                  strokeWidth="3"
+                />
+                <g clipPath={`url(#rond-central-${numero})`}>
+                  {decor.bandes.map((b, i) =>
+                    i % 2 === 0 ? (
+                      <rect
+                        key={`tonte-${b.cle}`}
+                        x={b.x}
+                        y={-decor.demiHauteurCentre}
+                        width={b.w}
+                        height={2 * decor.demiHauteurCentre}
+                        fill={DOMAINE.tonte}
+                        fillOpacity="0.45"
+                      />
+                    ) : null
+                  )}
+                </g>
+                <g stroke={DOMAINE.eauBord} strokeWidth="2.5" fill={DOMAINE.eau}>
+                  <ellipse
+                    cx={decor.bassin.cx}
+                    cy={decor.bassin.cy}
+                    rx={decor.bassin.rx}
+                    ry={decor.bassin.ry}
+                  />
+                  <ellipse
+                    cx={decor.bassin.cx + decor.bassin.rx * 0.55}
+                    cy={decor.bassin.cy - decor.bassin.ry * 0.3}
+                    rx={decor.bassin.rx * 0.6}
+                    ry={decor.bassin.ry * 0.6}
+                  />
+                </g>
+                <g fill={DOMAINE.eau} stroke="none">
+                  <ellipse
+                    cx={decor.bassin.cx}
+                    cy={decor.bassin.cy}
+                    rx={decor.bassin.rx - 1}
+                    ry={decor.bassin.ry - 1}
+                  />
+                  <ellipse
+                    cx={decor.bassin.cx + decor.bassin.rx * 0.55}
+                    cy={decor.bassin.cy - decor.bassin.ry * 0.3}
+                    rx={decor.bassin.rx * 0.6 - 1}
+                    ry={decor.bassin.ry * 0.6 - 1}
+                  />
+                </g>
+                <ellipse
+                  cx={decor.bassin.cx - decor.bassin.rx * 0.3}
+                  cy={decor.bassin.cy - decor.bassin.ry * 0.35}
+                  rx={decor.bassin.rx * 0.4}
+                  ry={decor.bassin.ry * 0.22}
+                  fill="#B3E5FC"
+                  fillOpacity="0.65"
+                />
+                {decor.bosquets.map((b) => (
+                  <Arbre key={`bosquet-${b.cle}`} x={b.x} y={b.y} r={b.r} />
+                ))}
                 {/* Chaque couloir est double d'un liere sombre : aux
                     croisements, on voit franchement une ligne passer sur
                     l'autre au lieu de deux couleurs qui se melangent. */}
@@ -695,7 +885,7 @@
                       <path
                         d={piste.couloirs[i].d}
                         fill="none"
-                        stroke={SABLE.bordure}
+                        stroke={DOMAINE.bordure}
                         strokeWidth={piste.largeur + 6}
                         strokeLinejoin="round"
                         strokeLinecap="round"
@@ -730,7 +920,7 @@
                     width={damier.largeur}
                     height={damier.hauteur}
                     fill="none"
-                    stroke={SABLE.bordure}
+                    stroke={DOMAINE.bordure}
                     strokeWidth="1.5"
                   />
                 </g>
