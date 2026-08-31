@@ -96,14 +96,48 @@
         RESULTAT: "resultat"
       };
 
-      const infosCourse = (maintenant, debutSoiree, cfg) => {
-        if (!debutSoiree) return { active: false, phase: PHASES.AUCUNE };
-        const intervalle = nombreSur(cfg.courseIntervalleMin, 30) * 60000;
-        if (intervalle <= 0) return { active: false, phase: PHASES.AUCUNE };
+      const infosCourse = (maintenant, debutSoiree, cfg, manuelle) => {
         const topSec = nombreSur(cfg.courseTopDepartSec, 15) * 1000;
         const dureeSec = nombreSur(cfg.courseDureeSec, 45) * 1000;
         const annonce = nombreSur(cfg.courseAnnonceMin, 10) * 60000;
         const apres = nombreSur(cfg.courseBlocageApresMin, 1) * 60000;
+
+        // Une course lancée à la main prime sur l'horaire : c'est elle qu'on
+        // regarde, du top départ jusqu'à la fin du temps de résultat.
+        if (manuelle && manuelle.depart) {
+          const avantDepart = manuelle.depart - maintenant;
+          const depuis = -avantDepart;
+          if (depuis < dureeSec + apres) {
+            let phase;
+            if (avantDepart > topSec) phase = PHASES.ANNONCE;
+            else if (avantDepart > 0) phase = PHASES.TOP;
+            else if (depuis < dureeSec) phase = PHASES.COURSE;
+            else phase = PHASES.RESULTAT;
+            return {
+              active: true,
+              manuelle: true,
+              numero: manuelle.numero,
+              depart: manuelle.depart,
+              avantDepart,
+              phase,
+              avancement:
+                phase === PHASES.COURSE
+                  ? Math.min(1, Math.max(0, depuis / dureeSec))
+                  : phase === PHASES.RESULTAT
+                    ? 1
+                    : 0,
+              parisOuverts: avantDepart > topSec
+            };
+          }
+        }
+
+        // En simulation, aucune course ne part toute seule : on attend que
+        // le bookmaker en lance une.
+        if (cfg.modeSimulation) return { active: false, phase: PHASES.AUCUNE };
+
+        if (!debutSoiree) return { active: false, phase: PHASES.AUCUNE };
+        const intervalle = nombreSur(cfg.courseIntervalleMin, 30) * 60000;
+        if (intervalle <= 0) return { active: false, phase: PHASES.AUCUNE };
 
         const ecoule = maintenant - debutSoiree;
         // La première course a lieu au bout d'un intervalle, pas au démarrage.
@@ -680,6 +714,12 @@
           {
             codeBookmaker: "77",
 
+            // Mode simulation : plus d'horaire automatique. Les courses se
+            // lancent à la demande, tous les projets sont accessibles et
+            // aucune échéance ne tombe toute seule. Sert à essayer le jeu
+            // sans attendre les minuteries.
+            modeSimulation: false,
+
             // --- Paris sur un joueur ---
             // Les seuils proposés au bookmaker, plutôt qu'un pourcentage libre.
             seuilsPari: [
@@ -768,6 +808,12 @@
         const [investissements, setInvestissements] = useEtatPartage(
           "investissements",
           []
+        );
+
+        // --- TABLE 13 : COURSE LANCÉE À LA MAIN (mode simulation) ---
+        const [courseManuelle, setCourseManuelle] = useEtatPartage(
+          "courseManuelle",
+          null
         );
 
         // --- TABLE 12 : DÉBUT DE LA SOIRÉE ---
@@ -1252,7 +1298,12 @@
           return () => clearInterval(t);
         }, []);
 
-        const course = infosCourse(maintenant, soireeDebut, configBookmaker);
+        const course = infosCourse(
+          maintenant,
+          soireeDebut,
+          configBookmaker,
+          courseManuelle
+        );
         const blocInvest = blocActuel(maintenant, soireeDebut, configBookmaker);
 
         // Le contrôle fiscal est interdit autour de la course : on veut la
@@ -1419,6 +1470,18 @@
           return chevauxCourse[gagnant] || null;
         };
 
+        // Lance une course tout de suite, sans attendre l'horaire. Le top
+        // départ est conservé pour que l'écran de la salle ait le temps
+        // d'afficher le décompte et que les paris se ferment proprement.
+        const lancerCourseMaintenant = () => {
+          const top = nombreSur(configBookmaker.courseTopDepartSec, 15) * 1000;
+          const precedent = courseManuelle ? nombreSur(courseManuelle.numero, 1000) : 999;
+          setCourseManuelle({
+            numero: Math.max(1000, precedent + 1),
+            depart: Date.now() + top
+          });
+        };
+
         const placerPariCourse = (joueurId, chevalId, mise) => {
           const joueur = joueurs.find((j) => j.id === joueurId);
           const cheval = chevauxCourse.find(
@@ -1552,16 +1615,27 @@
         );
 
         // ================= INVESTISSEMENTS =================
-        const projetsDuBloc = (configBookmaker.projets || []).filter(
-          (pr) => Number(pr.bloc) === Number(blocInvest)
-        );
+        // En simulation on montre tous les projets, sans attendre que leur
+        // bloc de 45 min arrive : c'est tout l'intérêt d'un mode d'essai.
+        const projetsDuBloc = configBookmaker.modeSimulation
+          ? configBookmaker.projets || []
+          : (configBookmaker.projets || []).filter(
+              (pr) => Number(pr.bloc) === Number(blocInvest)
+            );
 
-        const instanceProjet = (projetId) =>
-          investissements.find(
-            (i) =>
-              String(i.projetId) === String(projetId) &&
-              Number(i.bloc) === Number(blocInvest)
+        const instanceProjet = (projetId) => {
+          const memeProjet = investissements.filter(
+            (i) => String(i.projetId) === String(projetId)
           );
+          if (configBookmaker.modeSimulation) {
+            // Hors des blocs : on suit celui qui est ouvert, sinon le dernier.
+            return (
+              memeProjet.find((i) => i.statut === "ouvert") ||
+              memeProjet[memeProjet.length - 1]
+            );
+          }
+          return memeProjet.find((i) => Number(i.bloc) === Number(blocInvest));
+        };
 
         const totalInvesti = (inst) =>
           (inst && inst.investisseurs ? inst.investisseurs : []).reduce(
@@ -1756,7 +1830,11 @@
                 return;
               }
               // Plus de place et objectif non atteint : c'est perdu d'avance.
-              if (nb >= max || maintenant >= echeance) {
+              // En simulation le délai ne compte pas : rien ne doit échouer
+              // pendant qu'on met le jeu au point.
+              const delaiEcoule =
+                !configBookmaker.modeSimulation && maintenant >= echeance;
+              if (nb >= max || delaiEcoule) {
                 reglerProjet(inst, projet, false);
               }
             });
@@ -2701,6 +2779,35 @@
                     }}
                   >
                     🎩 Réglages Bookmaker
+                  </button>
+                  <button
+                    onClick={() => {
+                      const actif = !configBookmaker.modeSimulation;
+                      setConfigBookmaker({
+                        ...configBookmaker,
+                        modeSimulation: actif
+                      });
+                      // On efface la course d'essai en repassant en normal :
+                      // sinon elle resterait affichée en pleine vraie soirée.
+                      if (!actif) setCourseManuelle(null);
+                    }}
+                    style={{
+                      padding: "10px 18px",
+                      background: configBookmaker.modeSimulation
+                        ? "#7B1FA2"
+                        : "#333",
+                      color: "#fff",
+                      border: configBookmaker.modeSimulation
+                        ? "2px solid #CE93D8"
+                        : "2px solid transparent",
+                      borderRadius: "6px",
+                      fontWeight: "bold",
+                      cursor: "pointer"
+                    }}
+                  >
+                    {configBookmaker.modeSimulation
+                      ? "🧪 Simulation ACTIVE — repasser en normal"
+                      : "🧪 Passer en simulation"}
                   </button>
                   <button
                     onClick={() => {
@@ -5973,7 +6080,21 @@
                 </div>
               </div>
 
-              {!soireeDebut && (
+              {configBookmaker.modeSimulation && (
+                <div
+                  style={{
+                    ...cadre,
+                    background: "#4A148C",
+                    fontWeight: "bold"
+                  }}
+                >
+                  🧪 MODE SIMULATION — aucune course ne part toute seule, tous les
+                  projets sont accessibles et aucune échéance ne tombe. À
+                  désactiver dans l'Admin avant la vraie soirée.
+                </div>
+              )}
+
+              {!soireeDebut && !configBookmaker.modeSimulation && (
                 <div
                   style={{
                     ...cadre,
@@ -6154,6 +6275,15 @@
                   <h3 style={{ marginTop: 0, color: "#FFC107" }}>
                     Pari sur la course
                   </h3>
+                  {configBookmaker.modeSimulation && (
+                    <button
+                      onClick={lancerCourseMaintenant}
+                      className="checkbox-btn"
+                      style={{ background: "#FF6B00", marginBottom: "14px" }}
+                    >
+                      🏇 Lancer une course maintenant
+                    </button>
+                  )}
                   <label>Le joueur</label>
                   <select
                     value={bkCourseJoueurId}
@@ -6348,21 +6478,63 @@
                               </>
                             )}
                           </div>
-                          <button
-                            onClick={() => setVitrine({ mode: "projet", projetId: pr.id })}
+                          <div
                             style={{
-                              marginTop: "8px",
-                              padding: "6px 10px",
-                              background: "#455A64",
-                              color: "#fff",
-                              border: "none",
-                              borderRadius: "5px",
-                              cursor: "pointer",
-                              fontSize: "0.8rem"
+                              display: "flex",
+                              gap: "6px",
+                              flexWrap: "wrap",
+                              marginTop: "8px"
                             }}
                           >
-                            🪧 Présenter ce projet
-                          </button>
+                            <button
+                              onClick={() => setVitrine({ mode: "projet", projetId: pr.id })}
+                              style={{
+                                padding: "6px 10px",
+                                background: "#455A64",
+                                color: "#fff",
+                                border: "none",
+                                borderRadius: "5px",
+                                cursor: "pointer",
+                                fontSize: "0.8rem"
+                              }}
+                            >
+                              🪧 Présenter ce projet
+                            </button>
+                            {/* En simulation on peut trancher tout de suite,
+                                sans attendre le délai ni remplir la cagnotte. */}
+                            {configBookmaker.modeSimulation && inst && !clos && (
+                              <>
+                                <button
+                                  onClick={() => reglerProjet(inst, pr, true)}
+                                  style={{
+                                    padding: "6px 10px",
+                                    background: "#2E7D32",
+                                    color: "#fff",
+                                    border: "none",
+                                    borderRadius: "5px",
+                                    cursor: "pointer",
+                                    fontSize: "0.8rem"
+                                  }}
+                                >
+                                  ✅ Forcer la réussite
+                                </button>
+                                <button
+                                  onClick={() => reglerProjet(inst, pr, false)}
+                                  style={{
+                                    padding: "6px 10px",
+                                    background: "#7f1d1d",
+                                    color: "#fff",
+                                    border: "none",
+                                    borderRadius: "5px",
+                                    cursor: "pointer",
+                                    fontSize: "0.8rem"
+                                  }}
+                                >
+                                  ❌ Forcer l'échec
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </div>
                       );
                     })
