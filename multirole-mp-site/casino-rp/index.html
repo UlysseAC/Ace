@@ -392,10 +392,11 @@
         bordure: "#7A5A33", // le bord sombre qui détache chaque couloir
         eau: "#4FC3F7",
         eauBord: "#039BE5",
-        arbre: "#388E3C",
-        arbreClair: "#66BB6A",
-        arbreTrait: "#1B5E20",
-        ombre: "rgba(27, 68, 20, 0.32)",
+        arbreFond: "#3E7522", // le fond, pour qu'aucun trou ne perce
+        arbreSombre: "#3B6E22",
+        arbre: "#4E8C2B",
+        arbreClair: "#7CB342",
+        ombre: "rgba(27, 68, 20, 0.3)",
         tribuneMur: "#ECEFF1",
         tribuneToit: "#E65100"
       };
@@ -559,19 +560,54 @@
         return d + " Z";
       };
 
-      // Une couronne d'arbre vue du ciel : au lieu d'un rond plat, un contour
-      // à lobes, comme un feuillage. On la dessine une fois pour un rayon de
-      // 1, et chaque arbre n'est plus qu'une mise à l'échelle.
-      const feuillage = (lobes, creux) => {
-        const pts = [];
-        for (let k = 0; k < lobes * 2; k++) {
-          const a = (k / (lobes * 2)) * Math.PI * 2;
-          const r = k % 2 === 0 ? 1 : creux;
-          pts.push([r * Math.cos(a), r * Math.sin(a)]);
-        }
-        return contourFerme(pts, 3);
+      // Un buisson taillé, vu du ciel : une masse de petites feuilles posées
+      // en couronnes, du bord vers le cœur. Celles du bord dépassent, ce qui
+      // donne la silhouette hérissée ; celles qui font face au soleil — en
+      // haut à gauche — sont plus claires.
+      //
+      // Le buisson est dessiné une seule fois, pour un rayon de 1, et déposé
+      // dans les <defs> : chaque massif du domaine n'est ensuite qu'une copie
+      // translatée et tournée. Sinon ce seraient plusieurs milliers
+      // d'ellipses dans la page.
+      const dessinerBuisson = () => {
+        // Un tirage semé : le buisson est toujours le même, mais ses feuilles
+        // ne sont pas alignées au cordeau.
+        const alea = semer(20240817);
+        const couronnes = [
+          [1, 26], [0.87, 23], [0.74, 20], [0.61, 17],
+          [0.48, 14], [0.35, 11], [0.22, 8], [0.08, 4]
+        ];
+        const feuilles = [];
+        couronnes.forEach(([rayon, nb], k) => {
+          for (let i = 0; i < nb; i++) {
+            const angle = ((i + alea() * 0.8) / nb) * 360 + k * 13;
+            const rad = (angle * Math.PI) / 180;
+            const r = Math.max(0, rayon + (alea() - 0.5) * 0.09);
+            // Face au soleil — en haut à gauche — le feuillage est plus
+            // clair. Une feuille sur trois tranche quand même, sinon la
+            // masse est trop lisse pour ressembler à des feuilles.
+            const lumiere = -(Math.cos(rad) + Math.sin(rad)) / 2;
+            const tirage = alea();
+            let teinte = lumiere > 0.3 ? 2 : lumiere > -0.25 ? 1 : 0;
+            if (tirage < 0.22) teinte = Math.max(0, teinte - 1);
+            else if (tirage > 0.86) teinte = Math.min(2, teinte + 1);
+            feuilles.push({
+              cle: k + "-" + i,
+              rayon: r,
+              angle,
+              // La feuille n'est pas plantée droit dans l'axe : c'est ce
+              // désordre qui fait une touffe et non un oursin.
+              biais: (alea() - 0.5) * 110,
+              teinte
+            });
+          }
+        });
+        return feuilles;
       };
-      const FEUILLAGE = feuillage(9, 0.9);
+      const FEUILLES = dessinerBuisson();
+      // Toutes les touffes du domaine ont la même taille : c'est ce qui fait
+      // un pourtour régulier plutôt qu'un semis d'arbres dépareillés.
+      const RAYON_BUISSON = 19;
 
       // Sème des points régulièrement espacés le long d'un tracé : c'est ce
       // qui plante la haie d'arbres autour de la propriété.
@@ -614,12 +650,10 @@
         // choisis assez à l'intérieur pour qu'aucun arbre ne morde sur le
         // sable — et un rognage au bord du rond central le garantit.
         const bosquets = [
-          [-0.855, -0.2, 21, 0, 0, "a"], [-0.79, 0.34, 18, 0, 0, "b"],
-          [-0.7, -0.5, 17, 0, 0, "c"], [-0.735, 0.56, 15, 0, 0, "d"],
-          [-0.2, -0.56, 19, 0, 0, "e"], [-0.06, 0.58, 16, 0, 0, "f"],
-          [0.235, -0.58, 17, 0, 0, "g"], [0.5, 0.56, 19, 0, 0, "h"],
-          [0.79, -0.34, 20, 0, 0, "i"], [0.84, 0.26, 17, 0, 0, "j"],
-          [0.715, 0.55, 15, 0, 0, "k"], [0.735, -0.56, 16, 0, 0, "l"]
+          [-0.855, -0.2, "a"], [-0.79, 0.34, "b"], [-0.7, -0.5, "c"],
+          [-0.735, 0.56, "d"], [-0.2, -0.56, "e"], [-0.06, 0.58, "f"],
+          [0.235, -0.58, "g"], [0.5, 0.56, "h"], [0.79, -0.34, "i"],
+          [0.84, 0.26, "j"], [0.715, 0.55, "k"], [0.735, -0.56, "l"]
         ];
         // La tonte : des bandes alternées, comme sur une pelouse entretenue.
         const largeurBande = 52;
@@ -627,12 +661,11 @@
         for (let x = -l; x < l; x += largeurBande)
           bandes.push({ cle: String(Math.round(x)), x, w: largeurBande });
         return {
-          arbresHaie: semerLeLong(haie, 42).map((a, i) => ({
+          // Le pourtour complet du domaine, massif contre massif.
+          arbresHaie: semerLeLong(haie, RAYON_BUISSON * 1.7).map((a, i) => ({
             x: a.x,
             y: a.y,
-            // Trois tailles qui alternent : une haie parfaitement régulière
-            // ferait collier de perles.
-            r: 11 + ((i * 5) % 3) * 3
+            tour: (i * 47) % 360
           })),
           rayonHaie: rHaie,
           // Le plan d'eau : une berge irrégulière mais lisse, pas une ellipse.
@@ -661,15 +694,15 @@
           })(),
           bandes,
           bosquets: bosquets
-            .map(([fx, fy, r, dx, dy, cle]) => ({
+            .map(([fx, fy, cle], i) => ({
               cle,
-              x: l * fx + dx,
-              y: h * fy + dy,
-              r
+              x: l * fx,
+              y: h * fy,
+              tour: (i * 61) % 360
             }))
-            // Ceinture et bretelles : si un arbre venait malgré tout à mordre
+            // Ceinture et bretelles : si un massif venait malgré tout à mordre
             // sur la piste, on ne le plante pas du tout.
-            .filter((a) => rayonLocal(a.x, a.y) + a.r <= h - 2),
+            .filter((a) => rayonLocal(a.x, a.y) + RAYON_BUISSON <= h - 2),
           demiHauteurCentre: h,
           demiLargeurCentre: l
         };
@@ -683,22 +716,46 @@
         return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
       };
 
-      // Un arbre vu du ciel : son ombre portée, sa couronne à lobes, et la
-      // partie du feuillage que le soleil éclaire.
-      const Arbre = ({ x, y, r }) => (
-        <g transform={`translate(${x} ${y}) scale(${r})`}>
-          <path d={FEUILLAGE} fill={DOMAINE.ombre} transform="translate(0.13 0.19)" />
-          <path
-            d={FEUILLAGE}
-            fill={DOMAINE.arbre}
-            stroke={DOMAINE.arbreTrait}
-            strokeWidth="0.07"
-            strokeLinejoin="round"
+      // Le patron du buisson, à déposer une fois dans les <defs>.
+      const PatronBuisson = ({ id }) => (
+        <g id={id}>
+          <circle r="0.9" fill={DOMAINE.arbreFond} />
+          {FEUILLES.map((f) => (
+            <ellipse
+              key={f.cle}
+              rx="0.185"
+              ry="0.125"
+              fill={
+                f.teinte === 2
+                  ? DOMAINE.arbreClair
+                  : f.teinte === 1
+                    ? DOMAINE.arbre
+                    : DOMAINE.arbreSombre
+              }
+              transform={
+                `rotate(${f.angle.toFixed(1)}) translate(${f.rayon.toFixed(3)} 0)` +
+                ` rotate(${f.biais.toFixed(1)})`
+              }
+            />
+          ))}
+        </g>
+      );
+
+      // Un massif : l'ombre qu'il porte sur l'herbe, puis une copie du patron.
+      // On le fait tourner d'un massif à l'autre pour qu'ils ne se ressemblent
+      // pas tous, sans changer leur taille.
+      const Buisson = ({ id, x, y, tour }) => (
+        <g transform={`translate(${x} ${y})`}>
+          <ellipse
+            cx={RAYON_BUISSON * 0.13}
+            cy={RAYON_BUISSON * 0.2}
+            rx={RAYON_BUISSON * 0.88}
+            ry={RAYON_BUISSON * 0.82}
+            fill={DOMAINE.ombre}
           />
-          <path
-            d={FEUILLAGE}
-            fill={DOMAINE.arbreClair}
-            transform="translate(-0.15 -0.18) scale(0.62)"
+          <use
+            href={`#${id}`}
+            transform={`rotate(${tour}) scale(${RAYON_BUISSON})`}
           />
         </g>
       );
@@ -806,6 +863,7 @@
           () => (
             <g>
                   <defs>
+                    <PatronBuisson id={`buisson-${numero}`} />
                     <clipPath id={`rond-central-${numero}`}>
                       <rect
                         x={-decor.demiLargeurCentre}
@@ -830,7 +888,13 @@
                     strokeOpacity="0.55"
                   />
                   {decor.arbresHaie.map((a, i) => (
-                    <Arbre key={`haie-${i}`} x={a.x} y={a.y} r={a.r} />
+                    <Buisson
+                      key={`haie-${i}`}
+                      id={`buisson-${numero}`}
+                      x={a.x}
+                      y={a.y}
+                      tour={a.tour}
+                    />
                   ))}
 
                   {/* L'anneau de sable, cerné de ses deux lisses blanches */}
@@ -894,7 +958,13 @@
                       fillOpacity="0.5"
                     />
                     {decor.bosquets.map((b) => (
-                      <Arbre key={`bosquet-${b.cle}`} x={b.x} y={b.y} r={b.r} />
+                      <Buisson
+                        key={`bosquet-${b.cle}`}
+                        id={`buisson-${numero}`}
+                        x={b.x}
+                        y={b.y}
+                        tour={b.tour}
+                      />
                     ))}
                   </g>
                   {/* Chaque couloir est double d'un liere sombre : aux
