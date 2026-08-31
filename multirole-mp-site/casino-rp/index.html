@@ -29,6 +29,17 @@
         Zéro: "#9C27B0"
       };
 
+      // Les casaques des chevaux. Franches et sombres : c'est ce qui ressort
+      // le mieux sur le sable clair de la piste.
+      const COULEURS_CHEVAUX = [
+        "#C62828", // rouge
+        "#1565C0", // bleu roi
+        "#2E7D32", // vert bouteille
+        "#6A1B9A", // violet
+        "#00838F", // bleu canard
+        "#AD1457" // framboise
+      ];
+
       // ================= OUTILS DU BOOKMAKER =================
 
       // Générateur pseudo-aléatoire semé. Toute la course en découle : à
@@ -192,60 +203,151 @@
       // non plus en sprint ni ne s'arrête pour attendre les autres.
       const PAS_COURSE = 240;
 
-      const trameCourse = (numero, chevaux, cfg) => {
-        const alea = semer(numero * 7919 + 13);
-        const n = chevaux.length || 1;
-        const gagnant = Math.floor(alea() * n);
-
-        const profils = chevaux.map((c, i) => {
-          // La dérive donne son tempérament au cheval : négative, il part
-          // vite et s'essouffle ; positive, il finit fort. C'est ce qui
-          // produit les remontées, sans à-coup.
-          const derive = (alea() - 0.5) * 0.5;
-          const a1 = 0.04 + alea() * 0.06;
-          const a2 = 0.02 + alea() * 0.04;
-          const f1 = 0.7 + alea() * 0.8;
-          const f2 = 1.5 + alea() * 1.0;
-          const p1 = alea() * Math.PI * 2;
-          const p2 = alea() * Math.PI * 2;
-          // Écart à l'arrivée : quelques longueurs, pas la moitié de la piste.
-          const ecart = i === gagnant ? 0 : 0.012 + alea() * 0.05;
-
-          const vitesse = (t) =>
-            1 +
-            derive * (t - 0.5) +
-            a1 * Math.sin(f1 * Math.PI * 2 * t + p1) +
-            a2 * Math.sin(f2 * Math.PI * 2 * t + p2);
-
-          // Intégration au trapèze, une fois pour toute la course.
-          const cumul = [0];
-          for (let k = 1; k <= PAS_COURSE; k++) {
-            const t0 = (k - 1) / PAS_COURSE;
-            const t1 = k / PAS_COURSE;
-            const moyenne =
-              (Math.max(0.1, vitesse(t0)) + Math.max(0.1, vitesse(t1))) / 2;
-            cumul.push(cumul[k - 1] + moyenne / PAS_COURSE);
-          }
-
-          return {
-            cheval: c,
-            cumul,
-            total: cumul[PAS_COURSE] || 1,
-            arrivee: 1 - ecart
-          };
-        });
-        return { gagnant, profils };
-      };
+      // Avantage à la corde : sur un demi-tour, le cheval qui tient le virage
+      // serré grignote sur celui qui court à l'extérieur — puis lui rend tout
+      // dans le virage suivant, puisqu'ils échangent de couloir au milieu de
+      // la ligne droite. L'écart est nul à chaque passage devant les tribunes,
+      // et on l'éteint dans la dernière ligne droite : ce sont les derniers
+      // mètres qui donnent l'ordre d'arrivée tiré au sort, pas un avantage de
+      // couloir.
+      const AVANTAGE_CORDE = 0.014;
+      const FIN_SANS_CORDE = 0.14;
 
       // Avancement d'un cheval à l'instant t (0 à 1) de la course, entre 0 et
       // sa position d'arrivée. Toujours croissant.
       const avancementCheval = (profil, t) => {
-        const x = Math.max(0, Math.min(1, t)) * PAS_COURSE;
+        const u = Math.max(0, Math.min(1, t));
+        const x = u * PAS_COURSE;
         const k = Math.min(PAS_COURSE - 1, Math.floor(x));
         const f = x - k;
         const c = profil.cumul;
         const parcouru = c[k] + (c[k + 1] - c[k]) * f;
-        return (parcouru / profil.total) * profil.arrivee;
+        const base = (parcouru / profil.total) * profil.arrivee;
+        // Le sinus vaut zéro au poteau et repasse par zéro à chaque tour : le
+        // gain pris dans un virage est rendu dans le suivant.
+        const attenuation = Math.min(1, (1 - u) / FIN_SANS_CORDE);
+        return Math.max(
+          0,
+          base +
+            AVANTAGE_CORDE *
+              (profil.corde || 0) *
+              attenuation *
+              Math.sin(2 * Math.PI * (profil.tours || 3) * base)
+        );
+      };
+
+      // Une course doit se regarder. Deux promesses : aucun cheval ne reste au
+      // fond du peloton d'un bout à l'autre — chacun est premier ou deuxième
+      // au moins une fois — et personne ne mène de la première à la dernière
+      // seconde. On note donc chaque tirage sur ces deux points.
+      const PALIERS_CONTROLE = 60;
+      const noteCourse = (profils) => {
+        const n = profils.length;
+        const meilleurRang = new Array(n).fill(n + 1);
+        const meneurs = new Set();
+        // On saute le départ : tout le monde y est à égalité.
+        for (let k = 3; k <= PALIERS_CONTROLE; k++) {
+          const ordre = profils
+            .map((pr, i) => [avancementCheval(pr, k / PALIERS_CONTROLE), i])
+            .sort((a, b) => b[0] - a[0]);
+          ordre.forEach((e, rang) => {
+            if (rang + 1 < meilleurRang[e[1]]) meilleurRang[e[1]] = rang + 1;
+          });
+          meneurs.add(ordre[0][1]);
+        }
+        const devant = meilleurRang.filter((r) => r <= 2).length;
+        return {
+          bonne: devant === n && (n < 2 || meneurs.size >= 2),
+          note: devant + (meneurs.size >= 2 ? 1 : 0)
+        };
+      };
+
+      // Le tirage coûte quelques millisecondes — il retente jusqu'à tomber sur
+      // une belle course. On le garde donc sous le coude : sinon on le
+      // referait à chaque battement d'horloge pendant toute la course.
+      const trameEnMemoire = new Map();
+
+      const tirerTrame = (numero, n, tours) => {
+        const alea = semer(numero * 7919 + 13);
+        const gagnant = Math.floor(alea() * n);
+
+        const tirerProfils = () =>
+          Array.from({ length: n }, (rien, i) => {
+            // La dérive donne son tempérament au cheval : négative, il part
+            // vite et s'essouffle ; positive, il finit fort. C'est ce qui
+            // produit les remontées, sans à-coup.
+            const derive = (alea() - 0.5) * 0.5;
+            const a1 = 0.04 + alea() * 0.06;
+            const a2 = 0.02 + alea() * 0.04;
+            const f1 = 0.7 + alea() * 0.8;
+            const f2 = 1.5 + alea() * 1.0;
+            const p1 = alea() * Math.PI * 2;
+            const p2 = alea() * Math.PI * 2;
+            // Écart à l'arrivée : quelques longueurs, pas la moitié de la piste.
+            const ecart = i === gagnant ? 0 : 0.012 + alea() * 0.05;
+
+            const vitesse = (t) =>
+              1 +
+              derive * (t - 0.5) +
+              a1 * Math.sin(f1 * Math.PI * 2 * t + p1) +
+              a2 * Math.sin(f2 * Math.PI * 2 * t + p2);
+
+            // Intégration au trapèze, une fois pour toute la course.
+            const cumul = [0];
+            for (let k = 1; k <= PAS_COURSE; k++) {
+              const t0 = (k - 1) / PAS_COURSE;
+              const t1 = k / PAS_COURSE;
+              const moyenne =
+                (Math.max(0.1, vitesse(t0)) + Math.max(0.1, vitesse(t1))) / 2;
+              cumul.push(cumul[k - 1] + moyenne / PAS_COURSE);
+            }
+
+            return {
+              cumul,
+              total: cumul[PAS_COURSE] || 1,
+              arrivee: 1 - ecart,
+              // -1 pour celui qui prend le virage de droite au plus large,
+              // +1 pour celui qui le prend à la corde.
+              corde: n > 1 ? (2 * i) / (n - 1) - 1 : 0,
+              tours
+            };
+          });
+
+        // On retire jusqu'à tomber sur une course qui tient ses promesses. Le
+        // générateur est semé, donc tous les appareils s'arrêtent sur le même
+        // tirage sans rien échanger. À défaut, on garde le meilleur essai.
+        let meilleursProfils = null;
+        let meilleureNote = -1;
+        for (let essai = 0; essai < 80; essai++) {
+          const profils = tirerProfils();
+          const bilan = noteCourse(profils);
+          if (bilan.bonne) return { gagnant, profils };
+          if (bilan.note > meilleureNote) {
+            meilleureNote = bilan.note;
+            meilleursProfils = profils;
+          }
+        }
+        return { gagnant, profils: meilleursProfils };
+      };
+
+      const trameCourse = (numero, chevaux, cfg) => {
+        const n = chevaux.length || 1;
+        const tours = Math.max(1, nombreSur(cfg.courseTours, 3));
+        const cle = numero + "|" + n + "|" + tours;
+        let trame = trameEnMemoire.get(cle);
+        if (!trame) {
+          trame = tirerTrame(numero, n, tours);
+          // Une soirée n'aligne pas cent courses : on repart de zéro plutôt
+          // que de laisser la mémoire enfler.
+          if (trameEnMemoire.size > 40) trameEnMemoire.clear();
+          trameEnMemoire.set(cle, trame);
+        }
+        // Les noms et les couleurs peuvent changer dans les réglages d'un
+        // instant à l'autre : on rattache toujours les chevaux du moment.
+        return {
+          gagnant: trame.gagnant,
+          profils: trame.profils.map((pr, i) => ({ ...pr, cheval: chevaux[i] }))
+        };
       };
 
       // ---- Horloge des blocs d'investissement ----
@@ -274,6 +376,17 @@
       // droite. Deux couloirs ne se croisent ainsi jamais au meme endroit, on
       // suit chaque ligne du regard, et partout ailleurs elles restent bien
       // ecartees.
+      // Les couleurs de l'hippodrome : du sable, pas du gazon. Le sable est
+      // clair, alors les couleurs des chevaux sont franches et sombres --
+      // c'est ce qui les detache le mieux du fond.
+      const SABLE = {
+        horsPiste: "#D9C293", // le sable clair, tout autour
+        piste: "#BE9058", // la surface courue, damee, plus soutenue
+        centre: "#E7D6AC", // le rond central
+        lisse: "rgba(255,255,255,0.85)", // les barrieres blanches
+        bordure: "#5F4327" // le bord sombre qui detache chaque couloir
+      };
+
       const PISTE = {
         demiDroite: 210, // demi-longueur d'une ligne droite
         rayonMin: 120, // rayon du couloir le plus serre
@@ -548,20 +661,20 @@
                 style={{
                   width: compact ? "420px" : "min(70vw, 760px)",
                   maxWidth: "100%",
-                  background: "#14321a",
+                  background: SABLE.horsPiste,
                   borderRadius: "16px"
                 }}
               >
-                {/* L'anneau de piste, puis la pelouse centrale */}
+                {/* L'anneau de piste, puis le rond central */}
                 <rect
                   x={-(PISTE.demiDroite + piste.rayonExterieur + 14)}
                   y={-(piste.rayonExterieur + 14)}
                   width={2 * (PISTE.demiDroite + piste.rayonExterieur + 14)}
                   height={2 * (piste.rayonExterieur + 14)}
                   rx={piste.rayonExterieur + 14}
-                  fill="#0f2a16"
-                  stroke="rgba(255,255,255,0.16)"
-                  strokeWidth="2"
+                  fill={SABLE.piste}
+                  stroke={SABLE.lisse}
+                  strokeWidth="2.5"
                 />
                 <rect
                   x={-(PISTE.demiDroite + piste.rayonInterieur - 14)}
@@ -569,9 +682,9 @@
                   width={2 * (PISTE.demiDroite + piste.rayonInterieur - 14)}
                   height={2 * Math.max(4, piste.rayonInterieur - 14)}
                   rx={Math.max(4, piste.rayonInterieur - 14)}
-                  fill="#17381d"
-                  stroke="rgba(255,255,255,0.12)"
-                  strokeWidth="2"
+                  fill={SABLE.centre}
+                  stroke={SABLE.lisse}
+                  strokeWidth="2.5"
                 />
                 {/* Chaque couloir est double d'un liere sombre : aux
                     croisements, on voit franchement une ligne passer sur
@@ -582,7 +695,7 @@
                       <path
                         d={piste.couloirs[i].d}
                         fill="none"
-                        stroke="#0a1f0f"
+                        stroke={SABLE.bordure}
                         strokeWidth={piste.largeur + 6}
                         strokeLinejoin="round"
                         strokeLinecap="round"
@@ -591,7 +704,7 @@
                         d={piste.couloirs[i].d}
                         fill="none"
                         stroke={c.couleur}
-                        strokeOpacity="0.8"
+                        strokeOpacity="0.92"
                         strokeWidth={piste.largeur}
                         strokeLinejoin="round"
                         strokeLinecap="round"
@@ -617,7 +730,7 @@
                     width={damier.largeur}
                     height={damier.hauteur}
                     fill="none"
-                    stroke="rgba(255,255,255,0.75)"
+                    stroke={SABLE.bordure}
                     strokeWidth="1.5"
                   />
                 </g>
@@ -942,10 +1055,10 @@
             courseBlocageAvantMin: 2,
             courseBlocageApresMin: 1,
             chevaux: [
-              { id: 1, nom: "Éclair", couleur: "#f44336" },
-              { id: 2, nom: "Tonnerre", couleur: "#2196F3" },
-              { id: 3, nom: "Mistral", couleur: "#4CAF50" },
-              { id: 4, nom: "Zéphyr", couleur: "#FFC107" }
+              { id: 1, nom: "Éclair", couleur: COULEURS_CHEVAUX[0] },
+              { id: 2, nom: "Tonnerre", couleur: COULEURS_CHEVAUX[1] },
+              { id: 3, nom: "Mistral", couleur: COULEURS_CHEVAUX[2] },
+              { id: 4, nom: "Zéphyr", couleur: COULEURS_CHEVAUX[3] }
             ],
 
             // --- Investissements ---
@@ -1391,6 +1504,9 @@
           setParisCourse([]);
           setInvestissements([]);
           setSoireeDebut(0);
+          // Sans ca, la course lancee a la main pendant la partie precedente
+          // survivrait a la remise a zero, avec son numero.
+          setCourseManuelle(null);
           setVitrine({ mode: "accueil" });
           // Les traces de la partie précédente.
           setHistoriqueFiscal([]);
@@ -1665,9 +1781,12 @@
         // d'afficher le décompte et que les paris se ferment proprement.
         const lancerCourseMaintenant = () => {
           const top = nombreSur(configBookmaker.courseTopDepartSec, 15) * 1000;
-          const precedent = courseManuelle ? nombreSur(courseManuelle.numero, 1000) : 999;
+          // On numerote a partir de 1, comme les courses a l'horaire. Aucun
+          // risque de confusion : le lancement a la main n'existe qu'en
+          // simulation, et la simulation ne programme aucune course.
+          const precedent = courseManuelle ? nombreSur(courseManuelle.numero, 0) : 0;
           setCourseManuelle({
-            numero: Math.max(1000, precedent + 1),
+            numero: Math.max(1, precedent + 1),
             depart: Date.now() + top
           });
         };
@@ -6031,6 +6150,25 @@
                 >
                   + Ajouter un cheval
                 </button>
+                <button
+                  onClick={() =>
+                    majCfg(
+                      "chevaux",
+                      (configBookmaker.chevaux || []).map((c, i) => ({
+                        ...c,
+                        couleur: COULEURS_CHEVAUX[i % COULEURS_CHEVAUX.length]
+                      }))
+                    )
+                  }
+                  className="checkbox-btn"
+                  style={{ background: "#6D4C41", marginTop: "6px" }}
+                >
+                  🎨 Remettre les couleurs d'hippodrome
+                </button>
+                <p style={{ color: "#777", fontSize: "0.78rem", margin: "6px 0 0" }}>
+                  Les noms sont conservés. Ces couleurs-là ressortent sur le
+                  sable de la piste ; le jaune, lui, s'y perdait.
+                </p>
               </div>
 
               {/* ---- Croupiers ---- */}
