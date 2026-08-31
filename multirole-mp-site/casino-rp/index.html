@@ -394,7 +394,8 @@
         eauBord: "#039BE5",
         arbre: "#388E3C",
         arbreClair: "#66BB6A",
-        ombre: "rgba(27, 68, 20, 0.35)",
+        arbreTrait: "#1B5E20",
+        ombre: "rgba(27, 68, 20, 0.32)",
         tribuneMur: "#ECEFF1",
         tribuneToit: "#E65100"
       };
@@ -538,40 +539,13 @@
         return lo + f;
       };
 
-      // Une couronne d'arbre vue du ciel : au lieu d'un rond plat, un contour
-      // à lobes, comme un feuillage. On la dessine une fois pour un rayon de
-      // 1, et chaque arbre n'est plus qu'une mise à l'échelle.
-      const feuillage = (lobes) => {
-        const rl = 0.34; // rayon d'un lobe
-        const rc = 1 - rl; // cercle sur lequel les lobes sont posés
-        const demiAngle = Math.PI / lobes;
-        // Là où deux lobes voisins se coupent : c'est le creux du feuillage.
-        const demiCorde = rc * Math.sin(demiAngle);
-        const creux =
-          rc * Math.cos(demiAngle) +
-          Math.sqrt(Math.max(0, rl * rl - demiCorde * demiCorde));
-        const point = (k) => {
-          const a = ((k + 0.5) / lobes) * Math.PI * 2;
-          return [creux * Math.cos(a), creux * Math.sin(a)];
-        };
-        const depart = point(-1);
-        let d = "M " + depart[0].toFixed(3) + " " + depart[1].toFixed(3);
-        for (let k = 0; k < lobes; k++) {
-          const p = point(k);
-          d +=
-            " A " + rl.toFixed(3) + " " + rl.toFixed(3) + " 0 0 1 " +
-            p[0].toFixed(3) + " " + p[1].toFixed(3);
-        }
-        return d + " Z";
-      };
-      const FEUILLAGE = feuillage(7);
-
       // Un contour fermé et lisse qui passe par tous les points donnés
       // (Catmull-Rom converti en Béziers). C'est ce qui donne au plan d'eau
       // une berge naturelle plutôt qu'une ellipse.
-      const contourFerme = (pts) => {
+      const contourFerme = (pts, decimales) => {
         const n = pts.length;
-        const v = (p) => p[0].toFixed(1) + " " + p[1].toFixed(1);
+        const d10 = decimales === undefined ? 1 : decimales;
+        const v = (p) => p[0].toFixed(d10) + " " + p[1].toFixed(d10);
         let d = "M " + v(pts[0]);
         for (let i = 0; i < n; i++) {
           const p0 = pts[(i - 1 + n) % n];
@@ -584,6 +558,20 @@
         }
         return d + " Z";
       };
+
+      // Une couronne d'arbre vue du ciel : au lieu d'un rond plat, un contour
+      // à lobes, comme un feuillage. On la dessine une fois pour un rayon de
+      // 1, et chaque arbre n'est plus qu'une mise à l'échelle.
+      const feuillage = (lobes, creux) => {
+        const pts = [];
+        for (let k = 0; k < lobes * 2; k++) {
+          const a = (k / (lobes * 2)) * Math.PI * 2;
+          const r = k % 2 === 0 ? 1 : creux;
+          pts.push([r * Math.cos(a), r * Math.sin(a)]);
+        }
+        return contourFerme(pts, 3);
+      };
+      const FEUILLAGE = feuillage(9, 0.9);
 
       // Sème des points régulièrement espacés le long d'un tracé : c'est ce
       // qui plante la haie d'arbres autour de la propriété.
@@ -625,20 +613,14 @@
         // ils faisaient des taches sur la pelouse. Les emplacements sont
         // choisis assez à l'intérieur pour qu'aucun arbre ne morde sur le
         // sable — et un rognage au bord du rond central le garantit.
-        const centres = [
-          [-0.849, -0.234], [-0.816, 0.319], [-0.73, -0.532], [-0.75, 0.553],
-          [-0.197, -0.574], [-0.066, 0.596], [0.23, -0.596], [0.493, 0.574],
-          [0.783, -0.362], [0.829, 0.277], [0.711, 0.553], [0.73, -0.574]
+        const bosquets = [
+          [-0.855, -0.2, 21, 0, 0, "a"], [-0.79, 0.34, 18, 0, 0, "b"],
+          [-0.7, -0.5, 17, 0, 0, "c"], [-0.735, 0.56, 15, 0, 0, "d"],
+          [-0.2, -0.56, 19, 0, 0, "e"], [-0.06, 0.58, 16, 0, 0, "f"],
+          [0.235, -0.58, 17, 0, 0, "g"], [0.5, 0.56, 19, 0, 0, "h"],
+          [0.79, -0.34, 20, 0, 0, "i"], [0.84, 0.26, 17, 0, 0, "j"],
+          [0.715, 0.55, 15, 0, 0, "k"], [0.735, -0.56, 16, 0, 0, "l"]
         ];
-        const bouquet = [
-          [0, 0, 15], [17, -9, 11], [-14, 12, 12], [8, 14, 10]
-        ];
-        const bosquets = [];
-        centres.forEach(([fx, fy], g) =>
-          bouquet.slice(0, 3 + (g % 2)).forEach(([dx, dy, r], k) =>
-            bosquets.push([fx, fy, r, dx, dy, g + "-" + k])
-          )
-        );
         // La tonte : des bandes alternées, comme sur une pelouse entretenue.
         const largeurBande = 52;
         const bandes = [];
@@ -657,20 +639,24 @@
           bassin: (() => {
             const cx = -l * 0.5;
             const cy = h * 0.06;
-            const rx = l * 0.16;
-            const ry = h * 0.36;
-            const galbe = [1.06, 0.94, 0.8, 0.92, 1.05, 1.0, 0.85, 0.98];
-            const pts = galbe.map((k, i) => {
-              const a = (i / galbe.length) * Math.PI * 2;
-              return [cx + rx * k * Math.cos(a), cy + ry * k * Math.sin(a)];
-            });
-            const hautFond = galbe.map((k, i) => {
+            const rx = l * 0.19;
+            const ry = h * 0.31;
+            // Des rayons franchement inégaux : une berge régulière, ça fait
+            // bassin de jardin, pas plan d'eau.
+            const galbe = [1.12, 1.05, 0.92, 0.84, 0.9, 1.02, 1.1, 1.04, 0.9, 1.0];
+            const surLaBerge = (k, i, echelle, dx, dy) => {
               const a = (i / galbe.length) * Math.PI * 2;
               return [
-                cx - rx * 0.12 + rx * k * 0.66 * Math.cos(a),
-                cy - ry * 0.14 + ry * k * 0.66 * Math.sin(a)
+                cx + dx + rx * k * echelle * Math.cos(a),
+                cy + dy + ry * k * echelle * Math.sin(a)
               ];
-            });
+            };
+            const pts = galbe.map((k, i) => surLaBerge(k, i, 1, 0, 0));
+            // Le haut-fond : une frange claire près de la berge, pas une
+            // cuvette qui mangerait toute l'eau profonde.
+            const hautFond = galbe.map((k, i) =>
+              surLaBerge(k, i, 0.6, -rx * 0.16, -ry * 0.1)
+            );
             return { berge: contourFerme(pts), hautFond: contourFerme(hautFond) };
           })(),
           bandes,
@@ -701,12 +687,18 @@
       // partie du feuillage que le soleil éclaire.
       const Arbre = ({ x, y, r }) => (
         <g transform={`translate(${x} ${y}) scale(${r})`}>
-          <path d={FEUILLAGE} fill={DOMAINE.ombre} transform="translate(0.1 0.14)" />
-          <path d={FEUILLAGE} fill={DOMAINE.arbre} />
+          <path d={FEUILLAGE} fill={DOMAINE.ombre} transform="translate(0.13 0.19)" />
+          <path
+            d={FEUILLAGE}
+            fill={DOMAINE.arbre}
+            stroke={DOMAINE.arbreTrait}
+            strokeWidth="0.07"
+            strokeLinejoin="round"
+          />
           <path
             d={FEUILLAGE}
             fill={DOMAINE.arbreClair}
-            transform="translate(-0.16 -0.2) scale(0.6)"
+            transform="translate(-0.15 -0.18) scale(0.62)"
           />
         </g>
       );
@@ -899,7 +891,7 @@
                     <path
                       d={decor.bassin.hautFond}
                       fill="#81D4FA"
-                      fillOpacity="0.7"
+                      fillOpacity="0.5"
                     />
                     {decor.bosquets.map((b) => (
                       <Arbre key={`bosquet-${b.cle}`} x={b.x} y={b.y} r={b.r} />
