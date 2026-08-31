@@ -392,18 +392,20 @@
         bordure: "#7A5A33", // le bord sombre qui détache chaque couloir
         eau: "#4FC3F7",
         eauBord: "#039BE5",
-        arbre: "#388E3C",
-        arbreClair: "#66BB6A",
-        ombre: "rgba(27, 68, 20, 0.35)",
+        arbreFond: "#3E7522", // le fond, pour qu'aucun trou ne perce
+        arbreSombre: "#3B6E22",
+        arbre: "#4E8C2B",
+        arbreClair: "#7CB342",
+        ombre: "rgba(27, 68, 20, 0.3)",
         tribuneMur: "#ECEFF1",
         tribuneToit: "#E65100"
       };
 
       const PISTE = {
-        demiDroite: 210, // demi-longueur d'une ligne droite
-        rayonMin: 120, // rayon du couloir le plus serre
-        etendue: 72, // ecart total entre le plus serre et le plus large
-        ecartMax: 24, // ecart maximum entre deux couloirs voisins
+        demiDroite: 186, // demi-longueur d'une ligne droite
+        rayonMin: 106, // rayon du couloir le plus serré
+        etendue: 78, // écart total entre le plus serré et le plus large
+        ecartMax: 26, // écart maximum entre deux couloirs voisins
         zoneCroisement: 0.82, // part de la droite ouverte aux croisements
         partUtile: 0.88 // part de son creneau qu'une paire utilise vraiment
       };
@@ -538,40 +540,13 @@
         return lo + f;
       };
 
-      // Une couronne d'arbre vue du ciel : au lieu d'un rond plat, un contour
-      // à lobes, comme un feuillage. On la dessine une fois pour un rayon de
-      // 1, et chaque arbre n'est plus qu'une mise à l'échelle.
-      const feuillage = (lobes) => {
-        const rl = 0.34; // rayon d'un lobe
-        const rc = 1 - rl; // cercle sur lequel les lobes sont posés
-        const demiAngle = Math.PI / lobes;
-        // Là où deux lobes voisins se coupent : c'est le creux du feuillage.
-        const demiCorde = rc * Math.sin(demiAngle);
-        const creux =
-          rc * Math.cos(demiAngle) +
-          Math.sqrt(Math.max(0, rl * rl - demiCorde * demiCorde));
-        const point = (k) => {
-          const a = ((k + 0.5) / lobes) * Math.PI * 2;
-          return [creux * Math.cos(a), creux * Math.sin(a)];
-        };
-        const depart = point(-1);
-        let d = "M " + depart[0].toFixed(3) + " " + depart[1].toFixed(3);
-        for (let k = 0; k < lobes; k++) {
-          const p = point(k);
-          d +=
-            " A " + rl.toFixed(3) + " " + rl.toFixed(3) + " 0 0 1 " +
-            p[0].toFixed(3) + " " + p[1].toFixed(3);
-        }
-        return d + " Z";
-      };
-      const FEUILLAGE = feuillage(7);
-
       // Un contour fermé et lisse qui passe par tous les points donnés
       // (Catmull-Rom converti en Béziers). C'est ce qui donne au plan d'eau
       // une berge naturelle plutôt qu'une ellipse.
-      const contourFerme = (pts) => {
+      const contourFerme = (pts, decimales) => {
         const n = pts.length;
-        const v = (p) => p[0].toFixed(1) + " " + p[1].toFixed(1);
+        const d10 = decimales === undefined ? 1 : decimales;
+        const v = (p) => p[0].toFixed(d10) + " " + p[1].toFixed(d10);
         let d = "M " + v(pts[0]);
         for (let i = 0; i < n; i++) {
           const p0 = pts[(i - 1 + n) % n];
@@ -584,6 +559,55 @@
         }
         return d + " Z";
       };
+
+      // Un buisson taillé, vu du ciel : une masse de petites feuilles posées
+      // en couronnes, du bord vers le cœur. Celles du bord dépassent, ce qui
+      // donne la silhouette hérissée ; celles qui font face au soleil — en
+      // haut à gauche — sont plus claires.
+      //
+      // Le buisson est dessiné une seule fois, pour un rayon de 1, et déposé
+      // dans les <defs> : chaque massif du domaine n'est ensuite qu'une copie
+      // translatée et tournée. Sinon ce seraient plusieurs milliers
+      // d'ellipses dans la page.
+      const dessinerBuisson = () => {
+        // Un tirage semé : le buisson est toujours le même, mais ses feuilles
+        // ne sont pas alignées au cordeau.
+        const alea = semer(20240817);
+        const couronnes = [
+          [1, 26], [0.87, 23], [0.74, 20], [0.61, 17],
+          [0.48, 14], [0.35, 11], [0.22, 8], [0.08, 4]
+        ];
+        const feuilles = [];
+        couronnes.forEach(([rayon, nb], k) => {
+          for (let i = 0; i < nb; i++) {
+            const angle = ((i + alea() * 0.8) / nb) * 360 + k * 13;
+            const rad = (angle * Math.PI) / 180;
+            const r = Math.max(0, rayon + (alea() - 0.5) * 0.09);
+            // Face au soleil — en haut à gauche — le feuillage est plus
+            // clair. Une feuille sur trois tranche quand même, sinon la
+            // masse est trop lisse pour ressembler à des feuilles.
+            const lumiere = -(Math.cos(rad) + Math.sin(rad)) / 2;
+            const tirage = alea();
+            let teinte = lumiere > 0.3 ? 2 : lumiere > -0.25 ? 1 : 0;
+            if (tirage < 0.22) teinte = Math.max(0, teinte - 1);
+            else if (tirage > 0.86) teinte = Math.min(2, teinte + 1);
+            feuilles.push({
+              cle: k + "-" + i,
+              rayon: r,
+              angle,
+              // La feuille n'est pas plantée droit dans l'axe : c'est ce
+              // désordre qui fait une touffe et non un oursin.
+              biais: (alea() - 0.5) * 110,
+              teinte
+            });
+          }
+        });
+        return feuilles;
+      };
+      const FEUILLES = dessinerBuisson();
+      // Toutes les touffes du domaine ont la même taille : c'est ce qui fait
+      // un pourtour régulier plutôt qu'un semis d'arbres dépareillés.
+      const RAYON_BUISSON = 19;
 
       // Sème des points régulièrement espacés le long d'un tracé : c'est ce
       // qui plante la haie d'arbres autour de la propriété.
@@ -603,7 +627,7 @@
       // bosquets du rond central. Tout est calé sur les dimensions de la
       // piste, donc cela suit si l'on change le nombre de chevaux.
       const decorPiste = (piste) => {
-        const rHaie = piste.rayonExterieur + 40;
+        const rHaie = piste.rayonExterieur + 62;
         const haie = traceCouloir(
           rHaie,
           rHaie,
@@ -625,65 +649,60 @@
         // ils faisaient des taches sur la pelouse. Les emplacements sont
         // choisis assez à l'intérieur pour qu'aucun arbre ne morde sur le
         // sable — et un rognage au bord du rond central le garantit.
-        const centres = [
-          [-0.849, -0.234], [-0.816, 0.319], [-0.73, -0.532], [-0.75, 0.553],
-          [-0.197, -0.574], [-0.066, 0.596], [0.23, -0.596], [0.493, 0.574],
-          [0.783, -0.362], [0.829, 0.277], [0.711, 0.553], [0.73, -0.574]
+        const bosquets = [
+          [-0.855, -0.2, "a"], [-0.79, 0.34, "b"], [-0.7, -0.5, "c"],
+          [-0.735, 0.56, "d"], [-0.2, -0.56, "e"], [-0.06, 0.58, "f"],
+          [0.235, -0.58, "g"], [0.5, 0.56, "h"], [0.79, -0.34, "i"],
+          [0.84, 0.26, "j"], [0.715, 0.55, "k"], [0.735, -0.56, "l"]
         ];
-        const bouquet = [
-          [0, 0, 15], [17, -9, 11], [-14, 12, 12], [8, 14, 10]
-        ];
-        const bosquets = [];
-        centres.forEach(([fx, fy], g) =>
-          bouquet.slice(0, 3 + (g % 2)).forEach(([dx, dy, r], k) =>
-            bosquets.push([fx, fy, r, dx, dy, g + "-" + k])
-          )
-        );
         // La tonte : des bandes alternées, comme sur une pelouse entretenue.
         const largeurBande = 52;
         const bandes = [];
         for (let x = -l; x < l; x += largeurBande)
           bandes.push({ cle: String(Math.round(x)), x, w: largeurBande });
         return {
-          arbresHaie: semerLeLong(haie, 42).map((a, i) => ({
+          // Le pourtour complet du domaine, massif contre massif.
+          arbresHaie: semerLeLong(haie, RAYON_BUISSON * 1.7).map((a, i) => ({
             x: a.x,
             y: a.y,
-            // Trois tailles qui alternent : une haie parfaitement régulière
-            // ferait collier de perles.
-            r: 11 + ((i * 5) % 3) * 3
+            tour: (i * 47) % 360
           })),
           rayonHaie: rHaie,
           // Le plan d'eau : une berge irrégulière mais lisse, pas une ellipse.
           bassin: (() => {
             const cx = -l * 0.5;
             const cy = h * 0.06;
-            const rx = l * 0.16;
-            const ry = h * 0.36;
-            const galbe = [1.06, 0.94, 0.8, 0.92, 1.05, 1.0, 0.85, 0.98];
-            const pts = galbe.map((k, i) => {
-              const a = (i / galbe.length) * Math.PI * 2;
-              return [cx + rx * k * Math.cos(a), cy + ry * k * Math.sin(a)];
-            });
-            const hautFond = galbe.map((k, i) => {
+            const rx = l * 0.19;
+            const ry = h * 0.31;
+            // Des rayons franchement inégaux : une berge régulière, ça fait
+            // bassin de jardin, pas plan d'eau.
+            const galbe = [1.12, 1.05, 0.92, 0.84, 0.9, 1.02, 1.1, 1.04, 0.9, 1.0];
+            const surLaBerge = (k, i, echelle, dx, dy) => {
               const a = (i / galbe.length) * Math.PI * 2;
               return [
-                cx - rx * 0.12 + rx * k * 0.66 * Math.cos(a),
-                cy - ry * 0.14 + ry * k * 0.66 * Math.sin(a)
+                cx + dx + rx * k * echelle * Math.cos(a),
+                cy + dy + ry * k * echelle * Math.sin(a)
               ];
-            });
+            };
+            const pts = galbe.map((k, i) => surLaBerge(k, i, 1, 0, 0));
+            // Le haut-fond : une frange claire près de la berge, pas une
+            // cuvette qui mangerait toute l'eau profonde.
+            const hautFond = galbe.map((k, i) =>
+              surLaBerge(k, i, 0.6, -rx * 0.16, -ry * 0.1)
+            );
             return { berge: contourFerme(pts), hautFond: contourFerme(hautFond) };
           })(),
           bandes,
           bosquets: bosquets
-            .map(([fx, fy, r, dx, dy, cle]) => ({
+            .map(([fx, fy, cle], i) => ({
               cle,
-              x: l * fx + dx,
-              y: h * fy + dy,
-              r
+              x: l * fx,
+              y: h * fy,
+              tour: (i * 61) % 360
             }))
-            // Ceinture et bretelles : si un arbre venait malgré tout à mordre
+            // Ceinture et bretelles : si un massif venait malgré tout à mordre
             // sur la piste, on ne le plante pas du tout.
-            .filter((a) => rayonLocal(a.x, a.y) + a.r <= h - 2),
+            .filter((a) => rayonLocal(a.x, a.y) + RAYON_BUISSON <= h - 2),
           demiHauteurCentre: h,
           demiLargeurCentre: l
         };
@@ -697,16 +716,46 @@
         return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
       };
 
-      // Un arbre vu du ciel : son ombre portée, sa couronne à lobes, et la
-      // partie du feuillage que le soleil éclaire.
-      const Arbre = ({ x, y, r }) => (
-        <g transform={`translate(${x} ${y}) scale(${r})`}>
-          <path d={FEUILLAGE} fill={DOMAINE.ombre} transform="translate(0.1 0.14)" />
-          <path d={FEUILLAGE} fill={DOMAINE.arbre} />
-          <path
-            d={FEUILLAGE}
-            fill={DOMAINE.arbreClair}
-            transform="translate(-0.16 -0.2) scale(0.6)"
+      // Le patron du buisson, à déposer une fois dans les <defs>.
+      const PatronBuisson = ({ id }) => (
+        <g id={id}>
+          <circle r="0.9" fill={DOMAINE.arbreFond} />
+          {FEUILLES.map((f) => (
+            <ellipse
+              key={f.cle}
+              rx="0.185"
+              ry="0.125"
+              fill={
+                f.teinte === 2
+                  ? DOMAINE.arbreClair
+                  : f.teinte === 1
+                    ? DOMAINE.arbre
+                    : DOMAINE.arbreSombre
+              }
+              transform={
+                `rotate(${f.angle.toFixed(1)}) translate(${f.rayon.toFixed(3)} 0)` +
+                ` rotate(${f.biais.toFixed(1)})`
+              }
+            />
+          ))}
+        </g>
+      );
+
+      // Un massif : l'ombre qu'il porte sur l'herbe, puis une copie du patron.
+      // On le fait tourner d'un massif à l'autre pour qu'ils ne se ressemblent
+      // pas tous, sans changer leur taille.
+      const Buisson = ({ id, x, y, tour }) => (
+        <g transform={`translate(${x} ${y})`}>
+          <ellipse
+            cx={RAYON_BUISSON * 0.13}
+            cy={RAYON_BUISSON * 0.2}
+            rx={RAYON_BUISSON * 0.88}
+            ry={RAYON_BUISSON * 0.82}
+            fill={DOMAINE.ombre}
+          />
+          <use
+            href={`#${id}`}
+            transform={`rotate(${tour}) scale(${RAYON_BUISSON})`}
           />
         </g>
       );
@@ -803,7 +852,10 @@
               });
           return { cases, x0, largeur: x1 - x0, hauteur: rangees * pas };
         }, [piste]);
-        const rayonPion = Math.max(11, piste.largeur * 1.35);
+        // Le pion se cale sur l'écart entre couloirs, pas sur la largeur du
+        // trait : c'est ce qui le rend lisible de loin sans qu'il avale ses
+        // voisins.
+        const rayonPion = Math.max(11, piste.ecart * 0.62);
         const decor = React.useMemo(() => decorPiste(piste), [piste]);
 
         // Tout ce qui ne bouge pas — le domaine, la piste, les couloirs et
@@ -814,6 +866,7 @@
           () => (
             <g>
                   <defs>
+                    <PatronBuisson id={`buisson-${numero}`} />
                     <clipPath id={`rond-central-${numero}`}>
                       <rect
                         x={-decor.demiLargeurCentre}
@@ -838,7 +891,13 @@
                     strokeOpacity="0.55"
                   />
                   {decor.arbresHaie.map((a, i) => (
-                    <Arbre key={`haie-${i}`} x={a.x} y={a.y} r={a.r} />
+                    <Buisson
+                      key={`haie-${i}`}
+                      id={`buisson-${numero}`}
+                      x={a.x}
+                      y={a.y}
+                      tour={a.tour}
+                    />
                   ))}
 
                   {/* L'anneau de sable, cerné de ses deux lisses blanches */}
@@ -899,10 +958,16 @@
                     <path
                       d={decor.bassin.hautFond}
                       fill="#81D4FA"
-                      fillOpacity="0.7"
+                      fillOpacity="0.5"
                     />
                     {decor.bosquets.map((b) => (
-                      <Arbre key={`bosquet-${b.cle}`} x={b.x} y={b.y} r={b.r} />
+                      <Buisson
+                        key={`bosquet-${b.cle}`}
+                        id={`buisson-${numero}`}
+                        x={b.x}
+                        y={b.y}
+                        tour={b.tour}
+                      />
                     ))}
                   </g>
                   {/* Chaque couloir est double d'un liere sombre : aux
@@ -987,10 +1052,13 @@
                 TOUR {classement.length ? classement[0].tour : 1} / {tours}
               </div>
               <svg
-                viewBox="-478 -268 956 536"
+                viewBox="-458 -272 916 544"
                 style={{
-                  width: compact ? "420px" : "min(70vw, 760px)",
+                  width: compact ? "min(92vw, 560px)" : "min(78vw, 1080px)",
                   maxWidth: "100%",
+                  // Sur un écran peu haut, c'est la hauteur qui commande :
+                  // sans ça, la piste déborderait par le bas.
+                  maxHeight: compact ? "44vh" : "70vh",
                   background: DOMAINE.gazon,
                   borderRadius: "16px"
                 }}
@@ -1018,7 +1086,7 @@
                         y={pt.y}
                         textAnchor="middle"
                         dominantBaseline="central"
-                        style={{ fontSize: "20px" }}
+                        style={{ fontSize: `${(rayonPion * 1.55).toFixed(0)}px` }}
                       >
                         🏇
                       </text>
@@ -1083,6 +1151,9 @@
         const [configGlobale, setConfigGlobale] = useEtatPartage("configGlobale", {
           codeAdmin: "26",
           limitTop: 3,
+          // Ce que le grand écran montre du joueur : son nom, ou son
+          // identifiant si l'on préfère ne pas afficher les vrais noms.
+          topAffiche: "nom",
           dureeParadisFiscalMin: 15,
           limiteRetraitCroupier: 5000,
           dureeRoulement: 3,
@@ -1483,6 +1554,45 @@
         const nbParadisActifs = joueursActifs.filter(
           (j) => j.paradisActif
         ).length;
+
+        // Les places gagnées ou perdues au classement. On compte les rangs sur
+        // TOUS les joueurs, pas seulement ceux qu'on affiche : sinon un joueur
+        // qui file au paradis fiscal ferait monter tout le monde d'un cran
+        // pour rien.
+        const DUREE_BOUGE = 25000;
+        const [bougesClassement, setBougesClassement] = React.useState({});
+        const rangsPrecedents = React.useRef(null);
+        const rangsReels = {};
+        [...joueursActifs]
+          .sort((a, b) => b.solde - a.solde)
+          .forEach((j, i) => (rangsReels[j.id] = i));
+        const empreinteRangs = Object.keys(rangsReels)
+          .map((id) => id + ":" + rangsReels[id])
+          .join(",");
+        React.useEffect(() => {
+          const avant = rangsPrecedents.current;
+          rangsPrecedents.current = rangsReels;
+          if (!avant) return;
+          const bouges = {};
+          Object.keys(rangsReels).forEach((id) => {
+            // Un joueur qui vient d'être créé n'a pas « gagné » de places.
+            if (avant[id] === undefined) return;
+            const places = avant[id] - rangsReels[id];
+            if (places !== 0)
+              bouges[id] = { places, jusqua: Date.now() + DUREE_BOUGE };
+          });
+          if (!Object.keys(bouges).length) return;
+          setBougesClassement((prec) => {
+            const maintenant = Date.now();
+            const suite = {};
+            // On jette au passage les mouvements périmés, sinon la liste
+            // enflerait toute la soirée.
+            Object.keys(prec).forEach((id) => {
+              if (prec[id].jusqua > maintenant) suite[id] = prec[id];
+            });
+            return { ...suite, ...bouges };
+          });
+        }, [empreinteRangs]);
         const joueurActuel = joueursActifs.find(
           (j) => j.id === joueurConnecteId
         );
@@ -3489,6 +3599,22 @@
                         }
                         style={{ width: "100%", padding: "5px" }}
                       />
+                    </label>
+                    <label>
+                      Dans le Top, afficher :{" "}
+                      <select
+                        value={configGlobale.topAffiche || "nom"}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            topAffiche: e.target.value
+                          })
+                        }
+                        style={{ width: "100%", padding: "5px" }}
+                      >
+                        <option value="nom">Le nom du joueur</option>
+                        <option value="id">L'identifiant du joueur</option>
+                      </select>
                     </label>
                     <label>
                       Durée Paradis Fiscal (Min) :{" "}
@@ -6499,9 +6625,12 @@
                       key={pr.id}
                       style={{
                         background: "#1a1a1a",
-                        padding: "14px",
+                        padding: "16px",
                         borderRadius: "8px",
-                        marginTop: "12px"
+                        border: "1px solid #333",
+                        // Un blanc franc entre deux projets : enchaînés sans
+                        // respiration, on ne voyait plus où l'un finissait.
+                        marginTop: "22px"
                       }}
                     >
                       <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
@@ -8232,7 +8361,27 @@
                         }}
                       >
                         <span>
-                          <strong>#{i + 1}</strong> {j.nom}
+                          <strong>#{i + 1}</strong>{" "}
+                          {configGlobale.topAffiche === "id" ? j.id : j.nom}
+                          {(() => {
+                            const bouge = bougesClassement[j.id];
+                            if (!bouge || bouge.jusqua <= timeNow) return null;
+                            const monte = bouge.places > 0;
+                            return (
+                              <span
+                                style={{
+                                  marginLeft: "12px",
+                                  // L'écran d'affichage se regarde de loin :
+                                  // une flèche discrète ne se verrait pas.
+                                  fontSize: "1.05rem",
+                                  fontWeight: "bold",
+                                  color: monte ? "#4CAF50" : "#EF5350"
+                                }}
+                              >
+                                {monte ? "▲" : "▼"} {Math.abs(bouge.places)}
+                              </span>
+                            );
+                          })()}
                         </span>
                         <strong style={{ color: "#4CAF50" }}>
                           {j.solde.toLocaleString()} $
