@@ -210,6 +210,14 @@
       // et on l'éteint dans la dernière ligne droite : ce sont les derniers
       // mètres qui donnent l'ordre d'arrivée tiré au sort, pas un avantage de
       // couloir.
+      // Deux secondes de surlignage : assez pour que l'œil accroche la
+      // ligne qui vient de doubler, pas assez pour brouiller la suivante.
+      const DUREE_SURLIGNE_COURSE = 2000;
+      // Hauteur d'une ligne de classement, d'un bord à l'autre. C'est elle qui
+      // sert à faire glisser les lignes plutôt qu'à les réordonner d'un coup.
+      const PAS_CLASSEMENT = 66;
+      const PAS_CLASSEMENT_COURSE = 44;
+
       const AVANTAGE_CORDE = 0.014;
       const FIN_SANS_CORDE = 0.14;
 
@@ -821,7 +829,7 @@
                   cles.forEach((k) => delete copie[k]);
                   return copie;
                 });
-              }, 1000);
+              }, DUREE_SURLIGNE_COURSE);
             }
           }
           ordrePrecedent.current = ordre;
@@ -1096,18 +1104,37 @@
               </svg>
             </div>
 
-            <div style={{ minWidth: compact ? "180px" : "220px" }}>
-              {classement.map((p, rang) => {
-                const etat = changements[p.index];
-                return (
+            {/* Comme au classement général : les lignes gardent leur place
+                dans la page et c'est leur position qui glisse. */}
+            <div
+              style={{
+                minWidth: compact ? "180px" : "220px",
+                position: "relative",
+                height: `${classement.length * PAS_CLASSEMENT_COURSE}px`
+              }}
+            >
+              {[...classement]
+                .sort((a, b) => a.index - b.index)
+                .map((p) => {
+                  const rang = classement.findIndex(
+                    (x) => x.index === p.index
+                  );
+                  const etat = changements[p.index];
+                  return (
                   <div
                     key={`rang-${p.cheval.id}`}
                     style={{
+                      position: "absolute",
+                      left: 0,
+                      right: 0,
+                      top: 0,
+                      transform: `translateY(${rang * PAS_CLASSEMENT_COURSE}px)`,
+                      boxSizing: "border-box",
+                      height: `${PAS_CLASSEMENT_COURSE - 6}px`,
                       display: "flex",
                       alignItems: "center",
                       gap: "8px",
-                      padding: "8px 10px",
-                      marginBottom: "6px",
+                      padding: "0 10px",
                       borderRadius: "8px",
                       background:
                         etat === "gagne"
@@ -1115,7 +1142,8 @@
                           : etat === "perd"
                             ? "#7f1d1d"
                             : "#1a1a1a",
-                      transition: "background 250ms",
+                      transition:
+                        "transform 450ms cubic-bezier(.4,0,.2,1), background 300ms",
                       borderLeft: `6px solid ${p.cheval.couleur}`,
                       fontWeight: rang === 0 ? "bold" : "normal"
                     }}
@@ -1126,8 +1154,8 @@
                       tour {p.tour}
                     </span>
                   </div>
-                );
-              })}
+                  );
+                })}
             </div>
           </div>
         );
@@ -1203,6 +1231,13 @@
             nom: "Contrôle Fiscal",
             definition: "Saisit des fonds selon le lancer de dé.",
             phraseAnim: "Le fisc frappe à la porte !"
+          },
+          {
+            id: "delit_initie",
+            nom: "Délit d'initié",
+            definition:
+              "Usage unique : vous révèle le vainqueur de la prochaine course dont les paris sont encore ouverts. À vous d'aller miser chez le bookmaker.",
+            phraseAnim: "Une enveloppe change de mains..."
           }
         ]);
 
@@ -1560,7 +1595,9 @@
         // qui file au paradis fiscal ferait monter tout le monde d'un cran
         // pour rien.
         const DUREE_BOUGE = 25000;
+        const DUREE_SURLIGNE = 2000;
         const [bougesClassement, setBougesClassement] = React.useState({});
+        const [surlignesClassement, setSurlignesClassement] = React.useState({});
         const rangsPrecedents = React.useRef(null);
         const rangsReels = {};
         [...joueursActifs]
@@ -1582,6 +1619,20 @@
               bouges[id] = { places, jusqua: Date.now() + DUREE_BOUGE };
           });
           if (!Object.keys(bouges).length) return;
+          // Le surlignage, lui, ne dure que deux secondes : le temps que
+          // l'œil accroche la ligne qui vient de bouger.
+          const surlignes = {};
+          Object.keys(bouges).forEach(
+            (id) => (surlignes[id] = bouges[id].places > 0 ? "monte" : "descend")
+          );
+          setSurlignesClassement((prec) => ({ ...prec, ...surlignes }));
+          setTimeout(() => {
+            setSurlignesClassement((prec) => {
+              const suite = { ...prec };
+              Object.keys(surlignes).forEach((id) => delete suite[id]);
+              return suite;
+            });
+          }, DUREE_SURLIGNE);
           setBougesClassement((prec) => {
             const maintenant = Date.now();
             const suite = {};
@@ -2146,6 +2197,16 @@
           if (!numero || !chevauxCourse.length) return null;
           const { gagnant } = trameCourse(numero, chevauxCourse, configBookmaker);
           return chevauxCourse[gagnant] || null;
+        };
+
+        // Le délit d'initié révèle le vainqueur d'une course sur laquelle on
+        // peut encore parier — sinon le tuyau ne vaut rien. Si les paris de la
+        // course en cours sont clos, on donne celui de la suivante.
+        const courseAParier = () => {
+          if (!course.active || !course.numero) return null;
+          const numero = course.parisOuverts ? course.numero : course.numero + 1;
+          const gagnant = chevalGagnant(numero);
+          return gagnant ? { numero, cheval: gagnant } : null;
         };
 
         // Lance une course tout de suite, sans attendre l'horaire. Le top
@@ -5591,6 +5652,38 @@
                       }}
                     >
                       <h3>🎒 Mon Deck</h3>
+                      {/* Le tuyau du délit d'initié reste affiché tant que la
+                          course n'a pas eu lieu : on l'a payé assez cher pour
+                          pouvoir le relire. Il ne quitte jamais cette borne. */}
+                      {joueurActuel.tuyau &&
+                        course.numero <= joueurActuel.tuyau.numero && (
+                          <div
+                            style={{
+                              background: "#3E2723",
+                              border: `2px solid ${joueurActuel.tuyau.couleur || "#8D6E63"}`,
+                              borderRadius: "8px",
+                              padding: "12px 14px",
+                              marginBottom: "14px"
+                            }}
+                          >
+                            <div style={{ color: "#D7CCC8", fontSize: "0.8rem" }}>
+                              🔎 Délit d'initié — pour vous seul
+                            </div>
+                            <div
+                              style={{
+                                fontWeight: "bold",
+                                fontSize: "1.1rem",
+                                color: joueurActuel.tuyau.couleur || "#fff"
+                              }}
+                            >
+                              Course n°{joueurActuel.tuyau.numero} :{" "}
+                              {joueurActuel.tuyau.cheval}
+                            </div>
+                            <div style={{ color: "#aaa", fontSize: "0.8rem" }}>
+                              Misez chez le bookmaker avant le top départ.
+                            </div>
+                          </div>
+                        )}
                       {joueurActuel.deck.length === 0 ? (
                         <p style={{ color: "#888" }}>Vide.</p>
                       ) : (
@@ -5699,6 +5792,63 @@
                                 }}
                               >
                                 🌴 S'isoler
+                              </button>
+                            ) : c.id === "delit_initie" ? (
+                              <button
+                                onClick={() => {
+                                  if (bloqueParJetons(joueurActuel)) {
+                                    alert(MESSAGE_JETONS_EN_JEU);
+                                    return;
+                                  }
+                                  const tuyau = courseAParier();
+                                  if (!tuyau) {
+                                    alert(
+                                      "Aucune course n'est ouverte aux paris pour l'instant.\n\n" +
+                                        "Gardez votre carte : elle ne se consomme pas."
+                                    );
+                                    return;
+                                  }
+                                  setJoueurs((prev) =>
+                                    prev.map((j) =>
+                                      j.id === joueurActuel.id
+                                        ? {
+                                            ...j,
+                                            tuyau: {
+                                              numero: tuyau.numero,
+                                              cheval: tuyau.cheval.nom,
+                                              couleur: tuyau.cheval.couleur
+                                            },
+                                            deck: j.deck.filter(
+                                              (card) => card.id !== c.id
+                                            )
+                                          }
+                                        : j
+                                    )
+                                  );
+                                  // La salle voit passer la phrase, mais pas
+                                  // le nom du cheval : le tuyau reste secret.
+                                  setHistoriqueAffichage((prev) => [
+                                    c.phraseAnim,
+                                    prev[0]
+                                  ]);
+                                  alert(
+                                    `Course n°${tuyau.numero} : ${tuyau.cheval.nom} l'emportera.\n\n` +
+                                      "Filez chez le bookmaker avant le top départ."
+                                  );
+                                  setSousMenuBanque("accueil");
+                                }}
+                                style={{
+                                  padding: "8px",
+                                  background: "#8D6E63",
+                                  color: "#fff",
+                                  border: "none",
+                                  borderRadius: "4px",
+                                  cursor: "pointer",
+                                  fontWeight: "bold",
+                                  width: "100%"
+                                }}
+                              >
+                                🔎 Obtenir le tuyau
                               </button>
                             ) : c.id === "veinard" ? (
                               // Le joueur arme la carte quand il le décide :
@@ -8343,21 +8493,50 @@
                     style={{
                       background: "#222",
                       borderRadius: "12px",
-                      padding: "20px"
+                      padding: "20px",
+                      position: "relative",
+                      height: `${classementAffiche.length * PAS_CLASSEMENT}px`
                     }}
                   >
-                    {classementAffiche.map((j, i) => (
+                    {/* Les lignes ne sont pas rangées dans l'ordre du
+                        classement : elles restent au même endroit dans la
+                        page et c'est leur position qui glisse. Sans ça, le
+                        navigateur les déplacerait d'un coup, sans animation. */}
+                    {[...classementAffiche]
+                      .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+                      .map((j) => {
+                        const i = classementAffiche.findIndex(
+                          (x) => x.id === j.id
+                        );
+                        const surligne = surlignesClassement[j.id];
+                        return (
                       <div
                         key={j.id}
                         style={{
+                          position: "absolute",
+                          left: 0,
+                          right: 0,
+                          top: 0,
+                          transform: `translateY(${i * PAS_CLASSEMENT}px)`,
+                          boxSizing: "border-box",
+                          height: `${PAS_CLASSEMENT - 10}px`,
                           display: "flex",
+                          alignItems: "center",
                           justifyContent: "space-between",
-                          padding: "15px",
-                          marginBottom: "10px",
-                          background: i === 0 ? "#332b00" : "#333",
+                          padding: "0 15px",
+                          background:
+                            surligne === "monte"
+                              ? "#1B5E20"
+                              : surligne === "descend"
+                                ? "#7f1d1d"
+                                : i === 0
+                                  ? "#332b00"
+                                  : "#333",
                           borderRadius: "8px",
                           fontSize: "1.3rem",
-                          borderLeft: i === 0 ? "5px solid #FFD700" : "none"
+                          borderLeft: i === 0 ? "5px solid #FFD700" : "none",
+                          transition:
+                            "transform 550ms cubic-bezier(.4,0,.2,1), background 400ms"
                         }}
                       >
                         <span>
@@ -8387,7 +8566,8 @@
                           {j.solde.toLocaleString()} $
                         </strong>
                       </div>
-                    ))}
+                        );
+                      })}
                   </div>
                 </div>
                 <div style={{ width: "300px", marginLeft: "30px" }}>
