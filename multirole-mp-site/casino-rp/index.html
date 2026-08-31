@@ -257,38 +257,168 @@
       };
 
       // ================= L'HIPPODROME =================
-      // Un ovale parcouru à vitesse constante : l'angle ne suffit pas, un
-      // point avance deux fois plus vite dans les virages que dans les
-      // lignes droites. On tabule donc la longueur d'arc une fois, et on
-      // s'en sert pour placer le cheval à la bonne distance parcourue.
-      const tableOvale = (rx, ry, n = 720) => {
-        const pts = [{ a: 0, l: 0 }];
-        let L = 0;
-        let prev = [rx, 0];
-        for (let i = 1; i <= n; i++) {
-          const a = (i / n) * Math.PI * 2;
-          const p = [rx * Math.cos(a), ry * Math.sin(a)];
-          L += Math.hypot(p[0] - prev[0], p[1] - prev[1]);
-          pts.push({ a, l: L });
-          prev = p;
-        }
-        return { pts, L };
+      // Toutes les lignes doivent faire la meme distance. Un couloir tient
+      // donc son rayon pour un virage, puis celui de son partenaire pour
+      // l'autre : le plus large devient le plus serre, et reciproquement.
+      // Comme les rayons sont regulierement espaces, chaque paire echangee a
+      // la meme somme de rayons -- les deux virages pesent donc exactement
+      // pareil pour tout le monde. Seules les rampes de croisement coutent
+      // quelques pixels de plus a celles qui changent le plus de place (2 %
+      // du tour), ce qui ne se voit pas et ne change rien a la course : les
+      // chevaux sont cales sur la ligne moyenne, pas sur leur propre couloir.
+      //
+      // Les echanges se font sur les lignes droites, et surtout PAS tous au
+      // meme endroit : sinon les quatre couloirs se rejoindraient en un seul
+      // point et l'on ne saurait plus lequel va ou. Chaque paire a donc sa
+      // propre fenetre de croisement, l'une apres l'autre le long de la
+      // droite. Deux couloirs ne se croisent ainsi jamais au meme endroit, on
+      // suit chaque ligne du regard, et partout ailleurs elles restent bien
+      // ecartees.
+      const PISTE = {
+        demiDroite: 210, // demi-longueur d'une ligne droite
+        rayonMin: 120, // rayon du couloir le plus serre
+        etendue: 72, // ecart total entre le plus serre et le plus large
+        ecartMax: 24, // ecart maximum entre deux couloirs voisins
+        zoneCroisement: 0.82, // part de la droite ouverte aux croisements
+        partUtile: 0.88 // part de son creneau qu'une paire utilise vraiment
       };
 
-      const pointOvale = (table, rx, ry, s) => {
-        const cible = (((s % 1) + 1) % 1) * table.L;
+      // Combien de points par morceau de piste. Tous les couloirs sont
+      // echantillonnes de la meme facon : le point numero k d'un couloir
+      // repond au point numero k de tous les autres.
+      const decoupePiste = (rayonMoyen) => {
+        const points = (longueur) => Math.max(2, Math.round(longueur / 5));
+        return {
+          quart: points((Math.PI / 2) * rayonMoyen),
+          droite: points(2 * PISTE.demiDroite)
+        };
+      };
+
+      // La fenetre de croisement de la paire numero k (0 = la paire la plus
+      // exterieure), en abscisses et dans le sens de la marche.
+      const fenetreCroisement = (k, paires) => {
+        const bande = PISTE.demiDroite * PISTE.zoneCroisement;
+        const creneau = (2 * bande) / Math.max(1, paires);
+        const centre = bande - (k + 0.5) * creneau;
+        const demi = (creneau * PISTE.partUtile) / 2;
+        return { depart: centre + demi, large: 2 * demi || 1 };
+      };
+
+      // rDroite : le rayon tenu dans le virage de droite (celui du poteau
+      // d'arrivee) ; rGauche : celui tenu dans le virage de gauche. On tourne
+      // dans le sens inverse des aiguilles d'une montre, comme sur un vrai
+      // hippodrome.
+      const traceCouloir = (rDroite, rGauche, fenetre, d) => {
+        const Sx = PISTE.demiDroite;
+        const pts = [{ x: Sx + rDroite, y: 0 }];
+        const arc = (cx, r, a0, a1, n) => {
+          for (let k = 1; k <= n; k++) {
+            const a = a0 + ((a1 - a0) * k) / n;
+            pts.push({ x: cx + r * Math.cos(a), y: r * Math.sin(a) });
+          }
+        };
+        // Le glissement d'un rayon a l'autre, adouci aux deux bouts, pour que
+        // le couloir quitte et rejoigne sa ligne droite sans casser.
+        const glisser = (avance) => {
+          const u = Math.max(0, Math.min(1, avance));
+          return u * u * (3 - 2 * u);
+        };
+        // sens = 1 pour la droite du haut (on va de +Sx vers -Sx), -1 pour
+        // celle du bas. Les deux fenetres sont symetriques par rotation.
+        const droite = (rDepart, rArrivee, sens, n) => {
+          for (let k = 1; k <= n; k++) {
+            const x = sens * (Sx - (2 * Sx * k) / n);
+            const e = glisser((fenetre.depart - sens * x) / fenetre.large);
+            pts.push({ x, y: -sens * (rDepart + (rArrivee - rDepart) * e) });
+          }
+        };
+        arc(Sx, rDroite, 0, -Math.PI / 2, d.quart); // quart haut du virage droit
+        droite(rDroite, rGauche, 1, d.droite); // ligne droite du haut
+        arc(-Sx, rGauche, -Math.PI / 2, -Math.PI, d.quart); // quart haut gauche
+        arc(-Sx, rGauche, Math.PI, Math.PI / 2, d.quart); // quart bas gauche
+        droite(rGauche, rDroite, -1, d.droite); // ligne droite du bas
+        arc(Sx, rDroite, Math.PI / 2, 0, d.quart); // retour au poteau
+        const cumul = [0];
+        for (let k = 1; k < pts.length; k++)
+          cumul.push(
+            cumul[k - 1] +
+              Math.hypot(pts[k].x - pts[k - 1].x, pts[k].y - pts[k - 1].y)
+          );
+        return {
+          pts,
+          cumul,
+          L: cumul[cumul.length - 1] || 1,
+          d:
+            "M " +
+            pts.map((p) => p.x.toFixed(1) + " " + p.y.toFixed(1)).join(" L ")
+        };
+      };
+
+      // Les couloirs sont numerotes du plus large (0) au plus serre ; le
+      // couloir i echange sa place avec le couloir (n - 1 - i).
+      const geometriePiste = (nb) => {
+        const n = Math.max(1, nb);
+        const ecart =
+          n > 1 ? Math.min(PISTE.ecartMax, PISTE.etendue / (n - 1)) : 0;
+        const rayon = (i) => PISTE.rayonMin + (n - 1 - i) * ecart;
+        const rInterieur = rayon(n - 1);
+        const rExterieur = rayon(0);
+        const rMoyen = (rInterieur + rExterieur) / 2;
+        const paires = Math.max(1, Math.floor(n / 2));
+        const decoupe = decoupePiste(rMoyen);
+        const couloirs = [];
+        for (let i = 0; i < n; i++)
+          couloirs.push(
+            traceCouloir(
+              rayon(i),
+              rayon(n - 1 - i),
+              fenetreCroisement(Math.min(i, n - 1 - i), paires),
+              decoupe
+            )
+          );
+        return {
+          couloirs,
+          // La ligne moyenne sert d'horloge : c'est elle qui avance a vitesse
+          // constante, et chaque couloir se lit a la meme phase qu'elle.
+          reference: traceCouloir(
+            rMoyen,
+            rMoyen,
+            fenetreCroisement(0, paires),
+            decoupe
+          ),
+          ecart,
+          largeur: Math.max(5, Math.min(10, ecart * 0.42 || 10)),
+          rayonInterieur: rInterieur,
+          rayonExterieur: rExterieur
+        };
+      };
+
+      // On convertit l'avancement (0 a 1) en une phase commune a tous les
+      // couloirs. Deux chevaux a egalite restent ainsi epaule contre epaule :
+      // celui de l'exterieur couvre simplement plus de terrain dans le virage,
+      // exactement comme sur une vraie piste. Et la phase progresse a vitesse
+      // constante sur la ligne moyenne, sans acceleration dans les virages.
+      const phasePiste = (piste, avancement) => {
+        const ref = piste.reference;
+        const cible = (((avancement % 1) + 1) % 1) * ref.L;
+        const c = ref.cumul;
         let lo = 0;
-        let hi = table.pts.length - 1;
+        let hi = c.length - 1;
         while (lo < hi - 1) {
           const mid = (lo + hi) >> 1;
-          if (table.pts[mid].l < cible) lo = mid;
+          if (c[mid] < cible) lo = mid;
           else hi = mid;
         }
-        const p0 = table.pts[lo];
-        const p1 = table.pts[hi];
-        const f = p1.l === p0.l ? 0 : (cible - p0.l) / (p1.l - p0.l);
-        const a = p0.a + (p1.a - p0.a) * f;
-        return { x: rx * Math.cos(a), y: ry * Math.sin(a) };
+        const f = c[hi] === c[lo] ? 0 : (cible - c[lo]) / (c[hi] - c[lo]);
+        return lo + f;
+      };
+
+      const pointCouloir = (couloir, phase) => {
+        const i = Math.max(0, Math.min(couloir.pts.length - 2, Math.floor(phase)));
+        const f = phase - i;
+        const a = couloir.pts[i];
+        const b = couloir.pts[i + 1];
+        return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
       };
 
       function PisteCourse({ numero, chevaux, cfg, depart, compact }) {
@@ -358,16 +488,32 @@
           ordrePrecedent.current = ordre;
         }, [classement.map((p) => p.index).join(",")]);
 
-        const rx = 330;
-        const ry = 128;
-        const ecart = 26;
-        const tables = React.useMemo(
-          () =>
-            chevaux.map((_, i) =>
-              tableOvale(rx - i * ecart, ry - i * (ecart * 0.42))
-            ),
+        const piste = React.useMemo(
+          () => geometriePiste(chevaux.length),
           [chevaux.length]
         );
+        // La bande d'arrivee : un damier pose en travers de tous les couloirs,
+        // a l'endroit exact ou ils s'elancent.
+        const damier = React.useMemo(() => {
+          const demi = piste.largeur / 2 + 3;
+          const x0 = PISTE.demiDroite + piste.rayonInterieur - demi;
+          const x1 = PISTE.demiDroite + piste.rayonExterieur + demi;
+          const colonnes = Math.max(3, Math.round((x1 - x0) / 13));
+          const pas = (x1 - x0) / colonnes;
+          const rangees = 3;
+          const cases = [];
+          for (let c = 0; c < colonnes; c++)
+            for (let l = 0; l < rangees; l++)
+              cases.push({
+                cle: c + "-" + l,
+                x: x0 + c * pas,
+                y: (-rangees / 2 + l) * pas,
+                w: pas,
+                sombre: (c + l) % 2 === 0
+              });
+          return { cases, x0, largeur: x1 - x0, hauteur: rangees * pas };
+        }, [piste]);
+        const rayonPion = Math.max(11, piste.largeur * 1.35);
 
         return (
           <div
@@ -398,68 +544,112 @@
                 TOUR {classement.length ? classement[0].tour : 1} / {tours}
               </div>
               <svg
-                viewBox="-370 -170 740 340"
-              style={{
-                width: compact ? "420px" : "min(70vw, 760px)",
-                maxWidth: "100%",
-                background: "#14321a",
-                borderRadius: "16px"
-              }}
-            >
-              {chevaux.map((c, i) => (
-                <ellipse
-                  key={`piste-${c.id}`}
-                  cx="0"
-                  cy="0"
-                  rx={rx - i * ecart}
-                  ry={ry - i * (ecart * 0.42)}
-                  fill="none"
-                  stroke={c.couleur}
-                  strokeOpacity="0.35"
-                  strokeWidth="16"
+                viewBox="-422 -212 844 424"
+                style={{
+                  width: compact ? "420px" : "min(70vw, 760px)",
+                  maxWidth: "100%",
+                  background: "#14321a",
+                  borderRadius: "16px"
+                }}
+              >
+                {/* L'anneau de piste, puis la pelouse centrale */}
+                <rect
+                  x={-(PISTE.demiDroite + piste.rayonExterieur + 14)}
+                  y={-(piste.rayonExterieur + 14)}
+                  width={2 * (PISTE.demiDroite + piste.rayonExterieur + 14)}
+                  height={2 * (piste.rayonExterieur + 14)}
+                  rx={piste.rayonExterieur + 14}
+                  fill="#0f2a16"
+                  stroke="rgba(255,255,255,0.16)"
+                  strokeWidth="2"
                 />
-              ))}
-              {/* Ligne d'arrivée, à droite, là où les chevaux s'élancent */}
-              <line
-                x1={rx - chevaux.length * ecart}
-                y1="0"
-                x2={rx + 10}
-                y2="0"
-                stroke="#fff"
-                strokeWidth="3"
-                strokeDasharray="6 5"
-              />
-              {positions.map((p) => {
-                const table = tables[p.index];
-                if (!table) return null;
-                const pt = pointOvale(
-                  table,
-                  rx - p.index * ecart,
-                  ry - p.index * (ecart * 0.42),
-                  p.avance * tours
-                );
-                return (
-                  <g key={`cheval-${p.cheval.id}`}>
-                    <circle
-                      cx={pt.x}
-                      cy={pt.y}
-                      r="15"
-                      fill={p.cheval.couleur}
-                      stroke="#000"
-                      strokeWidth="1.5"
+                <rect
+                  x={-(PISTE.demiDroite + piste.rayonInterieur - 14)}
+                  y={-Math.max(4, piste.rayonInterieur - 14)}
+                  width={2 * (PISTE.demiDroite + piste.rayonInterieur - 14)}
+                  height={2 * Math.max(4, piste.rayonInterieur - 14)}
+                  rx={Math.max(4, piste.rayonInterieur - 14)}
+                  fill="#17381d"
+                  stroke="rgba(255,255,255,0.12)"
+                  strokeWidth="2"
+                />
+                {/* Chaque couloir est double d'un liere sombre : aux
+                    croisements, on voit franchement une ligne passer sur
+                    l'autre au lieu de deux couleurs qui se melangent. */}
+                {chevaux.map((c, i) =>
+                  piste.couloirs[i] ? (
+                    <g key={`piste-${c.id}`}>
+                      <path
+                        d={piste.couloirs[i].d}
+                        fill="none"
+                        stroke="#0a1f0f"
+                        strokeWidth={piste.largeur + 6}
+                        strokeLinejoin="round"
+                        strokeLinecap="round"
+                      />
+                      <path
+                        d={piste.couloirs[i].d}
+                        fill="none"
+                        stroke={c.couleur}
+                        strokeOpacity="0.8"
+                        strokeWidth={piste.largeur}
+                        strokeLinejoin="round"
+                        strokeLinecap="round"
+                      />
+                    </g>
+                  ) : null
+                )}
+                {/* Ligne d'arrivee : la bande a damier */}
+                <g>
+                  {damier.cases.map((c) => (
+                    <rect
+                      key={`damier-${c.cle}`}
+                      x={c.x}
+                      y={c.y}
+                      width={c.w}
+                      height={c.w}
+                      fill={c.sombre ? "#101010" : "#ffffff"}
                     />
-                    <text
-                      x={pt.x}
-                      y={pt.y}
-                      textAnchor="middle"
-                      dominantBaseline="central"
-                      style={{ fontSize: "20px" }}
-                    >
-                      🏇
-                    </text>
-                  </g>
-                );
-              })}
+                  ))}
+                  <rect
+                    x={damier.x0}
+                    y={-damier.hauteur / 2}
+                    width={damier.largeur}
+                    height={damier.hauteur}
+                    fill="none"
+                    stroke="rgba(255,255,255,0.75)"
+                    strokeWidth="1.5"
+                  />
+                </g>
+                {positions.map((p) => {
+                  const couloir = piste.couloirs[p.index];
+                  if (!couloir) return null;
+                  const pt = pointCouloir(
+                    couloir,
+                    phasePiste(piste, p.avance * tours)
+                  );
+                  return (
+                    <g key={`cheval-${p.cheval.id}`}>
+                      <circle
+                        cx={pt.x}
+                        cy={pt.y}
+                        r={rayonPion}
+                        fill={p.cheval.couleur}
+                        stroke="#000"
+                        strokeWidth="1.5"
+                      />
+                      <text
+                        x={pt.x}
+                        y={pt.y}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        style={{ fontSize: "20px" }}
+                      >
+                        🏇
+                      </text>
+                    </g>
+                  );
+                })}
               </svg>
             </div>
 
