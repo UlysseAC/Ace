@@ -402,10 +402,10 @@
       };
 
       const PISTE = {
-        demiDroite: 210, // demi-longueur d'une ligne droite
-        rayonMin: 120, // rayon du couloir le plus serre
-        etendue: 72, // ecart total entre le plus serre et le plus large
-        ecartMax: 24, // ecart maximum entre deux couloirs voisins
+        demiDroite: 186, // demi-longueur d'une ligne droite
+        rayonMin: 106, // rayon du couloir le plus serré
+        etendue: 78, // écart total entre le plus serré et le plus large
+        ecartMax: 26, // écart maximum entre deux couloirs voisins
         zoneCroisement: 0.82, // part de la droite ouverte aux croisements
         partUtile: 0.88 // part de son creneau qu'une paire utilise vraiment
       };
@@ -627,7 +627,7 @@
       // bosquets du rond central. Tout est calé sur les dimensions de la
       // piste, donc cela suit si l'on change le nombre de chevaux.
       const decorPiste = (piste) => {
-        const rHaie = piste.rayonExterieur + 40;
+        const rHaie = piste.rayonExterieur + 62;
         const haie = traceCouloir(
           rHaie,
           rHaie,
@@ -852,7 +852,10 @@
               });
           return { cases, x0, largeur: x1 - x0, hauteur: rangees * pas };
         }, [piste]);
-        const rayonPion = Math.max(11, piste.largeur * 1.35);
+        // Le pion se cale sur l'écart entre couloirs, pas sur la largeur du
+        // trait : c'est ce qui le rend lisible de loin sans qu'il avale ses
+        // voisins.
+        const rayonPion = Math.max(11, piste.ecart * 0.62);
         const decor = React.useMemo(() => decorPiste(piste), [piste]);
 
         // Tout ce qui ne bouge pas — le domaine, la piste, les couloirs et
@@ -1049,10 +1052,13 @@
                 TOUR {classement.length ? classement[0].tour : 1} / {tours}
               </div>
               <svg
-                viewBox="-478 -268 956 536"
+                viewBox="-458 -272 916 544"
                 style={{
-                  width: compact ? "420px" : "min(70vw, 760px)",
+                  width: compact ? "min(92vw, 560px)" : "min(78vw, 1080px)",
                   maxWidth: "100%",
+                  // Sur un écran peu haut, c'est la hauteur qui commande :
+                  // sans ça, la piste déborderait par le bas.
+                  maxHeight: compact ? "44vh" : "70vh",
                   background: DOMAINE.gazon,
                   borderRadius: "16px"
                 }}
@@ -1080,7 +1086,7 @@
                         y={pt.y}
                         textAnchor="middle"
                         dominantBaseline="central"
-                        style={{ fontSize: "20px" }}
+                        style={{ fontSize: `${(rayonPion * 1.55).toFixed(0)}px` }}
                       >
                         🏇
                       </text>
