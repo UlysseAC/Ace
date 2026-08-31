@@ -392,8 +392,9 @@
         bordure: "#7A5A33", // le bord sombre qui détache chaque couloir
         eau: "#4FC3F7",
         eauBord: "#039BE5",
-        arbre: "#2E7D32",
-        arbreClair: "#4CAF50",
+        arbre: "#388E3C",
+        arbreClair: "#66BB6A",
+        ombre: "rgba(27, 68, 20, 0.35)",
         tribuneMur: "#ECEFF1",
         tribuneToit: "#E65100"
       };
@@ -537,6 +538,53 @@
         return lo + f;
       };
 
+      // Une couronne d'arbre vue du ciel : au lieu d'un rond plat, un contour
+      // à lobes, comme un feuillage. On la dessine une fois pour un rayon de
+      // 1, et chaque arbre n'est plus qu'une mise à l'échelle.
+      const feuillage = (lobes) => {
+        const rl = 0.34; // rayon d'un lobe
+        const rc = 1 - rl; // cercle sur lequel les lobes sont posés
+        const demiAngle = Math.PI / lobes;
+        // Là où deux lobes voisins se coupent : c'est le creux du feuillage.
+        const demiCorde = rc * Math.sin(demiAngle);
+        const creux =
+          rc * Math.cos(demiAngle) +
+          Math.sqrt(Math.max(0, rl * rl - demiCorde * demiCorde));
+        const point = (k) => {
+          const a = ((k + 0.5) / lobes) * Math.PI * 2;
+          return [creux * Math.cos(a), creux * Math.sin(a)];
+        };
+        const depart = point(-1);
+        let d = "M " + depart[0].toFixed(3) + " " + depart[1].toFixed(3);
+        for (let k = 0; k < lobes; k++) {
+          const p = point(k);
+          d +=
+            " A " + rl.toFixed(3) + " " + rl.toFixed(3) + " 0 0 1 " +
+            p[0].toFixed(3) + " " + p[1].toFixed(3);
+        }
+        return d + " Z";
+      };
+      const FEUILLAGE = feuillage(7);
+
+      // Un contour fermé et lisse qui passe par tous les points donnés
+      // (Catmull-Rom converti en Béziers). C'est ce qui donne au plan d'eau
+      // une berge naturelle plutôt qu'une ellipse.
+      const contourFerme = (pts) => {
+        const n = pts.length;
+        const v = (p) => p[0].toFixed(1) + " " + p[1].toFixed(1);
+        let d = "M " + v(pts[0]);
+        for (let i = 0; i < n; i++) {
+          const p0 = pts[(i - 1 + n) % n];
+          const p1 = pts[i];
+          const p2 = pts[(i + 1) % n];
+          const p3 = pts[(i + 2) % n];
+          const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+          const c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+          d += " C " + v(c1) + ", " + v(c2) + ", " + v(p2);
+        }
+        return d + " Z";
+      };
+
       // Sème des points régulièrement espacés le long d'un tracé : c'est ce
       // qui plante la haie d'arbres autour de la propriété.
       const semerLeLong = (trace, pas) => {
@@ -564,18 +612,26 @@
         );
         const h = Math.max(20, piste.rayonInterieur - 26);
         const l = PISTE.demiDroite + h;
+        // Distance d'un point à l'axe de la piste : sert à vérifier que rien
+        // du rond central ne vient mordre sur le sable.
+        const rayonLocal = (x, y) =>
+          Math.abs(x) <= PISTE.demiDroite
+            ? Math.abs(y)
+            : Math.hypot(Math.abs(x) - PISTE.demiDroite, y);
         // Les bosquets se tiennent aux deux bouts du rond central et autour de
         // la pièce d'eau : le milieu reste dégagé, sinon le regard ne suit
         // plus les chevaux.
         // On plante par bouquets serrés plutôt qu'arbre par arbre : isolés,
-        // ils faisaient des taches sur la pelouse.
+        // ils faisaient des taches sur la pelouse. Les emplacements sont
+        // choisis assez à l'intérieur pour qu'aucun arbre ne morde sur le
+        // sable — et un rognage au bord du rond central le garantit.
         const centres = [
-          [-0.9, -0.1], [-0.76, 0.42], [-0.68, -0.46], [-0.34, 0.58],
-          [0.28, -0.6], [0.62, 0.54], [0.76, -0.36], [0.9, 0.24],
-          [0.95, -0.56]
+          [-0.849, -0.234], [-0.816, 0.319], [-0.73, -0.532], [-0.75, 0.553],
+          [-0.197, -0.574], [-0.066, 0.596], [0.23, -0.596], [0.493, 0.574],
+          [0.783, -0.362], [0.829, 0.277], [0.711, 0.553], [0.73, -0.574]
         ];
         const bouquet = [
-          [0, 0, 15], [17, -10, 11], [-15, 12, 12], [9, 15, 10]
+          [0, 0, 15], [17, -9, 11], [-14, 12, 12], [8, 14, 10]
         ];
         const bosquets = [];
         centres.forEach(([fx, fy], g) =>
@@ -597,14 +653,37 @@
             r: 11 + ((i * 5) % 3) * 3
           })),
           rayonHaie: rHaie,
-          bassin: { cx: -l * 0.5, cy: h * 0.1, rx: l * 0.17, ry: h * 0.4 },
+          // Le plan d'eau : une berge irrégulière mais lisse, pas une ellipse.
+          bassin: (() => {
+            const cx = -l * 0.5;
+            const cy = h * 0.06;
+            const rx = l * 0.16;
+            const ry = h * 0.36;
+            const galbe = [1.06, 0.94, 0.8, 0.92, 1.05, 1.0, 0.85, 0.98];
+            const pts = galbe.map((k, i) => {
+              const a = (i / galbe.length) * Math.PI * 2;
+              return [cx + rx * k * Math.cos(a), cy + ry * k * Math.sin(a)];
+            });
+            const hautFond = galbe.map((k, i) => {
+              const a = (i / galbe.length) * Math.PI * 2;
+              return [
+                cx - rx * 0.12 + rx * k * 0.66 * Math.cos(a),
+                cy - ry * 0.14 + ry * k * 0.66 * Math.sin(a)
+              ];
+            });
+            return { berge: contourFerme(pts), hautFond: contourFerme(hautFond) };
+          })(),
           bandes,
-          bosquets: bosquets.map(([fx, fy, r, dx, dy, cle]) => ({
-            cle,
-            x: l * fx + dx,
-            y: h * fy + dy,
-            r
-          })),
+          bosquets: bosquets
+            .map(([fx, fy, r, dx, dy, cle]) => ({
+              cle,
+              x: l * fx + dx,
+              y: h * fy + dy,
+              r
+            }))
+            // Ceinture et bretelles : si un arbre venait malgré tout à mordre
+            // sur la piste, on ne le plante pas du tout.
+            .filter((a) => rayonLocal(a.x, a.y) + a.r <= h - 2),
           demiHauteurCentre: h,
           demiLargeurCentre: l
         };
@@ -618,15 +697,16 @@
         return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
       };
 
-      // Un arbre vu du ciel : une couronne sombre, et sa partie éclairée.
+      // Un arbre vu du ciel : son ombre portée, sa couronne à lobes, et la
+      // partie du feuillage que le soleil éclaire.
       const Arbre = ({ x, y, r }) => (
-        <g>
-          <circle cx={x} cy={y} r={r} fill={DOMAINE.arbre} />
-          <circle
-            cx={x - r * 0.22}
-            cy={y - r * 0.22}
-            r={r * 0.62}
+        <g transform={`translate(${x} ${y}) scale(${r})`}>
+          <path d={FEUILLAGE} fill={DOMAINE.ombre} transform="translate(0.1 0.14)" />
+          <path d={FEUILLAGE} fill={DOMAINE.arbre} />
+          <path
+            d={FEUILLAGE}
             fill={DOMAINE.arbreClair}
+            transform="translate(-0.16 -0.2) scale(0.6)"
           />
         </g>
       );
@@ -726,6 +806,158 @@
         const rayonPion = Math.max(11, piste.largeur * 1.35);
         const decor = React.useMemo(() => decorPiste(piste), [piste]);
 
+        // Tout ce qui ne bouge pas — le domaine, la piste, les couloirs et
+        // la ligne d'arrivée — est figé une fois pour toutes. Sans ça, React
+        // rebâtirait quelque quatre cents formes à chaque image de
+        // l'animation, soixante fois par seconde.
+        const fond = React.useMemo(
+          () => (
+            <g>
+                  <defs>
+                    <clipPath id={`rond-central-${numero}`}>
+                      <rect
+                        x={-decor.demiLargeurCentre}
+                        y={-decor.demiHauteurCentre}
+                        width={2 * decor.demiLargeurCentre}
+                        height={2 * decor.demiHauteurCentre}
+                        rx={decor.demiHauteurCentre}
+                      />
+                    </clipPath>
+                  </defs>
+
+                  {/* Le rideau d'arbres qui ceinture le domaine */}
+                  <rect
+                    x={-(PISTE.demiDroite + decor.rayonHaie)}
+                    y={-decor.rayonHaie}
+                    width={2 * (PISTE.demiDroite + decor.rayonHaie)}
+                    height={2 * decor.rayonHaie}
+                    rx={decor.rayonHaie}
+                    fill="none"
+                    stroke={DOMAINE.arbre}
+                    strokeWidth="20"
+                    strokeOpacity="0.55"
+                  />
+                  {decor.arbresHaie.map((a, i) => (
+                    <Arbre key={`haie-${i}`} x={a.x} y={a.y} r={a.r} />
+                  ))}
+
+                  {/* L'anneau de sable, cerné de ses deux lisses blanches */}
+                  <rect
+                    x={-(PISTE.demiDroite + piste.rayonExterieur + 24)}
+                    y={-(piste.rayonExterieur + 24)}
+                    width={2 * (PISTE.demiDroite + piste.rayonExterieur + 24)}
+                    height={2 * (piste.rayonExterieur + 24)}
+                    rx={piste.rayonExterieur + 24}
+                    fill={DOMAINE.sableOmbre}
+                  />
+                  <rect
+                    x={-(PISTE.demiDroite + piste.rayonExterieur + 20)}
+                    y={-(piste.rayonExterieur + 20)}
+                    width={2 * (PISTE.demiDroite + piste.rayonExterieur + 20)}
+                    height={2 * (piste.rayonExterieur + 20)}
+                    rx={piste.rayonExterieur + 20}
+                    fill={DOMAINE.sable}
+                    stroke={DOMAINE.lisse}
+                    strokeWidth="3"
+                  />
+
+                  {/* Le rond central : gazon, trace de tonte, pièce d'eau */}
+                  <rect
+                    x={-decor.demiLargeurCentre}
+                    y={-decor.demiHauteurCentre}
+                    width={2 * decor.demiLargeurCentre}
+                    height={2 * decor.demiHauteurCentre}
+                    rx={decor.demiHauteurCentre}
+                    fill={DOMAINE.gazonCentre}
+                    stroke={DOMAINE.lisse}
+                    strokeWidth="3"
+                  />
+                  <g clipPath={`url(#rond-central-${numero})`}>
+                    {decor.bandes.map((b, i) =>
+                      i % 2 === 0 ? (
+                        <rect
+                          key={`tonte-${b.cle}`}
+                          x={b.x}
+                          y={-decor.demiHauteurCentre}
+                          width={b.w}
+                          height={2 * decor.demiHauteurCentre}
+                          fill={DOMAINE.tonte}
+                          fillOpacity="0.45"
+                        />
+                      ) : null
+                    )}
+                  </g>
+                  {/* Tout ce qui pousse au centre est rogné au bord du rond
+                      central : rien ne peut mordre sur le sable. */}
+                  <g clipPath={`url(#rond-central-${numero})`}>
+                    <path
+                      d={decor.bassin.berge}
+                      fill={DOMAINE.eau}
+                      stroke={DOMAINE.eauBord}
+                      strokeWidth="2.5"
+                    />
+                    <path
+                      d={decor.bassin.hautFond}
+                      fill="#81D4FA"
+                      fillOpacity="0.7"
+                    />
+                    {decor.bosquets.map((b) => (
+                      <Arbre key={`bosquet-${b.cle}`} x={b.x} y={b.y} r={b.r} />
+                    ))}
+                  </g>
+                  {/* Chaque couloir est double d'un liere sombre : aux
+                      croisements, on voit franchement une ligne passer sur
+                      l'autre au lieu de deux couleurs qui se melangent. */}
+                  {chevaux.map((c, i) =>
+                    piste.couloirs[i] ? (
+                      <g key={`piste-${c.id}`}>
+                        <path
+                          d={piste.couloirs[i].d}
+                          fill="none"
+                          stroke={DOMAINE.bordure}
+                          strokeWidth={piste.largeur + 6}
+                          strokeLinejoin="round"
+                          strokeLinecap="round"
+                        />
+                        <path
+                          d={piste.couloirs[i].d}
+                          fill="none"
+                          stroke={c.couleur}
+                          strokeOpacity="0.92"
+                          strokeWidth={piste.largeur}
+                          strokeLinejoin="round"
+                          strokeLinecap="round"
+                        />
+                      </g>
+                    ) : null
+                  )}
+                  {/* Ligne d'arrivee : la bande a damier */}
+                  <g>
+                    {damier.cases.map((c) => (
+                      <rect
+                        key={`damier-${c.cle}`}
+                        x={c.x}
+                        y={c.y}
+                        width={c.w}
+                        height={c.w}
+                        fill={c.sombre ? "#101010" : "#ffffff"}
+                      />
+                    ))}
+                    <rect
+                      x={damier.x0}
+                      y={-damier.hauteur / 2}
+                      width={damier.largeur}
+                      height={damier.hauteur}
+                      fill="none"
+                      stroke={DOMAINE.bordure}
+                      strokeWidth="1.5"
+                    />
+                  </g>
+            </g>
+          ),
+          [piste, decor, damier, chevaux, numero]
+        );
+
         return (
           <div
             style={{
@@ -763,167 +995,7 @@
                   borderRadius: "16px"
                 }}
               >
-                <defs>
-                  <clipPath id={`rond-central-${numero}`}>
-                    <rect
-                      x={-decor.demiLargeurCentre}
-                      y={-decor.demiHauteurCentre}
-                      width={2 * decor.demiLargeurCentre}
-                      height={2 * decor.demiHauteurCentre}
-                      rx={decor.demiHauteurCentre}
-                    />
-                  </clipPath>
-                </defs>
-
-                {/* Le rideau d'arbres qui ceinture le domaine */}
-                <rect
-                  x={-(PISTE.demiDroite + decor.rayonHaie)}
-                  y={-decor.rayonHaie}
-                  width={2 * (PISTE.demiDroite + decor.rayonHaie)}
-                  height={2 * decor.rayonHaie}
-                  rx={decor.rayonHaie}
-                  fill="none"
-                  stroke={DOMAINE.arbre}
-                  strokeWidth="20"
-                  strokeOpacity="0.55"
-                />
-                {decor.arbresHaie.map((a, i) => (
-                  <Arbre key={`haie-${i}`} x={a.x} y={a.y} r={a.r} />
-                ))}
-
-                {/* L'anneau de sable, cerné de ses deux lisses blanches */}
-                <rect
-                  x={-(PISTE.demiDroite + piste.rayonExterieur + 24)}
-                  y={-(piste.rayonExterieur + 24)}
-                  width={2 * (PISTE.demiDroite + piste.rayonExterieur + 24)}
-                  height={2 * (piste.rayonExterieur + 24)}
-                  rx={piste.rayonExterieur + 24}
-                  fill={DOMAINE.sableOmbre}
-                />
-                <rect
-                  x={-(PISTE.demiDroite + piste.rayonExterieur + 20)}
-                  y={-(piste.rayonExterieur + 20)}
-                  width={2 * (PISTE.demiDroite + piste.rayonExterieur + 20)}
-                  height={2 * (piste.rayonExterieur + 20)}
-                  rx={piste.rayonExterieur + 20}
-                  fill={DOMAINE.sable}
-                  stroke={DOMAINE.lisse}
-                  strokeWidth="3"
-                />
-
-                {/* Le rond central : gazon, trace de tonte, pièce d'eau */}
-                <rect
-                  x={-decor.demiLargeurCentre}
-                  y={-decor.demiHauteurCentre}
-                  width={2 * decor.demiLargeurCentre}
-                  height={2 * decor.demiHauteurCentre}
-                  rx={decor.demiHauteurCentre}
-                  fill={DOMAINE.gazonCentre}
-                  stroke={DOMAINE.lisse}
-                  strokeWidth="3"
-                />
-                <g clipPath={`url(#rond-central-${numero})`}>
-                  {decor.bandes.map((b, i) =>
-                    i % 2 === 0 ? (
-                      <rect
-                        key={`tonte-${b.cle}`}
-                        x={b.x}
-                        y={-decor.demiHauteurCentre}
-                        width={b.w}
-                        height={2 * decor.demiHauteurCentre}
-                        fill={DOMAINE.tonte}
-                        fillOpacity="0.45"
-                      />
-                    ) : null
-                  )}
-                </g>
-                <g stroke={DOMAINE.eauBord} strokeWidth="2.5" fill={DOMAINE.eau}>
-                  <ellipse
-                    cx={decor.bassin.cx}
-                    cy={decor.bassin.cy}
-                    rx={decor.bassin.rx}
-                    ry={decor.bassin.ry}
-                  />
-                  <ellipse
-                    cx={decor.bassin.cx + decor.bassin.rx * 0.55}
-                    cy={decor.bassin.cy - decor.bassin.ry * 0.3}
-                    rx={decor.bassin.rx * 0.6}
-                    ry={decor.bassin.ry * 0.6}
-                  />
-                </g>
-                <g fill={DOMAINE.eau} stroke="none">
-                  <ellipse
-                    cx={decor.bassin.cx}
-                    cy={decor.bassin.cy}
-                    rx={decor.bassin.rx - 1}
-                    ry={decor.bassin.ry - 1}
-                  />
-                  <ellipse
-                    cx={decor.bassin.cx + decor.bassin.rx * 0.55}
-                    cy={decor.bassin.cy - decor.bassin.ry * 0.3}
-                    rx={decor.bassin.rx * 0.6 - 1}
-                    ry={decor.bassin.ry * 0.6 - 1}
-                  />
-                </g>
-                <ellipse
-                  cx={decor.bassin.cx - decor.bassin.rx * 0.3}
-                  cy={decor.bassin.cy - decor.bassin.ry * 0.35}
-                  rx={decor.bassin.rx * 0.4}
-                  ry={decor.bassin.ry * 0.22}
-                  fill="#B3E5FC"
-                  fillOpacity="0.65"
-                />
-                {decor.bosquets.map((b) => (
-                  <Arbre key={`bosquet-${b.cle}`} x={b.x} y={b.y} r={b.r} />
-                ))}
-                {/* Chaque couloir est double d'un liere sombre : aux
-                    croisements, on voit franchement une ligne passer sur
-                    l'autre au lieu de deux couleurs qui se melangent. */}
-                {chevaux.map((c, i) =>
-                  piste.couloirs[i] ? (
-                    <g key={`piste-${c.id}`}>
-                      <path
-                        d={piste.couloirs[i].d}
-                        fill="none"
-                        stroke={DOMAINE.bordure}
-                        strokeWidth={piste.largeur + 6}
-                        strokeLinejoin="round"
-                        strokeLinecap="round"
-                      />
-                      <path
-                        d={piste.couloirs[i].d}
-                        fill="none"
-                        stroke={c.couleur}
-                        strokeOpacity="0.92"
-                        strokeWidth={piste.largeur}
-                        strokeLinejoin="round"
-                        strokeLinecap="round"
-                      />
-                    </g>
-                  ) : null
-                )}
-                {/* Ligne d'arrivee : la bande a damier */}
-                <g>
-                  {damier.cases.map((c) => (
-                    <rect
-                      key={`damier-${c.cle}`}
-                      x={c.x}
-                      y={c.y}
-                      width={c.w}
-                      height={c.w}
-                      fill={c.sombre ? "#101010" : "#ffffff"}
-                    />
-                  ))}
-                  <rect
-                    x={damier.x0}
-                    y={-damier.hauteur / 2}
-                    width={damier.largeur}
-                    height={damier.hauteur}
-                    fill="none"
-                    stroke={DOMAINE.bordure}
-                    strokeWidth="1.5"
-                  />
-                </g>
+                {fond}
                 {positions.map((p) => {
                   const couloir = piste.couloirs[p.index];
                   if (!couloir) return null;
