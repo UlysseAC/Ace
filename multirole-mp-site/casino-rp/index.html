@@ -44,11 +44,7 @@
         if (face.type === "Vert")
           return `Attaque réussie : vous saisissez ${pct} % du solde de votre cible.`;
         if (face.type === "Don")
-          return (
-            `Solidarité : ${pct} % de chacun des deux soldes sont saisis et ` +
-            `versés aux trois derniers du classement, pour les remettre à ` +
-            `hauteur.`
-          );
+          return `Solidarité : ${pct} % de chacun des deux soldes partent aux plus démunis.`;
         return "";
       };
 
@@ -3870,8 +3866,8 @@
               .sort((a, b) => a.solde - b.solde)
               .map((j) => j.nom);
             texteResultat =
-              `Solidarité ! ${cagnotte}$ saisis et versés au bas du ` +
-              `classement` +
+              `Solidarité ! ${cagnotte}$ saisis et redistribués aux plus ` +
+              `démunis` +
               (nomsServis.length ? ` : ${nomsServis.join(", ")}.` : ".");
           }
 
