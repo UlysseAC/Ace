@@ -187,6 +187,40 @@
             "À vous de filer chez le bookmaker avant le top départ.",
           delaiAvantUsage: true,
           phraseAnim: "Une enveloppe change de mains..."
+        },
+        {
+          id: "fontaine_jouvence",
+          nom: "Fontaine de Jouvence",
+          definition:
+            "Regain de fougue : armez-la, et la prochaine mission que vous validez vous rapporte un bonus.",
+          modeEmploi:
+            "Armez-la depuis votre deck, puis allez faire une mission. La prochaine que vous validez à la borne rapporte le bonus en plus de son montant habituel, et la carte est consommée à ce moment-là.\n\n" +
+            "Tant que vous ne validez aucune mission, elle reste armée : rien ne presse, mais rien ne se passe non plus. Vous pouvez la remettre en veille à tout moment.",
+          delaiAvantUsage: true,
+          phraseAnim: "Un regain de fougue !"
+        },
+        {
+          id: "pickpocket",
+          nom: "Pickpocket",
+          definition:
+            "Volez une carte à un joueur qui en possède — sans savoir laquelle. En échange, il reçoit le Pickpocket.",
+          modeEmploi:
+            "Activez-la depuis votre deck et désignez votre victime, parmi ceux qui ont au moins une carte en main. Une de ses cartes passe dans votre deck, tirée au hasard : vous ne choisissez pas, et vous découvrez ce que vous avez pris une fois le coup fait.\n\n" +
+            "Le Pickpocket, lui, passe dans la poche de votre victime : à elle de trouver quelqu'un à détrousser à son tour.\n\n" +
+            "La carte volée arrive avec son temps de garde à purger, comme si vous veniez de la ramasser. Personne d'autre que vous et votre victime ne sait ce qui a changé de mains.",
+          delaiAvantUsage: true,
+          phraseAnim: "Une main s'est glissée dans une poche..."
+        },
+        {
+          id: "argent_poche",
+          nom: "Argent de poche",
+          definition:
+            "Un billet qui traînait au fond d'une veste : activez-la, elle vous crédite une somme et disparaît.",
+          modeEmploi:
+            "Activez-la depuis votre deck. Le montant tombe aussitôt sur votre compte et la carte est consommée.\n\n" +
+            "Rien à négocier, rien à viser : c'est le coup de pouce le plus simple du jeu.",
+          delaiAvantUsage: true,
+          phraseAnim: "Un billet retrouvé au fond d'une poche."
         }
       ];
 
@@ -1791,6 +1825,10 @@
           raccourcisTactiles: [100, 500, 1000, 5000],
           // Combien de temps une carte reste en main avant d'être jouable.
           delaiCarteMin: DELAI_CARTE_DEFAUT,
+          // Ce que rapporte la Fontaine de Jouvence, et ce que verse l'Argent
+          // de poche.
+          bonusFontainePct: 20,
+          montantArgentPoche: 500,
           modeLocal: false,
           modeScanneur: "simulator",
           bonusVeinardGain: 5,
@@ -2536,6 +2574,7 @@
           croupierVendeur: null,
           jeuEnCours: null,
           veinardActif: false,
+          fontaineActive: false,
           achatsBoutique: 0,
           argentVole: 0,
           argentGagneCarte: 0,
@@ -3025,6 +3064,111 @@
         // Le délit d'initié révèle le vainqueur d'une course sur laquelle on
         // peut encore parier — sinon le tuyau ne vaut rien. Si les paris de la
         // course en cours sont clos, on donne celui de la suivante.
+        // ================= LE PICKPOCKET =================
+        // On désigne une victime, pas une carte : le tirage décide de ce qui
+        // change de mains, et le voleur ne le découvre qu'après coup. Les deux
+        // cartes arrivent avec leur temps de garde à purger, comme si on
+        // venait de les ramasser.
+        const detrousser = (carte) => {
+          if (bloqueParJetons(joueurActuel)) {
+            alert(MESSAGE_JETONS_EN_JEU);
+            return;
+          }
+          // On ne détrousse pas quelqu'un qui s'est isolé au paradis fiscal :
+          // il n'est plus dans la salle. Même règle que le contrôle fiscal.
+          const cibles = joueursActifs.filter(
+            (j) =>
+              j.id !== joueurActuel.id &&
+              !j.paradisActif &&
+              (j.deck || []).length > 0
+          );
+          if (!cibles.length) {
+            alert(
+              "Personne n'a de carte en main pour l'instant.\n\n" +
+                "Gardez la vôtre : elle ne se consomme pas."
+            );
+            return;
+          }
+          const nom = window.prompt(
+            "Qui allez-vous détrousser ?\n\n" +
+              cibles.map((j, i) => `${i + 1}. ${j.nom}`).join("\n") +
+              "\n\nTapez le numéro.",
+            "1"
+          );
+          if (nom === null) return;
+          const choix = cibles[Math.round(nombreSur(nom, 0)) - 1];
+          if (!choix) {
+            alert("Numéro invalide.");
+            return;
+          }
+          // Le tirage se fait ici, une fois, et le résultat sert aux deux
+          // decks : impossible qu'ils divergent.
+          const deckCible = choix.deck || [];
+          const volee = deckCible[Math.floor(Math.random() * deckCible.length)];
+          if (!volee) {
+            alert(`${choix.nom} n'a plus rien en poche.`);
+            return;
+          }
+          // Ici viendrait le garde du corps : s'il était actif chez la cible,
+          // le vol échouerait et le Pickpocket reviendrait dans la main du
+          // voleur, temps de garde remis à zéro.
+          const maintenantLa = Date.now();
+          setJoueurs((prev) =>
+            prev.map((j) => {
+              if (j.id === joueurActuel.id) {
+                return {
+                  ...j,
+                  deck: [
+                    ...j.deck.filter((x) => x.id !== carte.id),
+                    { ...volee, recuLe: maintenantLa }
+                  ],
+                  historique: [
+                    `Pickpocket sur ${choix.nom} : carte [${volee.nom}] dérobée`,
+                    ...j.historique
+                  ]
+                };
+              }
+              if (j.id === choix.id) {
+                // Une seule copie part, même si la victime en avait deux.
+                let retiree = false;
+                const restant = (j.deck || []).filter((x) => {
+                  if (!retiree && x.id === volee.id) {
+                    retiree = true;
+                    return false;
+                  }
+                  return true;
+                });
+                const ligne = `On vous a fait les poches : carte [${volee.nom}] dérobée`;
+                return {
+                  ...j,
+                  deck: [...restant, { ...carte, recuLe: maintenantLa }],
+                  // La victime n'est pas devant sa borne : l'avis l'attend.
+                  historique: [ligne, ...j.historique],
+                  avisBookmaker: [
+                    `${ligne} — le Pickpocket est passé dans votre main.`,
+                    ...(j.avisBookmaker || [])
+                  ],
+                  // Une carte volée pendant qu'elle était armée ne doit pas
+                  // laisser son effet derrière elle.
+                  veinardActif:
+                    volee.id === "veinard" ? false : j.veinardActif,
+                  fontaineActive:
+                    volee.id === "fontaine_jouvence" ? false : j.fontaineActive
+                };
+              }
+              return j;
+            })
+          );
+          // La salle apprend qu'une poche a été vidée, sans savoir laquelle.
+          annoncerSalle([carte.phraseAnim]);
+          alert(
+            `Vous avez dérobé [${volee.nom}] à ${choix.nom}.\n\n` +
+              "Elle arrive dans votre deck avec son temps de garde à purger.\n" +
+              "Le Pickpocket, lui, est passé dans sa poche."
+          );
+          setSousMenuBanque("accueil");
+        };
+
         const courseAParier = () => {
           if (!course.active || !course.numero) return null;
           const ouvert = course.parisOuverts;
@@ -3720,13 +3864,30 @@
                 let histNv = [...j.historique];
                 let codesNv = [...j.codesUtilises, hashSimule];
                 let listMissionsFaites = [...j.missionsFaites];
+                let fontaineNv = !!j.fontaineActive;
 
                 if (type === "mission") {
-                  soldeNv += objetDonnee.montant;
-                  missionsNv += objetDonnee.montant;
+                  // La Fontaine de Jouvence, si elle est armée : elle majore
+                  // cette mission-ci, puis elle est consommée.
+                  const fontaine =
+                    j.fontaineActive && deckNv.some((c) => c.id === "fontaine_jouvence");
+                  const base = nombreSur(objetDonnee.montant, 0);
+                  const pct = fontaine
+                    ? Math.max(0, nombreSur(configGlobale.bonusFontainePct, 20))
+                    : 0;
+                  const bonus = Math.round((base * pct) / 100);
+                  soldeNv += base + bonus;
+                  missionsNv += base + bonus;
                   histNv.unshift(
-                    `Mission validée [${objetDonnee.nom}] : +${objetDonnee.montant}$`
+                    fontaine
+                      ? `Mission validée [${objetDonnee.nom}] : +${base}$ ` +
+                          `et +${bonus}$ de Fontaine de Jouvence`
+                      : `Mission validée [${objetDonnee.nom}] : +${base}$`
                   );
+                  if (fontaine) {
+                    deckNv = deckNv.filter((c) => c.id !== "fontaine_jouvence");
+                    fontaineNv = false;
+                  }
                   listMissionsFaites.push(objetDonnee.id);
                 } else if (type === "carte") {
                   // L'heure du ramassage : c'est d'elle que part le temps de
@@ -3742,7 +3903,8 @@
                   deck: deckNv,
                   historique: histNv,
                   codesUtilises: codesNv,
-                  missionsFaites: listMissionsFaites
+                  missionsFaites: listMissionsFaites,
+                  fontaineActive: fontaineNv
                 };
               }
               return j;
@@ -4931,6 +5093,36 @@
                         Après le scan, avant de pouvoir la jouer. Carte par
                         carte, la case se décoche dans l'éditeur des cartes.
                       </span>
+                    </label>
+
+                    <label>
+                      Fontaine de Jouvence — bonus mission (%) :{" "}
+                      <input
+                        type="number"
+                        value={nombreSur(configGlobale.bonusFontainePct, 20)}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            bonusFontainePct: Number(e.target.value)
+                          })
+                        }
+                        style={{ width: "100%", padding: "5px" }}
+                      />
+                    </label>
+
+                    <label>
+                      Argent de poche — montant ($) :{" "}
+                      <input
+                        type="number"
+                        value={nombreSur(configGlobale.montantArgentPoche, 500)}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            montantArgentPoche: Number(e.target.value)
+                          })
+                        }
+                        style={{ width: "100%", padding: "5px" }}
+                      />
                     </label>
 
                     <label>
@@ -7388,6 +7580,147 @@
                               >
                                 🔎 Obtenir le tuyau
                               </button>
+                            ) : c.id === "argent_poche" ? (
+                              <button
+                                onClick={() => {
+                                  const montant = Math.max(
+                                    0,
+                                    Math.round(
+                                      nombreSur(configGlobale.montantArgentPoche, 500)
+                                    )
+                                  );
+                                  setJoueurs((prev) =>
+                                    prev.map((j) =>
+                                      j.id === joueurActuel.id
+                                        ? {
+                                            ...j,
+                                            solde: j.solde + montant,
+                                            argentGagneCarte:
+                                              nombreSur(j.argentGagneCarte, 0) + montant,
+                                            historique: [
+                                              `Argent de poche : +${montant}$`,
+                                              ...j.historique
+                                            ],
+                                            deck: j.deck.filter(
+                                              (card) => card.id !== c.id
+                                            )
+                                          }
+                                        : j
+                                    )
+                                  );
+                                  annoncerSalle([c.phraseAnim]);
+                                  alert(`Argent de poche : +${montant}$ sur votre compte.`);
+                                  setSousMenuBanque("accueil");
+                                }}
+                                style={{
+                                  padding: "8px",
+                                  background: "#43A047",
+                                  color: "#fff",
+                                  border: "none",
+                                  borderRadius: "4px",
+                                  cursor: "pointer",
+                                  fontWeight: "bold",
+                                  width: "100%"
+                                }}
+                              >
+                                💵 Empocher{" "}
+                                {Math.max(
+                                  0,
+                                  Math.round(
+                                    nombreSur(configGlobale.montantArgentPoche, 500)
+                                  )
+                                )}
+                                $
+                              </button>
+                            ) : c.id === "pickpocket" ? (
+                              <button
+                                onClick={() => detrousser(c)}
+                                style={{
+                                  padding: "8px",
+                                  background: "#5D4037",
+                                  color: "#fff",
+                                  border: "none",
+                                  borderRadius: "4px",
+                                  cursor: "pointer",
+                                  fontWeight: "bold",
+                                  width: "100%"
+                                }}
+                              >
+                                🕵️ Faire les poches
+                              </button>
+                            ) : c.id === "fontaine_jouvence" ? (
+                              // Comme Le Veinard : on l'arme, et elle attend
+                              // le bon moment sans se consommer.
+                              joueurActuel.fontaineActive ? (
+                                <div>
+                                  <div
+                                    style={{
+                                      padding: "8px",
+                                      background: "#8BC34A",
+                                      color: "#000",
+                                      borderRadius: "4px",
+                                      fontWeight: "bold",
+                                      textAlign: "center",
+                                      marginBottom: "6px"
+                                    }}
+                                  >
+                                    🌿 Armée — votre prochaine mission rapportera{" "}
+                                    {Math.max(
+                                      0,
+                                      nombreSur(configGlobale.bonusFontainePct, 20)
+                                    )}
+                                    % de plus
+                                  </div>
+                                  <button
+                                    onClick={() =>
+                                      setJoueurs((prev) =>
+                                        prev.map((j) =>
+                                          j.id === joueurActuel.id
+                                            ? { ...j, fontaineActive: false }
+                                            : j
+                                        )
+                                      )
+                                    }
+                                    style={{
+                                      padding: "6px",
+                                      background: "transparent",
+                                      color: "#aaa",
+                                      border: "1px solid #555",
+                                      borderRadius: "4px",
+                                      cursor: "pointer",
+                                      width: "100%",
+                                      fontSize: "0.85rem"
+                                    }}
+                                  >
+                                    Remettre en veille
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    setJoueurs((prev) =>
+                                      prev.map((j) =>
+                                        j.id === joueurActuel.id
+                                          ? { ...j, fontaineActive: true }
+                                          : j
+                                      )
+                                    );
+                                    annoncerSalle([c.phraseAnim]);
+                                  }}
+                                  style={{
+                                    padding: "8px",
+                                    background: "#8BC34A",
+                                    color: "#000",
+                                    border: "none",
+                                    borderRadius: "4px",
+                                    cursor: "pointer",
+                                    fontWeight: "bold",
+                                    width: "100%"
+                                  }}
+                                >
+                                  🌿 Armer pour ma prochaine mission
+                                </button>
+                              )
                             ) : c.id === "veinard" ? (
                               // Le joueur arme la carte quand il le décide :
                               // elle ne sera consommée qu'au retour des jetons
