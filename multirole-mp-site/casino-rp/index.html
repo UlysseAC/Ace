@@ -317,6 +317,193 @@
         return parts;
       };
 
+      // ---- L'impôt de fin de bloc ----
+      // Les plus riches versent un pourcentage de leur fortune, redistribué
+      // aux plus pauvres à chaque changement de bloc. La règle du jeu tient en
+      // une phrase : le prélèvement resserre les écarts, il ne double
+      // personne. C'est aux joueurs de se doubler ensuite.
+      const IMPOT_DEFAUT = { pct: 1, payeurs: 5, beneficiaires: 10 };
+      // Un dollar de marge partout, pour qu'on ne crée jamais d'égalité — deux
+      // soldes identiques, et l'ordre affiché devient arbitraire.
+      const MARGE_IMPOT = 1;
+
+      // Combien de contribuables et de bénéficiaires sur une table de `n`
+      // joueurs. Les deux groupes ne doivent jamais se toucher : sur une
+      // petite table on les réduit proportionnellement plutôt que de renoncer.
+      const groupesImpot = (n, cfg) => {
+        let p = Math.max(0, Math.round(nombreSur(cfg.impotBlocPayeurs, IMPOT_DEFAUT.payeurs)));
+        let b = Math.max(0, Math.round(nombreSur(cfg.impotBlocBeneficiaires, IMPOT_DEFAUT.beneficiaires)));
+        if (p < 1 || b < 1 || n < 2) return null;
+        if (p + b > n) {
+          const facteur = n / (p + b);
+          p = Math.max(1, Math.floor(p * facteur));
+          b = Math.max(1, Math.floor(b * facteur));
+          while (p + b > n && p > 1) p -= 1;
+          while (p + b > n && b > 1) b -= 1;
+        }
+        return p + b <= n ? { payeurs: p, beneficiaires: b } : null;
+      };
+
+      // `comptes` : [{ id, fortune, solde }], déjà purgé des paradis fiscaux.
+      // Renvoie { preleve: {id: montant}, verse: {id: montant}, total }, avec
+      // toujours autant de versé que de prélevé.
+      const impotDeBloc = (comptes, cfg) => {
+        const vide = { preleve: {}, verse: {}, total: 0 };
+        const pct = Math.max(0, nombreSur((cfg || {}).impotBlocPct, IMPOT_DEFAUT.pct));
+        if (pct <= 0 || !comptes || comptes.length < 2) return vide;
+
+        // Du plus riche au plus pauvre : c'est l'ordre qu'il faut préserver.
+        const classes = [...comptes].sort(
+          (a, b) => nombreSur(b.fortune, 0) - nombreSur(a.fortune, 0)
+        );
+        const n = classes.length;
+        const tailles = groupesImpot(n, cfg || {});
+        if (!tailles) return vide;
+        const { payeurs: nbP, beneficiaires: nbB } = tailles;
+
+        // ---- Ce que versent les riches ----
+        const fortune = (j) => nombreSur(j.fortune, 0);
+        const preleve = {};
+        const paye = classes.map((j, i) =>
+          i >= nbP
+            ? 0
+            : // On ne peut prendre que ce qui est sur le compte : le reste de
+              // la fortune est en jetons sur une table.
+              Math.max(
+                0,
+                Math.min(
+                  Math.round((fortune(j) * pct) / 100),
+                  Math.round(Math.max(0, nombreSur(j.solde, 0)))
+                )
+              )
+        );
+        // Un même pourcentage ne suffit pas à préserver l'ordre : celui dont
+        // l'argent dort en jetons ne peut payer que son solde, donc il descend
+        // moins que son voisin du dessus et lui passerait devant. On remonte
+        // donc le groupe depuis le bas, chacun devant rester au-dessus de
+        // celui qu'il précède une fois prélevé.
+        for (let i = nbP - 1; i >= 0; i--) {
+          const plancher =
+            i + 1 < n
+              ? fortune(classes[i + 1]) - paye[i + 1] + MARGE_IMPOT
+              : 0;
+          paye[i] = Math.max(0, Math.min(paye[i], fortune(classes[i]) - plancher));
+        }
+
+        // ---- Ce que le bas du classement peut absorber ----
+        // Les bénéficiaires, du plus pauvre au moins pauvre.
+        const groupe = classes.slice(n - nbB).reverse();
+        const iAuDessus = n - nbB - 1;
+        // Le joueur juste au-dessus du groupe est intouchable ; s'il vient de
+        // payer, c'est sa fortune d'après le prélèvement qui fait plafond.
+        const plafondHaut =
+          iAuDessus >= 0
+            ? fortune(classes[iAuDessus]) - paye[iAuDessus] - MARGE_IMPOT
+            : Infinity;
+        // Une échelle à un dollar d'écart sous ce plafond : le plus haut du
+        // groupe peut monter au plafond, celui d'en dessous un cran plus bas,
+        // et ainsi de suite. Personne ne double personne, personne n'égale
+        // personne.
+        const plafondDe = (k) =>
+          plafondHaut === Infinity ? Infinity : plafondHaut - (groupe.length - 1 - k);
+        const capacite = groupe.reduce(
+          (t, j, k) => t + Math.max(0, plafondDe(k) - fortune(j)),
+          0
+        );
+
+        // ---- La cagnotte se règle sur cette capacité ----
+        const brut = paye.reduce((t, m) => t + m, 0);
+        const total = Math.min(brut, capacite);
+        if (total <= 0) return vide;
+        if (total < brut) {
+          // On prélève moins, au prorata. Les dollars indivisibles vont aux
+          // plus gros contributeurs : plus grand reste.
+          const exact = paye.map((m) => (m * total) / brut);
+          const bas = exact.map(Math.floor);
+          let manque = total - bas.reduce((t, m) => t + m, 0);
+          exact
+            .map((v, i) => ({ i, reste: v - Math.floor(v) }))
+            .sort((a, b) => b.reste - a.reste)
+            .forEach((x) => {
+              if (manque > 0) {
+                bas[x.i] += 1;
+                manque -= 1;
+              }
+            });
+          bas.forEach((m, i) => {
+            if (m > 0) preleve[classes[i].id] = m;
+          });
+        } else {
+          paye.forEach((m, i) => {
+            if (m > 0) preleve[classes[i].id] = m;
+          });
+        }
+
+        // ---- Et le bas remonte, en commençant par les plus bas ----
+        // On cherche le niveau commun le plus haut que la cagnotte permet ;
+        // chacun monte à ce niveau, sans dépasser son propre plafond, et en
+        // gardant un dollar d'écart avec son voisin.
+        const cible = (niveau, k) =>
+          Math.max(
+            fortune(groupe[k]),
+            Math.min(niveau + k * MARGE_IMPOT, plafondDe(k))
+          );
+        const cout = (niveau) =>
+          groupe.reduce((t, j, k) => t + (cible(niveau, k) - fortune(j)), 0);
+        let bas = fortune(groupe[0]);
+        let haut = bas + total + MARGE_IMPOT * groupe.length + 1;
+        for (let tour = 0; tour < 64 && haut - bas > 1; tour++) {
+          const milieu = Math.floor((bas + haut) / 2);
+          if (cout(milieu) <= total) bas = milieu;
+          else haut = milieu;
+        }
+        const verse = {};
+        let reste = total;
+        groupe.forEach((j, k) => {
+          const part = Math.min(reste, cible(bas, k) - fortune(j));
+          if (part > 0) {
+            verse[j.id] = part;
+            reste -= part;
+          }
+        });
+        // Les quelques dollars que l'arrondi laisse de côté vont au HAUT du
+        // groupe, jamais au bas : donnés au plus pauvre, ils lui feraient
+        // rattraper son voisin, et l'échelle s'effondrerait.
+        for (let k = groupe.length - 1; k >= 0 && reste > 0; k--) {
+          const j = groupe[k];
+          const mien = fortune(j) + (verse[j.id] || 0);
+          // Ni au-dessus de son plafond, ni au-dessus de celui qui le
+          // précède dans le groupe.
+          const auDessus =
+            k === groupe.length - 1
+              ? plafondDe(k)
+              : Math.min(
+                  plafondDe(k),
+                  fortune(groupe[k + 1]) +
+                    (verse[groupe[k + 1].id] || 0) -
+                    MARGE_IMPOT
+                );
+          const part = Math.min(reste, Math.max(0, auDessus - mien));
+          if (part > 0) {
+            verse[j.id] = (verse[j.id] || 0) + part;
+            reste -= part;
+          }
+        }
+        // S'il reste vraiment de quoi ne pas savoir où le mettre, on ne le
+        // prélève pas : la cagnotte se réduit d'autant.
+        if (reste > 0) {
+          let aRendre = reste;
+          Object.keys(preleve).forEach((id) => {
+            if (aRendre <= 0) return;
+            const rendu = Math.min(aRendre, preleve[id]);
+            preleve[id] -= rendu;
+            aRendre -= rendu;
+            if (preleve[id] <= 0) delete preleve[id];
+          });
+        }
+        return { preleve, verse, total: total - reste };
+      };
+
       // Cote d'un pari sur un joueur. Proportionnelle aux jetons engagés par
       // la cible et au pourcentage visé : viser gros sur un gros stack paie
       // gros. Bornée pour que le bookmaker ne se retrouve jamais à devoir
@@ -1827,6 +2014,10 @@
 
             // --- Investissements ---
             blocDureeMin: 45,
+            // L'impôt de fin de bloc. À 0 %, il ne tombe pas.
+            impotBlocPct: IMPOT_DEFAUT.pct,
+            impotBlocPayeurs: IMPOT_DEFAUT.payeurs,
+            impotBlocBeneficiaires: IMPOT_DEFAUT.beneficiaires,
             projets: [
               {
                 id: 1,
@@ -1893,6 +2084,14 @@
         const [investissements, setInvestissements] = useEtatPartage(
           "investissements",
           []
+        );
+
+        // --- TABLE 14 : LE DERNIER BLOC DÉJÀ IMPOSÉ ---
+        // Partagé, pour qu'un prélèvement ne tombe qu'une fois même si
+        // plusieurs postes de bookmaker sont ouverts.
+        const [dernierBlocImpose, setDernierBlocImpose] = useEtatPartage(
+          "dernierBlocImpose",
+          0
         );
 
         // --- TABLE 13 : COURSE LANCÉE À LA MAIN (mode simulation) ---
@@ -2365,6 +2564,7 @@
           setParisJoueurs([]);
           setParisCourse([]);
           setInvestissements([]);
+          setDernierBlocImpose(0);
           setSoireeDebut(0);
           // Sans ça, la course lancée à la main pendant la partie précédente
           // survivrait à la remise à zéro, avec son numéro.
@@ -3326,6 +3526,82 @@
               }
             });
         }, [investissements, configBookmaker, maintenant, reglerProjet]);
+
+        // ================= L'IMPÔT DE FIN DE BLOC =================
+        // Les plus riches versent, les plus pauvres reçoivent, et le
+        // classement ne bouge pas d'un cran. Un joueur au paradis fiscal est
+        // hors du champ : ni contribuable, ni bénéficiaire.
+        const prelever = React.useCallback(
+          (bloc) => {
+            const imposables = joueursActifs
+              .filter((j) => !j.paradisActif)
+              .map((j) => ({
+                id: j.id,
+                fortune:
+                  nombreSur(j.solde, 0) + nombreSur(j.jetonsEnJeu, 0),
+                solde: nombreSur(j.solde, 0)
+              }));
+            const { preleve, verse, total } = impotDeBloc(
+              imposables,
+              configBookmaker
+            );
+            if (total <= 0) return false;
+
+            setJoueurs((prev) =>
+              prev.map((j) => {
+                const pris = preleve[j.id] || 0;
+                const recu = verse[j.id] || 0;
+                if (!pris && !recu) return j;
+                // Le montant ne paraît nulle part en public : chacun
+                // l'apprend sur sa borne, et l'avis reste tant qu'il n'a pas
+                // appuyé sur « J'ai lu ».
+                const ligne = pris
+                  ? `Impôt de fin de bloc n°${bloc} : −${pris}$`
+                  : `Redistribution du bloc n°${bloc} : +${recu}$`;
+                return {
+                  ...j,
+                  solde: Math.max(0, j.solde - pris + recu),
+                  historique: [ligne, ...j.historique],
+                  avisBookmaker: [ligne, ...(j.avisBookmaker || [])]
+                };
+              })
+            );
+            // La salle voit passer la somme, jamais les noms.
+            annoncerSalle([
+              `🏛️ Impôt de fin de bloc — ${total}$ prélevés sur les plus ` +
+                `fortunés et redistribués aux plus modestes`
+            ]);
+            return true;
+          },
+          [joueursActifs, configBookmaker, setJoueurs, annoncerSalle]
+        );
+
+        // Le prélèvement tombe au changement de bloc, une fois par bloc. Un
+        // marqueur partagé retient le dernier bloc traité : si le poste du
+        // bookmaker était fermé, on rattrape un bloc par passage plutôt que
+        // d'assommer la table de trois prélèvements d'un coup.
+        React.useEffect(() => {
+          if (interfaceActive !== "bookmaker") return;
+          if (!soireeDebut || configBookmaker.modeSimulation) return;
+          // Rien au premier bloc : il n'y a encore rien à redistribuer.
+          if (blocInvest < 2) return;
+          const suivant = Math.max(1, nombreSur(dernierBlocImpose, 0)) + 1;
+          if (nombreSur(dernierBlocImpose, 0) < 1) {
+            // Première fois de la soirée : on part du bloc en cours sans
+            // rattraper les blocs d'avant le réglage.
+            setDernierBlocImpose(blocInvest - 1);
+            return;
+          }
+          if (suivant > blocInvest) return;
+          setDernierBlocImpose(suivant);
+          prelever(suivant);
+        }, [
+          interfaceActive,
+          blocInvest,
+          soireeDebut,
+          dernierBlocImpose,
+          configBookmaker.modeSimulation
+        ]);
 
         // Le poste du bookmaker fait office d'arbitre : c'est lui, et lui
         // seul, qui solde les courses terminées et les projets échus. Si
@@ -4404,6 +4680,10 @@
                       // prendre de place. On efface les prises en cours pour
                       // que les projets se rejouent.
                       setInvestissements([]);
+                      // Les blocs repartent de 1 : sans ça le marqueur de
+                      // l'impôt resterait devant l'horloge et plus aucun
+                      // prélèvement ne tomberait de la soirée.
+                      setDernierBlocImpose(0);
                       setSoireeDebut(Date.now());
                     }}
                     style={{
@@ -8290,6 +8570,19 @@
                 <h3 style={{ marginTop: 0, color: "#CE93D8" }}>Investissements</h3>
                 <div style={grille}>
                   {champNombre("Durée d'un bloc (min)", "blocDureeMin", "45 min = 3 quarts d'heure")}
+                  {champNombre(
+                    "Impôt de fin de bloc (%)",
+                    "impotBlocPct",
+                    "de la fortune de chaque contribuable ; 0 = pas d'impôt"
+                  )}
+                  {champNombre(
+                    "Contribuables (les plus riches)",
+                    "impotBlocPayeurs"
+                  )}
+                  {champNombre(
+                    "Bénéficiaires (les plus pauvres)",
+                    "impotBlocBeneficiaires"
+                  )}
                 </div>
 
                 {(configBookmaker.projets || []).map((pr, i) => {
