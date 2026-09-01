@@ -4,6 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Casino RP - Système Intégral Stable</title>
+    <!-- Pour les bornes iPad : Safari n'accorde pas le plein écran à une page
+         entière. En revanche, « Partager > Ajouter à l'écran d'accueil » ouvre
+         le site en application, sans barre d'adresse ni onglets — et sans
+         touche Échap pour en sortir. Ces balises sont ce qui déclenche ce
+         mode ; sans elles, le raccourci rouvrirait simplement Safari. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Casino RP" />
+    <meta name="theme-color" content="#111111" />
     <!-- Librairies servies depuis le dossier vendor/ et non depuis un CDN :
          le site doit démarrer même si le réseau de la salle est lent,
          filtré, ou momentanément coupé. Voir vendor/LISEZMOI.md -->
@@ -2182,9 +2192,10 @@
               .catch(() =>
                 alert(
                   "Cet appareil ne propose pas le plein écran.\n\n" +
-                    "Sur iPhone, Safari le réserve aux vidéos : passez par " +
-                    "« Ajouter à l'écran d'accueil » pour ouvrir la page sans " +
-                    "les barres du navigateur."
+                    "Sur iPad et iPhone, Safari le réserve aux vidéos. La " +
+                    "solution : bouton Partager, puis « Ajouter à l'écran " +
+                    "d'accueil ». Le site s'ouvre alors en application, sans " +
+                    "barre d'adresse ni onglets — et sans touche Échap."
                 )
               );
             return;
@@ -2483,9 +2494,33 @@
         // course en cours sont clos, on donne celui de la suivante.
         const courseAParier = () => {
           if (!course.active || !course.numero) return null;
-          const numero = course.parisOuverts ? course.numero : course.numero + 1;
+          const ouvert = course.parisOuverts;
+          const numero = ouvert ? course.numero : course.numero + 1;
           const gagnant = chevalGagnant(numero);
-          return gagnant ? { numero, cheval: gagnant } : null;
+          if (!gagnant) return null;
+          // L'heure du départ, quand elle est connue : celle de la course en
+          // cours, ou celle-là plus un intervalle si l'on donne la suivante.
+          // En simulation, une course préparée n'a pas encore d'heure — c'est
+          // le bookmaker qui donne le top quand il veut.
+          const intervalle =
+            nombreSur(configBookmaker.courseIntervalleMin, 30) * 60000;
+          const depart = !course.depart
+            ? null
+            : ouvert
+              ? course.depart
+              : course.depart + intervalle;
+          return { numero, cheval: gagnant, depart };
+        };
+
+        const majuscule = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+
+        // « dans 12 min », « dans 45 s », ou l'aveu qu'on n'en sait rien.
+        const delaiAvantDepart = (depart) => {
+          if (!depart) return "le bookmaker donne le top quand il veut";
+          const reste = depart - maintenant;
+          if (reste <= 0) return "c'est parti !";
+          if (reste < 60000) return `départ dans ${Math.ceil(reste / 1000)} s`;
+          return `départ dans ${Math.ceil(reste / 60000)} min`;
         };
 
         // Lance une course tout de suite, sans attendre l'horaire. Le top
@@ -6014,6 +6049,9 @@
                               Course n°{joueurActuel.tuyau.numero} :{" "}
                               {joueurActuel.tuyau.cheval}
                             </div>
+                            <div style={{ color: "#FFCC80", fontSize: "0.9rem", marginTop: "2px" }}>
+                              ⏱ {delaiAvantDepart(joueurActuel.tuyau.depart)}
+                            </div>
                             <div style={{ color: "#aaa", fontSize: "0.8rem" }}>
                               Misez chez le bookmaker avant le top départ.
                             </div>
@@ -6151,7 +6189,8 @@
                                             tuyau: {
                                               numero: tuyau.numero,
                                               cheval: tuyau.cheval.nom,
-                                              couleur: tuyau.cheval.couleur
+                                              couleur: tuyau.cheval.couleur,
+                                              depart: tuyau.depart
                                             },
                                             deck: j.deck.filter(
                                               (card) => card.id !== c.id
@@ -6167,7 +6206,8 @@
                                     prev[0]
                                   ]);
                                   alert(
-                                    `Course n°${tuyau.numero} : ${tuyau.cheval.nom} l'emportera.\n\n` +
+                                    `Course n°${tuyau.numero} : ${tuyau.cheval.nom} l'emportera.\n` +
+                                      `${majuscule(delaiAvantDepart(tuyau.depart))}.\n\n` +
                                       "Filez chez le bookmaker avant le top départ."
                                   );
                                   setSousMenuBanque("accueil");
