@@ -2907,7 +2907,11 @@
             courant < 0
               ? 0
               : (courant + pas + projetsDuBloc.length) % projetsDuBloc.length;
-          setVitrine({ mode: "projet", projetId: projetsDuBloc[i].id });
+          setVitrine({
+            mode: "projet",
+            projetId: projetsDuBloc[i].id,
+            placeRang: null
+          });
         };
 
         // Le joueur prend une place précise : la mise et le bénéfice de
@@ -8503,7 +8507,13 @@
                             }}
                           >
                             <button
-                              onClick={() => setVitrine({ mode: "projet", projetId: pr.id })}
+                              onClick={() =>
+                                setVitrine({
+                                  mode: "projet",
+                                  projetId: pr.id,
+                                  placeRang: null
+                                })
+                              }
                               style={{
                                 padding: "6px 10px",
                                 background: "#455A64",
@@ -8578,6 +8588,15 @@
                       // Changer de projet remet le choix à zéro : la place
                       // n°2 d'un projet n'est pas celle d'un autre.
                       setBkInvRang("");
+                      // Le joueur est en face : ce que le bookmaker regarde,
+                      // la vitrine le montre. Sans ça il faut penser à
+                      // cliquer « Présenter ce projet » à chaque fois.
+                      if (e.target.value)
+                        setVitrine({
+                          mode: "projet",
+                          projetId: e.target.value,
+                          placeRang: null
+                        });
                     }}
                     style={champ}
                   >
@@ -8631,7 +8650,16 @@
                           return (
                             <button
                               key={pl.rang}
-                              onClick={() => setBkInvRang(String(pl.rang))}
+                              onClick={() => {
+                                setBkInvRang(String(pl.rang));
+                                // Et la vitrine désigne la même place : le
+                                // joueur voit celle dont on lui parle.
+                                setVitrine({
+                                  mode: "projet",
+                                  projetId: projetChoisi.id,
+                                  placeRang: pl.rang
+                                });
+                              }}
                               disabled={!!occupe}
                               style={{
                                 background: occupe
@@ -8691,6 +8719,14 @@
                     onClick={() => {
                       investir(bkInvJoueurId, bkInvProjetId, bkInvRang);
                       setBkInvRang("");
+                      // La place devient « prise » : plus rien à désigner,
+                      // mais le projet reste à l'écran pour le suivant.
+                      if (bkInvProjetId)
+                        setVitrine({
+                          mode: "projet",
+                          projetId: bkInvProjetId,
+                          placeRang: null
+                        });
                     }}
                     className="checkbox-btn"
                     style={{ background: "#9C27B0" }}
@@ -8916,16 +8952,36 @@
                       <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
                         {placesProjet(projetPresente).map((pl) => {
                           const occupe = prisVitrine[pl.rang];
+                          // La place que le bookmaker vient de désigner sur
+                          // son écran : c'est de celle-là qu'il parle.
+                          const designee =
+                            !occupe &&
+                            vitrine.placeRang !== null &&
+                            vitrine.placeRang !== undefined &&
+                            Number(vitrine.placeRang) === pl.rang;
                           return (
                             <div
                               key={pl.rang}
                               style={{
-                                background: occupe ? "#333" : "#1B5E20",
+                                background: occupe
+                                  ? "#333"
+                                  : designee
+                                    ? "#2E7D32"
+                                    : "#1B5E20",
                                 padding: "14px 18px",
                                 borderRadius: "10px",
                                 minWidth: "140px",
                                 textAlign: "center",
-                                opacity: occupe ? 0.5 : 1
+                                opacity: occupe ? 0.5 : 1,
+                                border: `3px solid ${
+                                  designee ? "#FFD54F" : "transparent"
+                                }`,
+                                boxShadow: designee
+                                  ? "0 0 18px rgba(255,213,79,0.55)"
+                                  : "none",
+                                transform: designee ? "scale(1.06)" : "none",
+                                transition:
+                                  "transform 180ms, box-shadow 180ms, background 180ms"
                               }}
                             >
                               <div style={{ fontSize: "0.8rem", color: "#ddd" }}>
@@ -8943,8 +8999,18 @@
                               <div style={{ fontSize: "1.15rem", color: "#A5D6A7" }}>
                                 +{pl.gain} %
                               </div>
-                              <div style={{ fontSize: "0.75rem", color: "#bbb" }}>
-                                {occupe ? "déjà prise" : "libre"}
+                              <div
+                                style={{
+                                  fontSize: "0.75rem",
+                                  color: designee ? "#FFD54F" : "#bbb",
+                                  fontWeight: designee ? "bold" : "normal"
+                                }}
+                              >
+                                {occupe
+                                  ? "déjà prise"
+                                  : designee
+                                    ? "★ celle-ci"
+                                    : "libre"}
                               </div>
                             </div>
                           );
