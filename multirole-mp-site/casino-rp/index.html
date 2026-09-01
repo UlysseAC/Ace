@@ -55,6 +55,30 @@
         Zéro: "#9C27B0"
       };
 
+      // Ce que fait chaque couleur, sans le pourcentage : c'est la règle du
+      // jeu, la même pour toutes les faces de cette couleur. Le joueur la lit
+      // à côté du dé, avant de lancer.
+      const REGLES_COULEURS = [
+        {
+          type: "Rouge",
+          titre: "Face rouge",
+          texte:
+            "L'attaque échoue. Le pourcentage est pris sur VOTRE solde et crédité à votre cible."
+        },
+        {
+          type: "Vert",
+          titre: "Face verte",
+          texte:
+            "L'attaque réussit. Le pourcentage est pris sur le solde de votre CIBLE et vous est crédité."
+        },
+        {
+          type: "Don",
+          titre: "Face bleue",
+          texte:
+            "Solidarité. Le pourcentage est pris sur vos deux soldes et redistribué aux plus démunis."
+        }
+      ];
+
       // Les casaques des chevaux. Franches et sombres : c'est ce qui ressort
       // le mieux sur le sable clair de la piste.
       const COULEURS_CHEVAUX = [
@@ -6212,7 +6236,11 @@
             <div
               style={{
                 padding: "30px",
-                maxWidth: "500px",
+                // La borne tient sur une colonne étroite, sauf l'écran du
+                // contrôle fiscal : il lui faut la place d'afficher les
+                // règles des couleurs à côté du dé.
+                maxWidth:
+                  sousMenuBanque === "activer_fiscal" ? "900px" : "500px",
                 margin: "0 auto",
                 position: "relative"
               }}
@@ -7033,6 +7061,18 @@
                       <h3 style={{ color: "#f44336" }}>
                         ⚡ Paramétrer l'Attaque
                       </h3>
+                      {/* Le paramétrage à gauche, les règles des couleurs à
+                          droite. Sur une borne en portrait, la colonne des
+                          règles repasse dessous. */}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "20px",
+                          alignItems: "flex-start",
+                          flexWrap: "wrap"
+                        }}
+                      >
+                        <div style={{ flex: "1 1 320px", minWidth: "280px" }}>
                       <label style={{ display: "block", marginBottom: "10px" }}>
                         Cible :
                         <select
@@ -7104,32 +7144,13 @@
                               style={{
                                 padding: "6px 9px",
                                 background:
-                                  f.type === "Rouge"
-                                    ? "#f44336"
-                                    : f.type === "Vert"
-                                      ? "#4CAF50"
-                                      : "#2196F3",
+                                  COULEURS_FACE[f.type] || "#2196F3",
                                 borderRadius: "4px",
                                 fontSize: "0.8rem",
-                                fontWeight: "bold",
-                                textAlign: "left",
-                                maxWidth: "190px"
+                                fontWeight: "bold"
                               }}
                             >
                               {f.type} {f.pct}%
-                              {/* Ce que fait la face, écrit dans l'admin :
-                                  le joueur sait sur quoi il tombe avant de
-                                  lancer, pas seulement une couleur. */}
-                              <div
-                                style={{
-                                  fontWeight: "normal",
-                                  fontSize: "0.75rem",
-                                  marginTop: "3px",
-                                  lineHeight: 1.35
-                                }}
-                              >
-                                {texteFace(f)}
-                              </div>
                             </div>
                           ))}
                         </div>
@@ -7157,6 +7178,60 @@
                       >
                         Annuler
                       </button>
+                        </div>
+
+                        <div
+                          style={{
+                            flex: "1 1 260px",
+                            minWidth: "240px",
+                            background: "#111",
+                            borderRadius: "8px",
+                            padding: "14px 16px"
+                          }}
+                        >
+                          <div
+                            style={{
+                              color: "#bbb",
+                              fontSize: "0.8rem",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.06em",
+                              marginBottom: "10px"
+                            }}
+                          >
+                            Ce que font les couleurs
+                          </div>
+                          {REGLES_COULEURS.map((r) => (
+                            <div
+                              key={r.type}
+                              style={{
+                                borderLeft: `4px solid ${COULEURS_FACE[r.type]}`,
+                                paddingLeft: "10px",
+                                marginBottom: "14px"
+                              }}
+                            >
+                              <div
+                                style={{
+                                  color: COULEURS_FACE[r.type],
+                                  fontWeight: "bold",
+                                  fontSize: "0.92rem"
+                                }}
+                              >
+                                {r.titre}
+                              </div>
+                              <div
+                                style={{
+                                  color: "#ddd",
+                                  fontSize: "0.85rem",
+                                  lineHeight: 1.45,
+                                  marginTop: "2px"
+                                }}
+                              >
+                                {r.texte}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   )}
 
