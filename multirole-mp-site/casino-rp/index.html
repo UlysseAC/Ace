@@ -3861,14 +3861,9 @@
               id,
               montant: parts[id]
             }));
-            const nomsServis = apresSaisie
-              .filter((j) => parts[j.id])
-              .sort((a, b) => a.solde - b.solde)
-              .map((j) => j.nom);
-            texteResultat =
-              `Solidarité ! ${cagnotte}$ saisis et redistribués aux plus ` +
-              `démunis` +
-              (nomsServis.length ? ` : ${nomsServis.join(", ")}.` : ".");
+            // Aucun nom : la salle voit passer la somme, pas les
+            // bénéficiaires. Chacun d'eux l'apprend sur sa borne, en privé.
+            texteResultat = `Solidarité ! ${cagnotte}$ saisis et redistribués aux plus démunis.`;
           }
 
           const phraseInitiale = configGlobale.phraseAttaqueCible
@@ -3904,6 +3899,7 @@
                     prev.map((item) => {
                       let nSolde = item.solde;
                       let nHist = [...item.historique];
+                      let nAvis = [...(item.avisBookmaker || [])];
                       let nVole = item.argentVole || 0;
                       let nDeck = item.deck;
 
@@ -3926,14 +3922,18 @@
                       );
                       if (partDon) {
                         nSolde += partDon.montant;
-                        nHist.unshift(
-                          `Don de solidarité reçu : +${partDon.montant}$`
-                        );
+                        const ligne = `Don de solidarité reçu : +${partDon.montant}$`;
+                        nHist.unshift(ligne);
+                        // Le montant n'apparaît nulle part en public : le
+                        // bénéficiaire l'apprend sur sa borne, et l'avis
+                        // reste tant qu'il n'a pas appuyé sur « J'ai lu ».
+                        nAvis.unshift(ligne);
                       }
                       return {
                         ...item,
                         solde: Math.max(0, nSolde),
                         historique: nHist,
+                        avisBookmaker: nAvis,
                         argentVole: nVole,
                         deck: nDeck
                       };
