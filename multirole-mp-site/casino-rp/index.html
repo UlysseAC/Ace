@@ -99,6 +99,11 @@
       // Tout se déduit de l'heure de départ de la soirée : numéro de la
       // course en cours, phase, secondes restantes. Aucun appareil n'a
       // besoin d'être prévenu, ils lisent la même horloge.
+      // À cinq secondes du départ, la piste apparaît et le décompte se pose
+      // par-dessus : la salle a le temps de repérer son cheval avant que ça
+      // parte. En dessous, c'est le décompte plein écran.
+      const DECOMPTE_SUR_PISTE = 5000;
+
       const PHASES = {
         AUCUNE: "aucune",
         ANNONCE: "annonce",
@@ -112,13 +117,16 @@
         const dureeSec = nombreSur(cfg.courseDureeSec, 45) * 1000;
         const annonce = nombreSur(cfg.courseAnnonceMin, 10) * 60000;
         const apres = nombreSur(cfg.courseBlocageApresMin, 1) * 60000;
+        // Combien de temps le vainqueur reste à l'écran, une fois la ligne
+        // franchie. Réglable : c'est le temps que la salle commente.
+        const resultat = nombreSur(cfg.courseResultatSec, 20) * 1000;
 
         // Une course lancée à la main prime sur l'horaire : c'est elle qu'on
         // regarde, du top départ jusqu'à la fin du temps de résultat.
         if (manuelle && manuelle.depart) {
           const avantDepart = manuelle.depart - maintenant;
           const depuis = -avantDepart;
-          if (depuis < dureeSec + apres) {
+          if (depuis < dureeSec + resultat) {
             let phase;
             if (avantDepart > topSec) phase = PHASES.ANNONCE;
             else if (avantDepart > 0) phase = PHASES.TOP;
@@ -160,7 +168,7 @@
         const numeroPrecedent = numeroSuivant - 1;
         const departPrecedent = debutSoiree + numeroPrecedent * intervalle;
         const depuisPrecedent = maintenant - departPrecedent;
-        if (numeroPrecedent >= 1 && depuisPrecedent < dureeSec + apres) {
+        if (numeroPrecedent >= 1 && depuisPrecedent < dureeSec + resultat) {
           const enCourse = depuisPrecedent < dureeSec;
           return {
             active: true,
@@ -230,10 +238,19 @@
         const f = x - k;
         const c = profil.cumul;
         const parcouru = c[k] + (c[k + 1] - c[k]) * f;
-        const base = (parcouru / profil.total) * profil.arrivee;
+        // La distance est la même pour tous ; c'est l'instant où chacun la
+        // boucle qui change. Au-delà, la valeur dépasse 1 : elle sert encore
+        // au classement, mais le dessin s'arrête au poteau.
+        const finit = profil.finit || 1;
+        const base = parcouru / profil.total / finit;
         // Le sinus vaut zéro au poteau et repasse par zéro à chaque tour : le
-        // gain pris dans un virage est rendu dans le suivant.
-        const attenuation = Math.min(1, (1 - u) / FIN_SANS_CORDE);
+        // gain pris dans un virage est rendu dans le suivant. On l'éteint sur
+        // les derniers mètres de CE cheval, pas de la fenêtre : sinon un
+        // avantage de couloir pourrait renverser l'ordre d'arrivée.
+        const attenuation = Math.min(
+          1,
+          Math.max(0, finit - u) / (FIN_SANS_CORDE * finit)
+        );
         return Math.max(
           0,
           base +
@@ -279,8 +296,8 @@
         const alea = semer(numero * 7919 + 13);
         const gagnant = Math.floor(alea() * n);
 
-        const tirerProfils = () =>
-          Array.from({ length: n }, (rien, i) => {
+        const tirerProfils = () => {
+          const bruts = Array.from({ length: n }, (rien, i) => {
             // La dérive donne son tempérament au cheval : négative, il part
             // vite et s'essouffle ; positive, il finit fort. C'est ce qui
             // produit les remontées, sans à-coup.
@@ -313,6 +330,7 @@
             return {
               cumul,
               total: cumul[PAS_COURSE] || 1,
+              ecart,
               arrivee: 1 - ecart,
               // -1 pour celui qui prend le virage de droite au plus large,
               // +1 pour celui qui le prend à la corde.
@@ -320,6 +338,16 @@
               tours
             };
           });
+          // Tous les chevaux couvrent la même distance et coupent tous la
+          // ligne : ce qui les départage, c'est le moment où ils la coupent.
+          // Le vainqueur arrive avant la fin de l'animation, le dernier pile à
+          // la fin — la course s'arrête donc quand le dernier est rentré.
+          const retardMax = Math.max(0, ...bruts.map((pr) => pr.ecart));
+          return bruts.map((pr) => ({
+            ...pr,
+            finit: Math.max(0.2, 1 - retardMax + pr.ecart)
+          }));
+        };
 
         // On retire jusqu'à tomber sur une course qui tient ses promesses. Le
         // générateur est semé, donc tous les appareils s'arrêtent sur le même
@@ -336,6 +364,40 @@
           }
         }
         return { gagnant, profils: meilleursProfils };
+      };
+
+      // L'ordre d'arrivée complet, du vainqueur au dernier. C'est l'écart à
+      // l'arrivée tiré au sort qui le décide, pas le déroulé de la course.
+      const ordreArrivee = (numero, chevaux, cfg) => {
+        const { profils } = trameCourse(numero, chevaux, cfg);
+        return profils
+          .map((pr, i) => ({ i, arrivee: pr.arrivee }))
+          .sort((a, b) => b.arrivee - a.arrivee)
+          .map((e) => chevaux[e.i])
+          .filter(Boolean);
+      };
+
+      // Ce que rapporte une mise selon la place du cheval : trois fois la mise
+      // au vainqueur, une fois et demie au deuxième, la moitié au troisième,
+      // rien ensuite. Une partie enregistrée avant ce barème n'a que son
+      // ancienne cote : on la garde pour le vainqueur et on complète.
+      const RAPPORTS_DEFAUT = [3, 1.5, 0.5, 0];
+      const rapportsCourse = (cfg) => {
+        const bruts = cfg && cfg.courseRapports;
+        const liste = Array.isArray(bruts)
+          ? bruts
+          : typeof bruts === "string"
+            ? bruts.split(",")
+            : null;
+        if (liste && liste.length) return liste.map((x) => nombreSur(x, 0));
+        const complet = RAPPORTS_DEFAUT.slice();
+        complet[0] = nombreSur((cfg || {}).courseCote, RAPPORTS_DEFAUT[0]);
+        return complet;
+      };
+
+      const rapportPourRang = (cfg, rang) => {
+        const r = rapportsCourse(cfg);
+        return rang >= 0 && rang < r.length ? r[rang] : 0;
       };
 
       const trameCourse = (numero, chevaux, cfg) => {
@@ -794,17 +856,23 @@
         }, [depart, duree]);
 
         const positions = trame.profils.map((pr, i) => {
-          const avance = avancementCheval(pr, t);
+          // Le brut sert au classement — il continue de croître après la
+          // ligne, ce qui garde l'ordre d'arrivée. Le dessin, lui, s'arrête
+          // au poteau : le cheval rentré ne repart pas pour un tour.
+          const brut = avancementCheval(pr, t);
+          const avance = Math.min(1, brut);
           return {
             index: i,
             cheval: pr.cheval,
+            brut,
             avance,
+            arrive: brut >= 1,
             // Au dernier mètre on est encore dans le dernier tour, pas dans
             // un tour de plus : d'où le plafond.
             tour: Math.min(tours, Math.floor(avance * tours) + 1)
           };
         });
-        const classement = [...positions].sort((a, b) => b.avance - a.avance);
+        const classement = [...positions].sort((a, b) => b.brut - a.brut);
 
         // Dépassement : la ligne qui gagne une place passe au vert, celle qui
         // en perd une au rouge, une seconde durant.
@@ -1419,6 +1487,9 @@
             courseDureeSec: 45,
             courseTours: 3,
             courseCote: 3,
+            courseResultatSec: 20,
+            // Ce que rapporte la mise selon la place : 1er, 2e, 3e, 4e…
+            courseRapports: [3, 1.5, 0.5, 0],
             courseMisePlafond: 100,
             courseBlocageAvantMin: 2,
             courseBlocageApresMin: 1,
@@ -2214,13 +2285,17 @@
         // d'afficher le décompte et que les paris se ferment proprement.
         const lancerCourseMaintenant = () => {
           const top = nombreSur(configBookmaker.courseTopDepartSec, 15) * 1000;
+          // Une fenêtre de paris avant le top départ : sans elle, une course
+          // lancée à la main partait déjà fermée et l'on ne pouvait rien
+          // essayer. Vingt-cinq secondes, le temps de saisir deux paris.
+          const fenetre = 25000;
           // On numerote a partir de 1, comme les courses a l'horaire. Aucun
           // risque de confusion : le lancement a la main n'existe qu'en
           // simulation, et la simulation ne programme aucune course.
           const precedent = courseManuelle ? nombreSur(courseManuelle.numero, 0) : 0;
           setCourseManuelle({
             numero: Math.max(1, precedent + 1),
-            depart: Date.now() + top
+            depart: Date.now() + top + fenetre
           });
         };
 
@@ -2233,8 +2308,11 @@
             alert("Sélection incomplète.");
             return;
           }
-          if (!soireeDebut) {
-            alert("La soirée n'a pas démarré : aucune course n'est programmée.");
+          // Ce qui compte, c'est qu'une course soit là et ouverte aux paris.
+          // En simulation il n'y a pas de soirée mais bien une course lancée à
+          // la main : on doit pouvoir parier dessus pour l'essayer.
+          if (!course.active) {
+            alert("Aucune course n'est programmée pour l'instant.");
             return;
           }
           if (!course.parisOuverts) {
@@ -2255,7 +2333,8 @@
             alert("Solde insuffisant.");
             return;
           }
-          const cote = nombreSur(configBookmaker.courseCote, 3);
+          const bareme = rapportsCourse(configBookmaker);
+          const cote = bareme[0] || 0;
           setParisCourse((prev) => [
             ...prev,
             {
@@ -2265,6 +2344,9 @@
               chevalId: cheval.id,
               mise: m,
               cote,
+              // On fige le barème sur le pari : celui qui a misé sous un
+              // barème ne doit pas être payé sous un autre.
+              rapports: bareme,
               statut: "ouvert",
               ts: Date.now()
             }
@@ -2285,7 +2367,10 @@
           );
           alert(
             `Pari enregistré : ${joueur.nom}, ${m}$ sur ${cheval.nom}\n` +
-              `Course n°${course.numero} — gain possible ${Math.round(m * cote)}$`
+              `Course n°${course.numero} — ` +
+              bareme
+                .map((r, i) => `${i + 1}${i ? "e" : "er"} : ${Math.round(m * r)}$`)
+                .join(", ")
           );
         };
 
@@ -2299,23 +2384,35 @@
             if (!aRegler.length) return;
             const gagnant = chevalGagnant(numero);
             if (!gagnant) return;
+            // Toutes les places paient, pas seulement la première.
+            const arrivee = ordreArrivee(numero, chevauxCourse, configBookmaker);
+            const placeDe = (chevalId) =>
+              arrivee.findIndex((c) => String(c.id) === String(chevalId));
 
             const gains = {};
             const lignes = {};
             const gagnantsSalle = new Set();
             aRegler.forEach((p) => {
-              const gagne = String(p.chevalId) === String(gagnant.id);
-              const gain = gagne
-                ? Math.round(nombreSur(p.mise, 0) * nombreSur(p.cote, 1))
-                : 0;
+              const place = placeDe(p.chevalId);
+              // Le barème figé au moment du pari fait foi.
+              const bareme = Array.isArray(p.rapports) && p.rapports.length
+                ? p.rapports
+                : rapportsCourse(configBookmaker);
+              const rapport =
+                place >= 0 && place < bareme.length
+                  ? nombreSur(bareme[place], 0)
+                  : 0;
+              const gain = Math.round(nombreSur(p.mise, 0) * rapport);
+              const cheval = arrivee[place];
+              const rang = place + 1;
               if (gain > 0) gains[p.joueurId] = (gains[p.joueurId] || 0) + gain;
               lignes[p.joueurId] = [
-                gagne
-                  ? `Course n°${numero} gagnée avec ${gagnant.nom} : +${gain}$`
-                  : `Course n°${numero} perdue : −${p.mise}$`,
+                gain > 0
+                  ? `Course n°${numero} : ${(cheval || {}).nom || "?"} ${rang}${rang === 1 ? "er" : "e"} (×${rapport}) : +${gain}$`
+                  : `Course n°${numero} : ${(cheval || {}).nom || "?"} ${rang}${rang === 1 ? "er" : "e"}, rien : −${p.mise}$`,
                 ...(lignes[p.joueurId] || [])
               ];
-              if (gagne) gagnantsSalle.add(p.joueurId);
+              if (gain > 0) gagnantsSalle.add(p.joueurId);
             });
 
             const ids = new Set(aRegler.map((p) => p.id));
@@ -2325,7 +2422,12 @@
                   ? {
                       ...p,
                       statut:
-                        String(p.chevalId) === String(gagnant.id)
+                        rapportPourRang(
+                          configBookmaker,
+                          arrivee.findIndex(
+                            (c) => String(c.id) === String(p.chevalId)
+                          )
+                        ) > 0
                           ? "gagne"
                           : "perdu",
                       regleTs: Date.now()
@@ -2349,7 +2451,7 @@
             annoncerSalle(
               [...gagnantsSalle].map((id) => {
                 const j = joueurs.find((x) => x.id === id);
-                return `🏇 ${(j || {}).nom || "Un joueur"} remporte son pari sur ${gagnant.nom}`;
+                return `🏇 ${(j || {}).nom || "Un joueur"} touche sur la course n°${numero}`;
               })
             );
           },
@@ -6438,7 +6540,7 @@
 
           const nbChevaux = (configBookmaker.chevaux || []).length || 1;
           const coteEquitable = nbChevaux;
-          const coteActuelle = nombreSur(configBookmaker.courseCote, 3);
+          const coteActuelle = rapportsCourse(configBookmaker)[0] || 0;
           const marge = Math.round((1 - coteActuelle / coteEquitable) * 100);
 
           return (
@@ -6612,9 +6714,29 @@
                   {champNombre("Intervalle entre courses (min)", "courseIntervalleMin")}
                   {champNombre("Annonce avant la course (min)", "courseAnnonceMin")}
                   {champNombre("Top départ (s)", "courseTopDepartSec")}
+                  {champNombre(
+                    "Vainqueur à l'écran (s)",
+                    "courseResultatSec",
+                    "le temps que la salle commente l'arrivée"
+                  )}
                   {champNombre("Durée de la course (s)", "courseDureeSec")}
                   {champNombre("Nombre de tours", "courseTours")}
-                  {champNombre("Cote", "courseCote")}
+                  <label style={{ fontSize: "0.85rem" }}>
+                    Rapports par place (× la mise), séparés par des virgules
+                    <input
+                      value={(configBookmaker.courseRapports || RAPPORTS_DEFAUT).join(", ")}
+                      onChange={(e) =>
+                        majCfg(
+                          "courseRapports",
+                          e.target.value.split(",").map((x) => nombreSur(x, 0))
+                        )
+                      }
+                      style={champ}
+                    />
+                    <span style={{ color: "#777", fontSize: "0.78rem" }}>
+                      1er, 2e, 3e, 4e… Le 1er sert de cote affichée.
+                    </span>
+                  </label>
                   {champNombre("Mise max par pari", "courseMisePlafond")}
                   {champNombre("Contrôle fiscal bloqué avant (min)", "courseBlocageAvantMin")}
                   {champNombre("Contrôle fiscal bloqué après (min)", "courseBlocageApresMin")}
@@ -7262,7 +7384,7 @@
                     <option value="">-- Choisir --</option>
                     {chevauxCourse.map((c) => (
                       <option key={c.id} value={c.id}>
-                        {c.nom} — cote {nombreSur(configBookmaker.courseCote, 3)}
+                        {c.nom} — ×{rapportsCourse(configBookmaker)[0] || 0} s'il gagne
                       </option>
                     ))}
                   </select>
@@ -7601,7 +7723,8 @@
                   fort, tout le monde doit avoir les yeux dessus. */}
               {enCourse ? (
                 <div style={carte}>
-                  {course.phase === PHASES.TOP ? (
+                  {course.phase === PHASES.TOP &&
+                  course.avantDepart > DECOMPTE_SUR_PISTE ? (
                     <div style={{ textAlign: "center" }}>
                       <h2 style={{ color: "#FFC107" }}>🏇 Course n°{course.numero}</h2>
                       <div style={{ fontSize: "5rem", fontWeight: "bold" }}>
@@ -7614,12 +7737,38 @@
                       <h2 style={{ color: "#FFC107", textAlign: "center" }}>
                         🏇 Course n°{course.numero}
                       </h2>
-                      <PisteCourse
-                        numero={course.numero}
-                        chevaux={chevauxCourse}
-                        cfg={configBookmaker}
-                        depart={course.depart}
-                      />
+                      <div style={{ position: "relative" }}>
+                        <PisteCourse
+                          numero={course.numero}
+                          chevaux={chevauxCourse}
+                          cfg={configBookmaker}
+                          depart={course.depart}
+                        />
+                        {course.phase === PHASES.TOP && (
+                          <div
+                            style={{
+                              position: "absolute",
+                              inset: 0,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              pointerEvents: "none"
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontSize: "11rem",
+                                fontWeight: "bold",
+                                color: "#fff",
+                                lineHeight: 1,
+                                textShadow: "0 0 24px rgba(0,0,0,0.85)"
+                              }}
+                            >
+                              {Math.max(0, Math.ceil(course.avantDepart / 1000))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </>
                   )}
                 </div>
@@ -7818,7 +7967,7 @@
                             color: "#FFC107"
                           }}
                         >
-                          × {nombreSur(configBookmaker.courseCote, 3)}
+                          × {rapportsCourse(configBookmaker)[0] || 0}
                         </div>
                       </div>
                     ))}
@@ -8344,44 +8493,125 @@
                   <h2 style={{ color: "#FFC107", margin: 0 }}>
                     🏇 Course n°{course.numero}
                   </h2>
-                  {course.phase === PHASES.TOP && (
-                    <>
-                      <div
-                        style={{
-                          fontSize: "9rem",
-                          fontWeight: "bold",
-                          color: "#fff",
-                          lineHeight: 1
-                        }}
-                      >
-                        {Math.max(0, Math.ceil(course.avantDepart / 1000))}
-                      </div>
-                      <div style={{ color: "#aaa", fontSize: "1.2rem" }}>
-                        Les paris sont clos
-                      </div>
-                    </>
-                  )}
-                  {course.phase === PHASES.COURSE && (
-                    <PisteCourse
-                      numero={course.numero}
-                      chevaux={chevauxCourse}
-                      cfg={configBookmaker}
-                      depart={course.depart}
-                    />
+                  {course.phase === PHASES.TOP &&
+                    course.avantDepart > DECOMPTE_SUR_PISTE && (
+                      <>
+                        <div
+                          style={{
+                            fontSize: "9rem",
+                            fontWeight: "bold",
+                            color: "#fff",
+                            lineHeight: 1
+                          }}
+                        >
+                          {Math.max(0, Math.ceil(course.avantDepart / 1000))}
+                        </div>
+                        <div style={{ color: "#aaa", fontSize: "1.2rem" }}>
+                          Les paris sont clos
+                        </div>
+                      </>
+                    )}
+                  {(course.phase === PHASES.COURSE ||
+                    (course.phase === PHASES.TOP &&
+                      course.avantDepart <= DECOMPTE_SUR_PISTE)) && (
+                    <div style={{ position: "relative" }}>
+                      <PisteCourse
+                        numero={course.numero}
+                        chevaux={chevauxCourse}
+                        cfg={configBookmaker}
+                        depart={course.depart}
+                      />
+                      {course.phase === PHASES.TOP && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            inset: 0,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            pointerEvents: "none"
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: "16rem",
+                              fontWeight: "bold",
+                              color: "#fff",
+                              lineHeight: 1,
+                              // Un liseré sombre, sinon le chiffre se perdrait
+                              // sur le sable clair de la piste.
+                              textShadow: "0 0 30px rgba(0,0,0,0.85)"
+                            }}
+                          >
+                            {Math.max(0, Math.ceil(course.avantDepart / 1000))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
                   {course.phase === PHASES.RESULTAT && vainqueur && (
-                    <div style={{ textAlign: "center" }}>
-                      <div style={{ fontSize: "5rem" }}>🏆</div>
-                      <div
-                        style={{
-                          fontSize: "3rem",
-                          fontWeight: "bold",
-                          color: vainqueur.couleur
-                        }}
-                      >
-                        {vainqueur.nom}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "60px",
+                        flexWrap: "wrap",
+                        justifyContent: "center"
+                      }}
+                    >
+                      <div style={{ textAlign: "center" }}>
+                        <div style={{ fontSize: "5rem" }}>🏆</div>
+                        <div
+                          style={{
+                            fontSize: "3rem",
+                            fontWeight: "bold",
+                            color: vainqueur.couleur
+                          }}
+                        >
+                          {vainqueur.nom}
+                        </div>
+                        <div style={{ color: "#aaa" }}>remporte la course</div>
                       </div>
-                      <div style={{ color: "#aaa" }}>remporte la course</div>
+                      {/* Le reste du classement : ceux qui ont misé sur une
+                          place payante doivent le voir tout de suite. */}
+                      <div style={{ minWidth: "320px" }}>
+                        {ordreArrivee(
+                          course.numero,
+                          chevauxCourse,
+                          configBookmaker
+                        ).map((c, rang) => {
+                          const rapport = rapportPourRang(configBookmaker, rang);
+                          return (
+                            <div
+                              key={`arrivee-${c.id}`}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "14px",
+                                padding: "10px 14px",
+                                marginBottom: "8px",
+                                borderRadius: "8px",
+                                background: rang === 0 ? "#332b00" : "#222",
+                                borderLeft: `8px solid ${c.couleur}`,
+                                fontSize: "1.4rem"
+                              }}
+                            >
+                              <strong style={{ width: "42px" }}>
+                                {rang + 1}
+                                {rang === 0 ? "er" : "e"}
+                              </strong>
+                              <span style={{ flex: 1 }}>{c.nom}</span>
+                              <strong
+                                style={{
+                                  color: rapport > 0 ? "#4CAF50" : "#666"
+                                }}
+                              >
+                                {rapport > 0 ? `×${rapport}` : "—"}
+                              </strong>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>
