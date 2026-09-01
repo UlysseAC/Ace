@@ -535,6 +535,57 @@
       const couleurRapport = (rapport) =>
         gagnantPour(rapport) ? COULEUR_GAIN : COULEUR_PERTE;
 
+      // ---- Les places d'un projet d'investissement ----
+      // Un projet n'est plus une cagnotte où chacun verse ce qu'il veut :
+      // c'est une liste de places numérotées. La place du premier
+      // investisseur coûte tant et rapporte tant, celle du deuxième moins
+      // cher et moins rapporté, et ainsi de suite. Le joueur ne choisit pas
+      // son montant, il choisit sa place.
+      const MISE_PLACE_DEFAUT = 200;
+      const placesProjet = (projet) => {
+        if (!projet) return [];
+        const gains = Array.isArray(projet.gains) ? projet.gains : [];
+        const mises = Array.isArray(projet.mises) ? projet.mises : [];
+        const nb = Math.max(
+          1,
+          Math.round(nombreSur(projet.investisseursMax, gains.length || 5))
+        );
+        // Une partie enregistrée avant les mises fixes n'en a aucune : on
+        // répartit le montant à réunir à parts égales entre les places, le
+        // projet reste finançable et rien ne casse.
+        const secours = mises.length
+          ? nombreSur(mises[mises.length - 1], MISE_PLACE_DEFAUT)
+          : Math.round(nombreSur(projet.montantRequis, 0) / nb) ||
+            MISE_PLACE_DEFAUT;
+        const places = [];
+        for (let i = 0; i < nb; i++)
+          places.push({
+            rang: i,
+            mise: Math.max(0, Math.round(nombreSur(mises[i], secours))),
+            gain: nombreSur(gains[i], nombreSur(gains[gains.length - 1], 0))
+          });
+        return places;
+      };
+
+      const placeDe = (projet, rang) =>
+        placesProjet(projet)[rang] || { rang, mise: 0, gain: 0 };
+
+      // Le rang d'une entrée. Les investissements enregistrés avant les
+      // places fixes n'en portent pas : c'est alors l'ordre d'arrivée, comme
+      // avant.
+      const rangEntree = (entree, i) =>
+        Number.isFinite(Number(entree && entree.rang)) ? Number(entree.rang) : i;
+
+      const rangsPris = (inst) => {
+        const pris = {};
+        ((inst && inst.investisseurs) || []).forEach((x, i) => {
+          pris[rangEntree(x, i)] = x;
+        });
+        return pris;
+      };
+
+      const libelleRang = (rang) => `${rang + 1}${rang === 0 ? "er" : "e"}`;
+
       const trameCourse = (numero, chevaux, cfg) => {
         const n = chevaux.length || 1;
         const tours = Math.max(1, nombreSur(cfg.courseTours, 3));
@@ -1624,6 +1675,7 @@
                 montantRequis: 700,
                 investisseursMax: 5,
                 delaiMin: 30,
+                mises: [300, 250, 200, 150, 100],
                 gains: [40, 35, 30, 25, 20],
                 remboursement: 0
               },
@@ -1636,6 +1688,7 @@
                 montantRequis: 1200,
                 investisseursMax: 4,
                 delaiMin: 30,
+                mises: [500, 400, 300, 200],
                 gains: [80, 60, 45, 30],
                 remboursement: 50
               }
@@ -1711,7 +1764,7 @@
         const [bkCourseMise, setBkCourseMise] = React.useState("");
         const [bkInvJoueurId, setBkInvJoueurId] = React.useState("");
         const [bkInvProjetId, setBkInvProjetId] = React.useState("");
-        const [bkInvMontant, setBkInvMontant] = React.useState("");
+        const [bkInvRang, setBkInvRang] = React.useState("");
 
         // États Croupier
         const [tableCroupier, setTableCroupier] = React.useState("Roulette");
@@ -2857,22 +2910,40 @@
           setVitrine({ mode: "projet", projetId: projetsDuBloc[i].id });
         };
 
-        const investir = (joueurId, projetId, montant) => {
+        // Le joueur prend une place précise : la mise et le bénéfice de
+        // cette place sont fixés d'avance, il ne reste qu'à savoir laquelle
+        // il veut — et si elle est libre.
+        const investir = (joueurId, projetId, rang) => {
           const projet = (configBookmaker.projets || []).find(
             (pr) => String(pr.id) === String(projetId)
           );
           const joueur = joueurs.find((j) => j.id === joueurId);
-          if (!projet || !joueur) {
-            alert("Sélection incomplète.");
+          // Attention à la chaîne vide : Number("") vaut 0, et l'on
+          // inscrirait quelqu'un en première place sans qu'il l'ait
+          // demandé. Aucune place choisie, aucun investissement.
+          const r = rang === "" || rang === null || rang === undefined
+            ? NaN
+            : Number(rang);
+          if (!projet || !joueur || !Number.isFinite(r)) {
+            alert(
+              !projet || !joueur
+                ? "Sélection incomplète."
+                : "Choisissez la place que le joueur veut prendre."
+            );
             return;
           }
-          const m = Number(montant);
-          if (!(m > 0)) {
-            alert("Montant invalide.");
+          const places = placesProjet(projet);
+          const place = places[r];
+          if (!place) {
+            alert("Cette place n'existe pas sur ce projet.");
             return;
           }
+          const m = place.mise;
           if (m > joueur.solde) {
-            alert("Solde insuffisant.");
+            alert(
+              `Solde insuffisant : la place de ${libelleRang(r)} investisseur ` +
+                `coûte ${m}$, ${joueur.nom} en a ${joueur.solde}.`
+            );
             return;
           }
           const inst = instanceProjet(projetId);
@@ -2887,14 +2958,17 @@
             alert(`${joueur.nom} a déjà investi dans ce projet.`);
             return;
           }
-          const nb = inst ? (inst.investisseurs || []).length : 0;
-          const max = nombreSur(projet.investisseursMax, 5);
-          if (nb >= max) {
-            alert(`Ce projet a déjà ses ${max} investisseurs.`);
+          const pris = rangsPris(inst);
+          if (pris[r]) {
+            const autre = joueurs.find((j) => j.id === pris[r].joueurId);
+            alert(
+              `La place de ${libelleRang(r)} investisseur est déjà prise` +
+                (autre ? ` par ${autre.nom}` : "") +
+                "."
+            );
             return;
           }
-
-          const entree = { joueurId, montant: m, ts: Date.now() };
+          const entree = { joueurId, montant: m, rang: r, ts: Date.now() };
           if (inst) {
             setInvestissements((prev) =>
               prev.map((i) =>
@@ -2924,7 +2998,8 @@
                     ...j,
                     solde: Math.max(0, j.solde - m),
                     historique: [
-                      `Investissement ${m}$ dans « ${projet.titre} » (rang ${nb + 1})`,
+                      `Investissement ${m}$ dans « ${projet.titre} » — place de ` +
+                        `${libelleRang(r)} investisseur (+${place.gain} % si ça réussit)`,
                       ...j.historique
                     ]
                   }
@@ -2932,7 +3007,8 @@
             )
           );
           alert(
-            `${joueur.nom} investit ${m}$ dans « ${projet.titre} » — rang ${nb + 1}.`
+            `${joueur.nom} prend la place de ${libelleRang(r)} investisseur ` +
+              `dans « ${projet.titre} » : ${m}$ misés, +${place.gain} % si ça réussit.`
           );
         };
 
@@ -2944,14 +3020,18 @@
             const remb = nombreSur(projet.remboursement, 0);
             const mouvements = {};
             const lignes = {};
-            (inst.investisseurs || []).forEach((x, rang) => {
+            (inst.investisseurs || []).forEach((x, i) => {
+              // Le rang n'est plus l'ordre d'arrivée : c'est la place que le
+              // joueur a choisie, et c'est elle qui décide du bénéfice.
+              const rang = rangEntree(x, i);
               const mise = nombreSur(x.montant, 0);
               if (reussi) {
                 const pct = nombreSur(gains[rang], 0);
                 const total = mise + Math.round((mise * pct) / 100);
                 mouvements[x.joueurId] = (mouvements[x.joueurId] || 0) + total;
                 lignes[x.joueurId] = [
-                  `« ${projet.titre} » a réussi — rang ${rang + 1}, +${pct} % : +${total}$`,
+                  `« ${projet.titre} » a réussi — ${libelleRang(rang)} investisseur, ` +
+                    `+${pct} % sur ${mise}$ : +${total}$`,
                   ...(lignes[x.joueurId] || [])
                 ];
               } else {
@@ -7696,6 +7776,27 @@
                           />
                         </label>
                         <label style={{ fontSize: "0.85rem", gridColumn: "span 2" }}>
+                          Mise de chaque place ($), séparées par des virgules
+                          <input
+                            value={(pr.mises || []).join(", ")}
+                            onChange={(e) =>
+                              maj(
+                                "mises",
+                                e.target.value
+                                  .split(",")
+                                  .map((x) => x.trim())
+                                  .filter((x) => x !== "")
+                                  .map(Number)
+                              )
+                            }
+                            style={champ}
+                          />
+                          <span style={{ color: "#777", fontSize: "0.78rem" }}>
+                            1er investisseur, 2e, 3e… Le joueur ne choisit pas
+                            son montant : il choisit sa place.
+                          </span>
+                        </label>
+                        <label style={{ fontSize: "0.85rem", gridColumn: "span 2" }}>
                           Bénéfices par rang (%), séparés par des virgules
                           <input
                             value={(pr.gains || []).join(", ")}
@@ -7713,6 +7814,64 @@
                           />
                         </label>
                       </div>
+
+                      {/* Les deux listes lues ensemble, place par place :
+                          c'est ce que le joueur verra, et ça évite de compter
+                          les virgules à la main. */}
+                      {(() => {
+                        const places = placesProjet(pr);
+                        const tout = places.reduce((t, pl) => t + pl.mise, 0);
+                        const requis = nombreSur(pr.montantRequis, 0);
+                        let cumul = 0;
+                        let combien = places.length + 1;
+                        places.forEach((pl, i) => {
+                          cumul += pl.mise;
+                          if (cumul >= requis && combien > places.length)
+                            combien = i + 1;
+                        });
+                        return (
+                          <div
+                            style={{
+                              marginTop: "10px",
+                              padding: "10px 12px",
+                              background: "#111",
+                              borderRadius: "6px",
+                              fontSize: "0.85rem",
+                              color: "#ccc"
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: "10px",
+                                flexWrap: "wrap"
+                              }}
+                            >
+                              {places.map((pl) => (
+                                <span key={pl.rang}>
+                                  <strong>{libelleRang(pl.rang)}</strong>{" "}
+                                  {pl.mise}$ → +{pl.gain} %
+                                </span>
+                              ))}
+                            </div>
+                            <div style={{ color: "#888", marginTop: "6px" }}>
+                              Toutes les places réunies : {tout}$ — il en faut{" "}
+                              {requis}$, soit{" "}
+                              {combien <= places.length ? (
+                                <strong style={{ color: "#81C784" }}>
+                                  les {combien} premières places
+                                </strong>
+                              ) : (
+                                <strong style={{ color: "#EF5350" }}>
+                                  plus que ce que les places rapportent : le
+                                  projet ne peut pas aboutir
+                                </strong>
+                              )}
+                              .
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })}
@@ -7730,6 +7889,7 @@
                         montantRequis: 500,
                         investisseursMax: 5,
                         delaiMin: 30,
+                        mises: [200, 175, 150, 125, 100],
                         gains: [40, 35, 30, 25, 20],
                         remboursement: 0
                       }
@@ -8314,7 +8474,7 @@
                           </div>
                           <div style={{ fontSize: "0.85rem", color: "#bbb" }}>
                             {total} / {pr.montantRequis}$ · {nb} /{" "}
-                            {pr.investisseursMax} investisseurs ·{" "}
+                            {placesProjet(pr).length} places ·{" "}
                             {pr.type === "aleatoire"
                               ? `aléatoire (${pr.probabilite} %)`
                               : "réussite garantie"}
@@ -8413,7 +8573,12 @@
                   <label>Le projet</label>
                   <select
                     value={bkInvProjetId}
-                    onChange={(e) => setBkInvProjetId(e.target.value)}
+                    onChange={(e) => {
+                      setBkInvProjetId(e.target.value);
+                      // Changer de projet remet le choix à zéro : la place
+                      // n°2 d'un projet n'est pas celle d'un autre.
+                      setBkInvRang("");
+                    }}
                     style={champ}
                   >
                     <option value="">-- Choisir --</option>
@@ -8424,18 +8589,108 @@
                     ))}
                   </select>
 
-                  <label>Montant</label>
-                  <input
-                    type="number"
-                    value={bkInvMontant}
-                    onChange={(e) => setBkInvMontant(e.target.value)}
-                    style={champ}
-                  />
+                  {/* La mise n'est plus libre : le joueur choisit sa place,
+                      et la place dit ce qu'elle coûte et ce qu'elle
+                      rapporte. Celles qui sont prises ne se cliquent pas. */}
+                  <label>La place</label>
+                  {(() => {
+                    const projetChoisi = projetsDuBloc.find(
+                      (pr) => String(pr.id) === String(bkInvProjetId)
+                    );
+                    if (!projetChoisi)
+                      return (
+                        <p style={{ color: "#888", margin: "4px 0 10px" }}>
+                          Choisissez d'abord un projet.
+                        </p>
+                      );
+                    const instChoisi = instanceProjet(projetChoisi.id);
+                    const pris = rangsPris(instChoisi);
+                    const investisseur = joueurs.find(
+                      (j) => j.id === bkInvJoueurId
+                    );
+                    return (
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "8px",
+                          flexWrap: "wrap",
+                          margin: "4px 0 12px"
+                        }}
+                      >
+                        {placesProjet(projetChoisi).map((pl) => {
+                          const occupe = pris[pl.rang];
+                          const nomOccupant = occupe
+                            ? (
+                                joueurs.find((j) => j.id === occupe.joueurId) ||
+                                {}
+                              ).nom || "quelqu'un"
+                            : null;
+                          const tropCher =
+                            investisseur && investisseur.solde < pl.mise;
+                          const choisie = String(bkInvRang) === String(pl.rang);
+                          return (
+                            <button
+                              key={pl.rang}
+                              onClick={() => setBkInvRang(String(pl.rang))}
+                              disabled={!!occupe}
+                              style={{
+                                background: occupe
+                                  ? "#2a2a2a"
+                                  : choisie
+                                    ? "#6A1B9A"
+                                    : "#1a1a1a",
+                                color: occupe ? "#777" : "#fff",
+                                border: `2px solid ${
+                                  choisie
+                                    ? "#CE93D8"
+                                    : occupe
+                                      ? "#333"
+                                      : tropCher
+                                        ? "#7f1d1d"
+                                        : "#4A148C"
+                                }`,
+                                borderRadius: "10px",
+                                padding: "10px 14px",
+                                minWidth: "130px",
+                                textAlign: "center",
+                                cursor: occupe ? "not-allowed" : "pointer"
+                              }}
+                            >
+                              <div style={{ fontSize: "0.78rem", color: "#bbb" }}>
+                                {libelleRang(pl.rang)} investisseur
+                              </div>
+                              <div
+                                style={{ fontSize: "1.2rem", fontWeight: "bold" }}
+                              >
+                                {pl.mise}$
+                              </div>
+                              <div
+                                style={{ fontSize: "0.85rem", color: "#81C784" }}
+                              >
+                                +{pl.gain} %
+                              </div>
+                              {occupe ? (
+                                <div style={{ fontSize: "0.72rem" }}>
+                                  prise — {nomOccupant}
+                                </div>
+                              ) : tropCher ? (
+                                <div
+                                  style={{ fontSize: "0.72rem", color: "#EF5350" }}
+                                >
+                                  solde insuffisant
+                                </div>
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
 
                   <button
                     onClick={() => {
-                      investir(bkInvJoueurId, bkInvProjetId, bkInvMontant);
-                      setBkInvMontant("");
+                      investir(bkInvJoueurId, bkInvProjetId, bkInvRang);
+                      setBkInvRang("");
                     }}
                     className="checkbox-btn"
                     style={{ background: "#9C27B0" }}
@@ -8587,6 +8842,7 @@
                   const inst = instanceProjet(projetPresente.id);
                   const total = totalInvesti(inst);
                   const nb = inst ? (inst.investisseurs || []).length : 0;
+                  const prisVitrine = rangsPris(inst);
                   return (
                     <div style={carte}>
                       {projetsDuBloc.length > 1 && (
@@ -8652,33 +8908,47 @@
                         </div>
                       </div>
                       <h3 style={{ color: "#CE93D8", marginTop: "22px" }}>
-                        Bénéfice selon votre rang
+                        Les places — à vous de choisir la vôtre
                       </h3>
+                      {/* La mise de chaque place est fixée : on montre ce
+                          qu'elle coûte, ce qu'elle rapporte, et si elle est
+                          encore libre. */}
                       <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-                        {(projetPresente.gains || []).map((g, i) => (
-                          <div
-                            key={i}
-                            style={{
-                              background: i < nb ? "#333" : "#1B5E20",
-                              padding: "14px 18px",
-                              borderRadius: "10px",
-                              minWidth: "110px",
-                              textAlign: "center",
-                              opacity: i < nb ? 0.5 : 1
-                            }}
-                          >
-                            <div style={{ fontSize: "0.8rem", color: "#bbb" }}>
-                              {i + 1}
-                              {i === 0 ? "er" : "e"} investisseur
+                        {placesProjet(projetPresente).map((pl) => {
+                          const occupe = prisVitrine[pl.rang];
+                          return (
+                            <div
+                              key={pl.rang}
+                              style={{
+                                background: occupe ? "#333" : "#1B5E20",
+                                padding: "14px 18px",
+                                borderRadius: "10px",
+                                minWidth: "140px",
+                                textAlign: "center",
+                                opacity: occupe ? 0.5 : 1
+                              }}
+                            >
+                              <div style={{ fontSize: "0.8rem", color: "#ddd" }}>
+                                {libelleRang(pl.rang)} investisseur
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: "1.5rem",
+                                  fontWeight: "bold",
+                                  margin: "4px 0"
+                                }}
+                              >
+                                {pl.mise}$
+                              </div>
+                              <div style={{ fontSize: "1.15rem", color: "#A5D6A7" }}>
+                                +{pl.gain} %
+                              </div>
+                              <div style={{ fontSize: "0.75rem", color: "#bbb" }}>
+                                {occupe ? "déjà prise" : "libre"}
+                              </div>
                             </div>
-                            <div style={{ fontSize: "1.6rem", fontWeight: "bold" }}>
-                              +{g} %
-                            </div>
-                            {i < nb && (
-                              <div style={{ fontSize: "0.7rem" }}>déjà pris</div>
-                            )}
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   );
@@ -9539,7 +9809,8 @@
                     const inst = instanceProjet(pr.id);
                     if (inst && inst.statut !== "ouvert") return null;
                     const total = totalInvesti(inst);
-                    const nb = inst ? (inst.investisseurs || []).length : 0;
+                    const pris = rangsPris(inst);
+                    const libres = placesProjet(pr).filter((pl) => !pris[pl.rang]);
                     return (
                       <div
                         key={pr.id}
@@ -9553,8 +9824,12 @@
                       >
                         <strong>💼 {pr.titre}</strong>
                         <div style={{ color: "#bbb" }}>
-                          {total} / {pr.montantRequis}$ · {nb} /{" "}
-                          {pr.investisseursMax} investisseurs
+                          {total} / {pr.montantRequis}$ ·{" "}
+                          {libres.length
+                            ? `places libres : ${libres
+                                .map((pl) => `${libelleRang(pl.rang)} ${pl.mise}$`)
+                                .join(" · ")}`
+                            : "toutes les places sont prises"}
                         </div>
                       </div>
                     );
