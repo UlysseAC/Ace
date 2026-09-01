@@ -68,7 +68,7 @@
           id: "paradis_fiscal",
           nom: "Paradis Fiscal",
           definition:
-            "Masque votre identité au classement : votre place reste affichée, mais plus votre nom ni votre solde.",
+            "Vous disparaissez du classement affiché. Les autres gardent leur numéro : on devine qu'il y a quelqu'un à votre place, sans savoir qui.",
           phraseAnim: "Disparition dans les îles..."
         },
         {
@@ -1722,16 +1722,16 @@
           paradisActif: j.paradisFiscal && j.finParadis > timeNow
         }));
         const joueursVisibles = joueursActifs.filter((j) => !j.paradisActif);
-        // Le paradis fiscal masque une identité, pas une place. Si l'on
-        // retirait la ligne, tous ceux d'en dessous gagneraient un rang sans
-        // avoir rien fait — et la salle verrait bien lequel manque.
+        // Les rangs se comptent sur TOUS les joueurs, y compris ceux qui se
+        // cachent au paradis fiscal. Leur ligne, elle, ne s'affiche pas : le
+        // numéro manquant dit à la salle qu'il y a quelqu'un à cette place,
+        // sans dire qui. Et personne d'autre ne change de numéro.
         const classementActuel = [...joueursActifs].sort(
           (a, b) => b.solde - a.solde
         );
-        const classementAffiche = classementActuel.slice(
-          0,
-          configGlobale.limitTop
-        );
+        const classementAffiche = classementActuel
+          .filter((j) => !j.paradisActif)
+          .slice(0, configGlobale.limitTop);
         const nbParadisActifs = joueursActifs.filter(
           (j) => j.paradisActif
         ).length;
@@ -9178,9 +9178,12 @@
                     {[...classementAffiche]
                       .sort((a, b) => String(a.id).localeCompare(String(b.id)))
                       .map((j) => {
+                        // La position sert à placer la ligne dans la page ;
+                        // le rang, lui, est le vrai numéro au classement.
                         const i = classementAffiche.findIndex(
                           (x) => x.id === j.id
                         );
+                        const rang = rangsReels[j.id];
                         const surligne = surlignesClassement[j.id];
                         return (
                       <div
@@ -9202,27 +9205,21 @@
                               ? "#1B5E20"
                               : surligne === "descend"
                                 ? "#7f1d1d"
-                                : i === 0
+                                : rang === 0
                                   ? "#332b00"
                                   : "#333",
                           borderRadius: "8px",
                           fontSize: "1.3rem",
-                          borderLeft: i === 0 ? "5px solid #FFD700" : "none",
+                          // L'or est pour le vrai premier. Si celui-là s'est
+                          // isolé, la ligne du dessus n'y a pas droit.
+                          borderLeft: rang === 0 ? "5px solid #FFD700" : "none",
                           transition:
                             "transform 550ms cubic-bezier(.4,0,.2,1), background 400ms"
                         }}
                       >
                         <span>
-                          <strong>#{i + 1}</strong>{" "}
-                          {j.paradisActif ? (
-                            <span style={{ color: "#FF9800", letterSpacing: "2px" }}>
-                              🌴 ??? ???
-                            </span>
-                          ) : configGlobale.topAffiche === "id" ? (
-                            j.id
-                          ) : (
-                            j.nom
-                          )}
+                          <strong>#{(rang === undefined ? i : rang) + 1}</strong>{" "}
+                          {configGlobale.topAffiche === "id" ? j.id : j.nom}
                           {(() => {
                             const bouge = bougesClassement[j.id];
                             if (!bouge || bouge.jusqua <= timeNow) return null;
@@ -9243,12 +9240,8 @@
                             );
                           })()}
                         </span>
-                        <strong
-                          style={{ color: j.paradisActif ? "#FF9800" : "#4CAF50" }}
-                        >
-                          {/* Le solde aussi : à un franc près, la salle
-                              retrouverait en trois secondes qui se cache. */}
-                          {j.paradisActif ? "••• $" : `${j.solde.toLocaleString()} $`}
+                        <strong style={{ color: "#4CAF50" }}>
+                          {j.solde.toLocaleString()} $
                         </strong>
                       </div>
                         );
