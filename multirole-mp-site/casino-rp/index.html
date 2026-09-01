@@ -62,6 +62,10 @@
           nom: "Le Veinard",
           definition:
             "Usage unique : quand vous rendez vos jetons au croupier, réduit votre perte de 50% ou augmente votre gain de 5%.",
+          modeEmploi:
+            "Armez-la depuis votre deck AVANT de vous asseoir à une table.\n" +
+            "Elle ne se consomme qu'au moment où vous rendez vos jetons au croupier : si vous avez perdu, votre perte est réduite de moitié ; si vous avez gagné, votre gain augmente. Tant qu'elle n'a pas joué, elle reste dans votre deck.\n\n" +
+            "À savoir : tant que vous détenez cette carte, personne ne peut parier sur vous.",
           phraseAnim: "La chance sourit !"
         },
         {
@@ -69,12 +73,19 @@
           nom: "Paradis Fiscal",
           definition:
             "Vous disparaissez du classement affiché. Les autres gardent leur numéro : on devine qu'il y a quelqu'un à votre place, sans savoir qui.",
+          modeEmploi:
+            "Activez-la depuis votre deck. Vous quittez le classement de l'écran de la salle pour la durée réglée par l'organisateur.\n\n" +
+            "Les autres joueurs gardent leur numéro : si vous étiez premier, la liste commence au numéro 2. La salle devine donc qu'il y a quelqu'un à votre place, sans savoir qui.\n\n" +
+            "Impossible à activer si vous avez des jetons en jeu : rendez-les d'abord à votre croupier.",
           phraseAnim: "Disparition dans les îles..."
         },
         {
           id: "controle_fiscal",
           nom: "Contrôle Fiscal",
           definition: "Saisit des fonds selon le lancer de dé.",
+          modeEmploi:
+            "Activez-la depuis votre deck, choisissez votre cible et lancez le dé. La face tirée décide de la part que vous lui prenez.\n\n" +
+            "Deux limites : on ne peut pas viser quelqu'un qui s'est isolé au paradis fiscal, et l'attaque est bloquée juste avant et juste après une course de chevaux — la salle doit regarder la piste, pas deux animations à la fois.",
           phraseAnim: "Le fisc frappe à la porte !"
         },
         {
@@ -82,6 +93,10 @@
           nom: "Délit d'initié",
           definition:
             "Usage unique : vous révèle le vainqueur de la prochaine course dont les paris sont encore ouverts, et l'heure de son départ. À vous d'aller miser chez le bookmaker.",
+          modeEmploi:
+            "Activez-la depuis votre deck. Elle vous donne le vainqueur de la prochaine course encore ouverte aux paris, et dans combien de temps elle part. Si les paris de la course en cours sont déjà clos, elle vous donne la suivante.\n\n" +
+            "Le tuyau reste affiché sur cette borne jusqu'à ce que la course ait eu lieu : vous pouvez le relire. Personne d'autre ne le voit — la salle apprend seulement qu'une enveloppe a changé de mains.\n\n" +
+            "À vous de filer chez le bookmaker avant le top départ.",
           phraseAnim: "Une enveloppe change de mains..."
         }
       ];
@@ -4627,6 +4642,9 @@
                           Supprimer
                         </button>
                       </div>
+                      <label style={{ fontSize: "0.75rem", color: "#aaa" }}>
+                        Résumé — une ligne, en tête de la carte dans le deck
+                      </label>
                       <input
                         type="text"
                         placeholder="Définition"
@@ -4638,6 +4656,32 @@
                         }}
                         style={{ padding: "5px" }}
                       />
+                      <label style={{ fontSize: "0.75rem", color: "#aaa" }}>
+                        Mode d'emploi — le texte que le joueur lit dans son
+                        deck. Sautez des lignes, elles sont conservées.
+                      </label>
+                      <textarea
+                        rows="5"
+                        placeholder="Comment s'en sert-on, et à quoi sert-elle ?"
+                        value={c.modeEmploi || ""}
+                        onChange={(e) =>
+                          setCartesJeu(
+                            cartesJeu.map((x, i) =>
+                              i === idx ? { ...x, modeEmploi: e.target.value } : x
+                            )
+                          )
+                        }
+                        style={{
+                          padding: "6px",
+                          fontFamily: "inherit",
+                          fontSize: "0.9rem",
+                          borderLeft: "3px solid #8D6E63",
+                          resize: "vertical"
+                        }}
+                      />
+                      <label style={{ fontSize: "0.75rem", color: "#aaa" }}>
+                        Phrase pour l'écran de la salle, à l'activation
+                      </label>
                       <input
                         type="text"
                         placeholder="Phrase pour l'écran d'affichage"
@@ -4652,6 +4696,47 @@
                           borderLeft: "3px solid #2196F3"
                         }}
                       />
+                      {/* Les textes livrés avec le jeu, carte par carte : une
+                          partie enregistrée avant une refonte garde les
+                          anciens, et on ne veut pas écraser les vôtres en
+                          bloc. */}
+                      {CARTES_LIVREES.some(
+                        (l) =>
+                          l.id === c.id &&
+                          (l.definition !== c.definition ||
+                            (l.modeEmploi || "") !== (c.modeEmploi || ""))
+                      ) && (
+                        <button
+                          onClick={() => {
+                            const livree = CARTES_LIVREES.find(
+                              (l) => l.id === c.id
+                            );
+                            setCartesJeu(
+                              cartesJeu.map((x, i) =>
+                                i === idx
+                                  ? {
+                                      ...x,
+                                      definition: livree.definition,
+                                      modeEmploi: livree.modeEmploi
+                                    }
+                                  : x
+                              )
+                            );
+                          }}
+                          style={{
+                            alignSelf: "flex-start",
+                            background: "transparent",
+                            color: "#80CBC4",
+                            border: "1px solid #00695C",
+                            borderRadius: "4px",
+                            padding: "4px 10px",
+                            fontSize: "0.78rem",
+                            cursor: "pointer"
+                          }}
+                        >
+                          ↺ Remettre les textes livrés pour cette carte
+                        </button>
+                      )}
                     </div>
                   ))}
                   <button
@@ -6202,6 +6287,25 @@
                             >
                               {c.definition}
                             </p>
+                            {/* Le mode d'emploi, tel que l'organisateur l'a
+                                écrit : les sauts de ligne sont conservés. */}
+                            {c.modeEmploi ? (
+                              <div
+                                style={{
+                                  background: "#1a1a1a",
+                                  borderLeft: "3px solid #8D6E63",
+                                  borderRadius: "6px",
+                                  padding: "10px 12px",
+                                  margin: "8px 0",
+                                  fontSize: "0.85rem",
+                                  color: "#ddd",
+                                  whiteSpace: "pre-line",
+                                  lineHeight: 1.5
+                                }}
+                              >
+                                {c.modeEmploi}
+                              </div>
+                            ) : null}
 
                             {c.id === "controle_fiscal" ? (
                               <button
