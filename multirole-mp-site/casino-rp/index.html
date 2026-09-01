@@ -32,6 +32,22 @@
     <script type="text/babel">
       // Couleur de chaque type de face. Partagée par le tirage (qui l'envoie
       // avec le résultat) et par l'animation (qui fait défiler les faces).
+      // Ce que fait une face, en une phrase. L'organisateur peut écrire la
+      // sienne dans l'admin ; sinon on la déduit de la face elle-même, ce qui
+      // marche aussi sur une partie enregistrée avant ce champ.
+      const texteFace = (face) => {
+        if (!face) return "";
+        if (face.note) return face.note;
+        const pct = nombreSur(face.pct, 0);
+        if (face.type === "Rouge")
+          return `L'attaque échoue : ${pct} % de votre solde passent à votre cible.`;
+        if (face.type === "Vert")
+          return `Attaque réussie : vous saisissez ${pct} % du solde de votre cible.`;
+        if (face.type === "Don")
+          return `Solidarité : ${pct} % de chacun des deux soldes partent aux plus démunis.`;
+        return "";
+      };
+
       const COULEURS_FACE = {
         Rouge: "#f44336",
         Vert: "#4CAF50",
@@ -1705,6 +1721,22 @@
           { numero: "3", nom: "Croupier 3" }
         ]);
 
+        // Les jeux qu'on peut tenir. Le croupier annonce le sien en ouvrant
+        // sa table, et l'on retient à quel jeu chaque joueur est assis.
+        // « Paris autorisés » décide si la salle peut parier sur lui pendant
+        // qu'il y joue : au poker il joue contre les autres, un pari sur son
+        // résultat reviendrait à parier sur une partie qu'on peut arranger.
+        const [jeuxCroupier, setJeuxCroupier] = useEtatPartage("jeuxCroupier", [
+          { id: "poker", nom: "Poker", parisAutorises: false },
+          { id: "blackjack", nom: "Blackjack", parisAutorises: true },
+          { id: "roulette", nom: "Roulette", parisAutorises: true }
+        ]);
+
+        const jeuNomme = (nom) =>
+          (jeuxCroupier || []).find(
+            (x) => String(x.nom).toLowerCase() === String(nom || "").toLowerCase()
+          ) || null;
+
         // --- TABLE 9 : PARIS SUR LES JOUEURS ---
         const [parisJoueurs, setParisJoueurs] = useEtatPartage("parisJoueurs", []);
 
@@ -1767,7 +1799,7 @@
         const [bkInvRang, setBkInvRang] = React.useState("");
 
         // États Croupier
-        const [tableCroupier, setTableCroupier] = React.useState("Roulette");
+        const [tableCroupier, setTableCroupier] = React.useState("");
         const [joueurCroupierId, setJoueurCroupierId] = React.useState("steph");
         const [saisieCroupierManuelle, setSaisieCroupierManuelle] =
           React.useState("");
@@ -2157,6 +2189,7 @@
           totalPenalites: 0,
           jetonsEnJeu: 0,
           croupierVendeur: null,
+          jeuEnCours: null,
           veinardActif: false,
           achatsBoutique: 0,
           argentVole: 0,
@@ -2535,6 +2568,12 @@
             return `${cible.nom} n'a pas de jetons en jeu : aucune cote n'est calculable.`;
           if ((cible.deck || []).some((c) => c.id === "veinard"))
             return `${cible.nom} détient une carte Veinard : les paris sur ce joueur sont interdits.`;
+          // Certaines tables se jouent entre joueurs : parier sur le résultat
+          // de quelqu'un qui y est assis, c'est parier sur une partie qui
+          // peut s'arranger.
+          const jeu = jeuNomme(cible.jeuEnCours);
+          if (jeu && jeu.parisAutorises === false)
+            return `${cible.nom} est à la table de ${jeu.nom} : les paris y sont interdits.`;
           return null;
         };
 
@@ -3301,22 +3340,10 @@
           setCodeManuel("");
         };
 
-        const defausserCarte = (carteId) => {
-          setJoueurs((prev) =>
-            prev.map((j) =>
-              j.id === joueurActuel.id
-                ? {
-                    ...j,
-                    deck: j.deck.filter((c) => c.id !== carteId),
-                    veinardActif:
-                      carteId === "veinard" ? false : j.veinardActif,
-                    historique: [`Carte défaussée`, ...j.historique]
-                  }
-                : j
-            )
-          );
-          alert("Carte défaussée avec succès.");
-        };
+        // Une carte reçue ne se jette plus : elle se joue, ou elle reste
+        // en main jusqu'au bout de la soirée. Se débarrasser d'une carte
+        // gênante — le Veinard, qui interdit les paris sur son porteur —
+        // était une échappatoire, pas un coup.
 
         // ================= LOGIQUE CROUPIER =================
         const totalCroupier =
@@ -3363,6 +3390,9 @@
                       // On retient qui a vendu : c'est ce croupier qu'il
                       // faudra prévenir si un pari est pris sur ce joueur.
                       croupierVendeur: croupierIdentifie || j.croupierVendeur || null,
+                      // Le jeu auquel il est assis : c'est lui qui décide si
+                      // la salle peut parier sur son résultat.
+                      jeuEnCours: tableCroupier || null,
                       historique: [
                         `Croupier ${croupierIdentifie ? "n°" + croupierIdentifie + " " : ""}[${tableCroupier}] : achat de ${montant}$ de jetons`,
                         ...j.historique
@@ -3506,6 +3536,7 @@
                 totalJeux: j.totalJeux + credite,
                 jetonsEnJeu: 0,
                 croupierVendeur: null,
+                jeuEnCours: null,
                 veinardActif: false,
                 deck:
                   aLeVeinard && bonus > 0
@@ -3630,7 +3661,8 @@
             phraseAction: ev.phraseAction,
             face: `${depart.pct}%`,
             couleur: depart.couleur,
-            phraseResultat: ev.phraseResultat
+            phraseResultat: ev.phraseResultat,
+            noteFace: ev.noteFace || ""
           });
           setAnimationActive(true);
           setEstEnRoulementFiscal(true);
@@ -3756,6 +3788,9 @@
             facePct: faceTiree.pct,
             couleur: COULEURS_FACE[faceTiree.type],
             phraseResultat: texteResultat,
+            // La note de la face tirée : la salle entend le résultat, le
+            // joueur lit la règle qui vient de s'appliquer.
+            noteFace: texteFace(faceTiree),
             faces: deConfig.faces.map((f) => ({ pct: f.pct, type: f.type })),
             secRoulement,
             secArret
@@ -4137,7 +4172,11 @@
                       if (soireeDebut) {
                         if (
                           !confirm(
-                            "La soirée a déjà démarré. Remettre les horloges à zéro ? Les courses et les blocs d'investissement repartiront de maintenant."
+                            "La soirée a déjà démarré. Remettre les horloges à zéro ?\n\n" +
+                              "Les courses repartent de la n°1 et les blocs d'investissement du bloc 1. " +
+                              "Les projets déjà financés, réussis ou échoués redeviennent ouverts, " +
+                              "toutes leurs places libres.\n\n" +
+                              "Les soldes des joueurs ne bougent pas."
                           )
                         )
                           return;
@@ -4159,6 +4198,12 @@
                           });
                         }
                       }
+                      // On repart au bloc 1 : les projets de ce bloc-là
+                      // sont pourtant restés financés, réussis ou échoués de
+                      // la fois précédente, et personne ne pouvait plus y
+                      // prendre de place. On efface les prises en cours pour
+                      // que les projets se rejouent.
+                      setInvestissements([]);
                       setSoireeDebut(Date.now());
                     }}
                     style={{
@@ -4357,6 +4402,35 @@
                       />
                     </label>
 
+                    {/* Les montants des gros boutons de la table du
+                        croupier : ils changent d'une soirée à l'autre selon
+                        la valeur des jetons. */}
+                    <label style={{ gridColumn: "span 2" }}>
+                      Boutons tactiles du croupier ($), séparés par des
+                      virgules :{" "}
+                      <input
+                        type="text"
+                        value={(configGlobale.raccourcisTactiles || []).join(
+                          ", "
+                        )}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            raccourcisTactiles: e.target.value
+                              .split(",")
+                              .map((x) => x.trim())
+                              .filter((x) => x !== "")
+                              .map(Number)
+                              .filter((n) => Number.isFinite(n) && n > 0)
+                          })
+                        }
+                        style={{ width: "100%", padding: "5px" }}
+                      />
+                      <span style={{ color: "#777", fontSize: "0.78rem" }}>
+                        Un bouton « +montant$ » par valeur, dans cet ordre.
+                      </span>
+                    </label>
+
                     <label>
                       Déconnexion borne après (s) :{" "}
                       <input
@@ -4526,14 +4600,18 @@
                           <div
                             key={fIndex}
                             style={{
-                              display: "flex",
-                              gap: "5px",
-                              alignItems: "center",
                               background: "#333",
                               padding: "5px",
                               borderRadius: "4px"
                             }}
                           >
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: "5px",
+                                alignItems: "center"
+                              }}
+                            >
                             <span>F{fIndex + 1}</span>
                             <select
                               value={face.type}
@@ -4572,6 +4650,42 @@
                               }}
                             />{" "}
                             %
+                            </div>
+                            {/* Ce que fait cette face, en clair. Le joueur le
+                                lit à la borne avant de lancer, et le revoit
+                                quand le dé s'arrête dessus. */}
+                            <input
+                              type="text"
+                              placeholder={texteFace({
+                                type: face.type,
+                                pct: face.pct
+                              })}
+                              value={face.note || ""}
+                              onChange={(e) => {
+                                const t = desConfig.map((d, k) =>
+                                  k !== dIndex
+                                    ? d
+                                    : {
+                                        ...d,
+                                        faces: d.faces.map((f, m) =>
+                                          m === fIndex
+                                            ? { ...f, note: e.target.value }
+                                            : f
+                                        )
+                                      }
+                                );
+                                setDesConfig(t);
+                              }}
+                              style={{
+                                width: "100%",
+                                marginTop: "5px",
+                                padding: "4px",
+                                background: "#222",
+                                color: "#ddd",
+                                border: "1px solid #555",
+                                fontSize: "0.8rem"
+                              }}
+                            />
                           </div>
                         ))}
                       </div>
@@ -6076,6 +6190,18 @@
                       }}
                     >
                       {infosAnimation.phraseResultat}
+                      {infosAnimation.noteFace ? (
+                        <div
+                          style={{
+                            fontSize: "0.95rem",
+                            fontWeight: "normal",
+                            color: "#ccc",
+                            marginTop: "10px"
+                          }}
+                        >
+                          {infosAnimation.noteFace}
+                        </div>
+                      ) : null}
                     </h3>
                   )}
                 </div>
@@ -6526,19 +6652,6 @@
                               <strong style={{ color: "#9C27B0" }}>
                                 {c.nom}
                               </strong>
-                              <button
-                                onClick={() => defausserCarte(c.id)}
-                                style={{
-                                  background: "transparent",
-                                  border: "none",
-                                  color: "#f44336",
-                                  cursor: "pointer",
-                                  textDecoration: "underline",
-                                  fontSize: "0.8rem"
-                                }}
-                              >
-                                Défausser
-                              </button>
                             </div>
                             <p
                               style={{
@@ -6896,7 +7009,7 @@
                             <div
                               key={i}
                               style={{
-                                padding: "5px 8px",
+                                padding: "6px 9px",
                                 background:
                                   f.type === "Rouge"
                                     ? "#f44336"
@@ -6905,10 +7018,25 @@
                                       : "#2196F3",
                                 borderRadius: "4px",
                                 fontSize: "0.8rem",
-                                fontWeight: "bold"
+                                fontWeight: "bold",
+                                textAlign: "left",
+                                maxWidth: "190px"
                               }}
                             >
                               {f.type} {f.pct}%
+                              {/* Ce que fait la face, écrit dans l'admin :
+                                  le joueur sait sur quoi il tombe avant de
+                                  lancer, pas seulement une couleur. */}
+                              <div
+                                style={{
+                                  fontWeight: "normal",
+                                  fontSize: "0.75rem",
+                                  marginTop: "3px",
+                                  lineHeight: 1.35
+                                }}
+                              >
+                                {texteFace(f)}
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -7665,6 +7793,88 @@
                   style={{ background: "#2E7D32", marginTop: "6px" }}
                 >
                   + Ajouter un croupier
+                </button>
+
+                {/* Les jeux qu'un croupier peut tenir. Décocher « paris »
+                    interdit à la salle de parier sur quiconque est assis à
+                    cette table — le poker se joue entre joueurs, un pari sur
+                    le résultat de l'un d'eux s'arrange trop facilement. */}
+                <h4 style={{ color: "#CE93D8", margin: "22px 0 8px" }}>
+                  Les jeux des tables
+                </h4>
+                {(jeuxCroupier || []).map((x, i) => (
+                  <div
+                    key={x.id}
+                    style={{
+                      display: "flex",
+                      gap: "10px",
+                      alignItems: "center",
+                      marginBottom: "6px",
+                      flexWrap: "wrap"
+                    }}
+                  >
+                    <input
+                      value={x.nom}
+                      onChange={(e) =>
+                        setJeuxCroupier(
+                          jeuxCroupier.map((y, k) =>
+                            k === i ? { ...y, nom: e.target.value } : y
+                          )
+                        )
+                      }
+                      style={{ padding: "8px", flex: 1, minWidth: "150px" }}
+                    />
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        fontSize: "0.85rem",
+                        color: x.parisAutorises === false ? "#EF5350" : "#81C784"
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={x.parisAutorises !== false}
+                        onChange={(e) =>
+                          setJeuxCroupier(
+                            jeuxCroupier.map((y, k) =>
+                              k === i
+                                ? { ...y, parisAutorises: e.target.checked }
+                                : y
+                            )
+                          )
+                        }
+                      />
+                      {x.parisAutorises === false
+                        ? "paris interdits"
+                        : "paris autorisés"}
+                    </label>
+                    <button
+                      onClick={() =>
+                        setJeuxCroupier(jeuxCroupier.filter((_, k) => k !== i))
+                      }
+                      style={{ padding: "8px 12px", background: "#7f1d1d", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer" }}
+                    >
+                      X
+                    </button>
+                  </div>
+                ))}
+                <button
+                  onClick={() =>
+                    setJeuxCroupier([
+                      ...(jeuxCroupier || []),
+                      {
+                        id: `jeu-${Date.now()}`,
+                        nom: "Nouveau jeu",
+                        parisAutorises: true
+                      }
+                    ])
+                  }
+                  className="checkbox-btn"
+                  style={{ background: "#2E7D32", marginTop: "6px" }}
+                >
+                  + Ajouter un jeu
                 </button>
               </div>
 
@@ -9211,10 +9421,33 @@
                     </option>
                   ))}
                 </select>
+                {/* Le jeu tenu à cette table : il s'inscrit dans l'historique
+                    des joueurs servis, et décide si l'on peut parier sur eux
+                    pendant qu'ils y jouent. */}
+                <p style={{ color: "#aaa", marginTop: "16px" }}>
+                  Le jeu de votre table :
+                </p>
+                <select
+                  value={tableCroupier}
+                  onChange={(e) => setTableCroupier(e.target.value)}
+                  style={{ width: "100%", padding: "12px", fontSize: "1.1rem" }}
+                >
+                  <option value="">-- Choisir --</option>
+                  {(jeuxCroupier || []).map((x) => (
+                    <option key={x.id} value={x.nom}>
+                      {x.nom}
+                      {x.parisAutorises === false ? " (paris interdits)" : ""}
+                    </option>
+                  ))}
+                </select>
                 <button
                   onClick={() => {
                     if (!saisieNumeroCroupier) {
                       alert("Choisissez votre numéro.");
+                      return;
+                    }
+                    if (!tableCroupier) {
+                      alert("Choisissez le jeu de votre table.");
                       return;
                     }
                     setCroupierIdentifie(saisieNumeroCroupier);
@@ -9269,6 +9502,21 @@
               >
                 <h1 style={{ color: "#9C27B0", margin: 0 }}>
                   🎲 Croupier n°{croupierIdentifie}
+                  {tableCroupier ? (
+                    <span
+                      style={{
+                        color: "#CE93D8",
+                        fontSize: "1.1rem",
+                        marginLeft: "10px"
+                      }}
+                    >
+                      — {tableCroupier}
+                      {jeuNomme(tableCroupier) &&
+                      jeuNomme(tableCroupier).parisAutorises === false
+                        ? " · paris interdits"
+                        : ""}
+                    </span>
+                  ) : null}
                 </h1>
                 <button
                   onClick={() => {
@@ -9283,6 +9531,7 @@
                     }
                     setCroupierIdentifie("");
                     setSaisieNumeroCroupier("");
+                    setTableCroupier("");
                   }}
                   style={{
                     padding: "8px 14px",
@@ -9476,7 +9725,7 @@
                     gap: "10px"
                   }}
                 >
-                  {configGlobale.raccourcisTactiles.map((v, i) => (
+                  {(configGlobale.raccourcisTactiles || []).map((v, i) => (
                     <button
                       key={i}
                       onClick={() => setCroupierStack([...croupierStack, v])}
@@ -9854,6 +10103,18 @@
                       }}
                     >
                       {infosAnimation.phraseResultat}
+                      {infosAnimation.noteFace ? (
+                        <div
+                          style={{
+                            fontSize: "0.95rem",
+                            fontWeight: "normal",
+                            color: "#ccc",
+                            marginTop: "10px"
+                          }}
+                        >
+                          {infosAnimation.noteFace}
+                        </div>
+                      ) : null}
                     </h3>
                   )}
                 </div>
