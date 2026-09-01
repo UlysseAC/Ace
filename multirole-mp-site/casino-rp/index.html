@@ -67,7 +67,8 @@
         {
           id: "paradis_fiscal",
           nom: "Paradis Fiscal",
-          definition: "Masque votre position du classement.",
+          definition:
+            "Masque votre identité au classement : votre place reste affichée, mais plus votre nom ni votre solde.",
           phraseAnim: "Disparition dans les îles..."
         },
         {
@@ -1721,7 +1722,10 @@
           paradisActif: j.paradisFiscal && j.finParadis > timeNow
         }));
         const joueursVisibles = joueursActifs.filter((j) => !j.paradisActif);
-        const classementActuel = [...joueursVisibles].sort(
+        // Le paradis fiscal masque une identité, pas une place. Si l'on
+        // retirait la ligne, tous ceux d'en dessous gagneraient un rang sans
+        // avoir rien fait — et la salle verrait bien lequel manque.
+        const classementActuel = [...joueursActifs].sort(
           (a, b) => b.solde - a.solde
         );
         const classementAffiche = classementActuel.slice(
@@ -9210,7 +9214,15 @@
                       >
                         <span>
                           <strong>#{i + 1}</strong>{" "}
-                          {configGlobale.topAffiche === "id" ? j.id : j.nom}
+                          {j.paradisActif ? (
+                            <span style={{ color: "#FF9800", letterSpacing: "2px" }}>
+                              🌴 ??? ???
+                            </span>
+                          ) : configGlobale.topAffiche === "id" ? (
+                            j.id
+                          ) : (
+                            j.nom
+                          )}
                           {(() => {
                             const bouge = bougesClassement[j.id];
                             if (!bouge || bouge.jusqua <= timeNow) return null;
@@ -9231,8 +9243,12 @@
                             );
                           })()}
                         </span>
-                        <strong style={{ color: "#4CAF50" }}>
-                          {j.solde.toLocaleString()} $
+                        <strong
+                          style={{ color: j.paradisActif ? "#FF9800" : "#4CAF50" }}
+                        >
+                          {/* Le solde aussi : à un franc près, la salle
+                              retrouverait en trois secondes qui se cache. */}
+                          {j.paradisActif ? "••• $" : `${j.solde.toLocaleString()} $`}
                         </strong>
                       </div>
                         );
