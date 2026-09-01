@@ -7941,6 +7941,36 @@
                     ))}
                   </select>
 
+                  {/* Le barème sous les yeux du bookmaker au moment de
+                      prendre le pari : c'est lui qui l'annonce au joueur. */}
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "8px",
+                      flexWrap: "wrap",
+                      margin: "4px 0 8px"
+                    }}
+                  >
+                    {rapportsCourse(configBookmaker).map((r, i) => (
+                      <span
+                        key={`bareme-${i}`}
+                        style={{
+                          background: "#1a1a1a",
+                          border: "1px solid #37474F",
+                          borderRadius: "8px",
+                          padding: "4px 10px",
+                          fontSize: "0.85rem"
+                        }}
+                      >
+                        {i + 1}
+                        {i === 0 ? "er" : "e"}{" "}
+                        <strong style={{ color: r > 0 ? "#4CAF50" : "#EF5350" }}>
+                          ×{r}
+                        </strong>
+                      </span>
+                    ))}
+                  </div>
+
                   <label>Le cheval</label>
                   <select
                     value={bkCourseChevalId}
@@ -8551,7 +8581,46 @@
                         >
                           × {rapportsCourse(configBookmaker)[0] || 0}
                         </div>
+                        <div style={{ color: "#999", fontSize: "0.85rem" }}>
+                          s'il gagne
+                        </div>
                       </div>
+                    ))}
+                  </div>
+                  {/* Toutes les places paient, pas seulement la première :
+                      la salle doit le voir avant de miser, pas le découvrir
+                      à l'arrivée. */}
+                  <div
+                    style={{
+                      marginTop: "18px",
+                      display: "flex",
+                      gap: "10px",
+                      flexWrap: "wrap",
+                      alignItems: "center"
+                    }}
+                  >
+                    <span style={{ color: "#bbb", fontSize: "1.05rem" }}>
+                      Et selon la place à l'arrivée :
+                    </span>
+                    {rapportsCourse(configBookmaker).map((r, i) => (
+                      <span
+                        key={`rapport-${i}`}
+                        style={{
+                          background: r > 0 ? "#1a1a1a" : "#221414",
+                          border: `1px solid ${r > 0 ? "#455A64" : "#5d2a2a"}`,
+                          borderRadius: "10px",
+                          padding: "8px 14px",
+                          fontSize: "1.15rem"
+                        }}
+                      >
+                        <strong>
+                          {i + 1}
+                          {i === 0 ? "er" : "e"}
+                        </strong>{" "}
+                        <strong style={{ color: r > 0 ? "#4CAF50" : "#EF5350" }}>
+                          ×{r}
+                        </strong>
+                      </span>
                     ))}
                   </div>
                   <p style={{ color: "#888", marginTop: "18px" }}>
@@ -9195,10 +9264,12 @@
                               <span style={{ flex: 1 }}>{c.nom}</span>
                               <strong
                                 style={{
-                                  color: rapport > 0 ? "#4CAF50" : "#666"
+                                  color: rapport > 0 ? "#4CAF50" : "#EF5350"
                                 }}
                               >
-                                {rapport > 0 ? `×${rapport}` : "—"}
+                                {/* Un tiret laissait croire à une place non
+                                    classée : le zéro se dit. */}
+                                ×{rapport}
                               </strong>
                             </div>
                           );
