@@ -6236,11 +6236,7 @@
             <div
               style={{
                 padding: "30px",
-                // La borne tient sur une colonne étroite, sauf l'écran du
-                // contrôle fiscal : il lui faut la place d'afficher les
-                // règles des couleurs à côté du dé.
-                maxWidth:
-                  sousMenuBanque === "activer_fiscal" ? "900px" : "500px",
+                maxWidth: "500px",
                 margin: "0 auto",
                 position: "relative"
               }}
@@ -7061,18 +7057,6 @@
                       <h3 style={{ color: "#f44336" }}>
                         ⚡ Paramétrer l'Attaque
                       </h3>
-                      {/* Le paramétrage à gauche, les règles des couleurs à
-                          droite. Sur une borne en portrait, la colonne des
-                          règles repasse dessous. */}
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "20px",
-                          alignItems: "flex-start",
-                          flexWrap: "wrap"
-                        }}
-                      >
-                        <div style={{ flex: "1 1 320px", minWidth: "280px" }}>
                       <label style={{ display: "block", marginBottom: "10px" }}>
                         Cible :
                         <select
@@ -7156,6 +7140,61 @@
                         </div>
                       )}
 
+                      {/* La règle de chaque couleur, sous le dé : trois
+                          lignes valent mieux que la même phrase répétée sous
+                          les six faces. */}
+                      <div
+                        style={{
+                          background: "#111",
+                          borderRadius: "6px",
+                          padding: "12px 14px",
+                          marginBottom: "15px"
+                        }}
+                      >
+                        <div
+                          style={{
+                            color: "#bbb",
+                            fontSize: "0.78rem",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.06em",
+                            marginBottom: "10px"
+                          }}
+                        >
+                          Ce que font les couleurs
+                        </div>
+                        {REGLES_COULEURS.map((r, i) => (
+                          <div
+                            key={r.type}
+                            style={{
+                              borderLeft: `4px solid ${COULEURS_FACE[r.type]}`,
+                              paddingLeft: "10px",
+                              marginBottom:
+                                i === REGLES_COULEURS.length - 1 ? 0 : "12px"
+                            }}
+                          >
+                            <div
+                              style={{
+                                color: COULEURS_FACE[r.type],
+                                fontWeight: "bold",
+                                fontSize: "0.9rem"
+                              }}
+                            >
+                              {r.titre}
+                            </div>
+                            <div
+                              style={{
+                                color: "#ddd",
+                                fontSize: "0.85rem",
+                                lineHeight: 1.45,
+                                marginTop: "2px"
+                              }}
+                            >
+                              {r.texte}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
                       <button
                         onClick={lancerControleFiscal}
                         style={{
@@ -7178,60 +7217,6 @@
                       >
                         Annuler
                       </button>
-                        </div>
-
-                        <div
-                          style={{
-                            flex: "1 1 260px",
-                            minWidth: "240px",
-                            background: "#111",
-                            borderRadius: "8px",
-                            padding: "14px 16px"
-                          }}
-                        >
-                          <div
-                            style={{
-                              color: "#bbb",
-                              fontSize: "0.8rem",
-                              textTransform: "uppercase",
-                              letterSpacing: "0.06em",
-                              marginBottom: "10px"
-                            }}
-                          >
-                            Ce que font les couleurs
-                          </div>
-                          {REGLES_COULEURS.map((r) => (
-                            <div
-                              key={r.type}
-                              style={{
-                                borderLeft: `4px solid ${COULEURS_FACE[r.type]}`,
-                                paddingLeft: "10px",
-                                marginBottom: "14px"
-                              }}
-                            >
-                              <div
-                                style={{
-                                  color: COULEURS_FACE[r.type],
-                                  fontWeight: "bold",
-                                  fontSize: "0.92rem"
-                                }}
-                              >
-                                {r.titre}
-                              </div>
-                              <div
-                                style={{
-                                  color: "#ddd",
-                                  fontSize: "0.85rem",
-                                  lineHeight: 1.45,
-                                  marginTop: "2px"
-                                }}
-                              >
-                                {r.texte}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
                     </div>
                   )}
 
