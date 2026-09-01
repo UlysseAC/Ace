@@ -139,3 +139,14 @@ body {
     display: none !important;
   }
 }
+
+/* Le bouton plein écran : effacé sur un écran de salle qu'on regarde de
+   loin, franc dès qu'on approche la souris ou qu'on le sélectionne. */
+.bouton-plein-ecran {
+  opacity: 0.28;
+  transition: opacity 200ms;
+}
+.bouton-plein-ecran:hover,
+.bouton-plein-ecran:focus {
+  opacity: 1;
+}

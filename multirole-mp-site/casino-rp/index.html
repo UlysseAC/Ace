@@ -40,6 +40,39 @@
         "#AD1457" // framboise
       ];
 
+      // ================= LE PLEIN ÉCRAN =================
+      // Le navigateur n'accorde le plein écran que sur un geste de
+      // l'utilisateur : impossible de le déclencher tout seul, d'où un bouton.
+      // Safari a gardé ses préfixes, et l'iPhone ne le propose pas du tout
+      // pour autre chose qu'une vidéo — sur ce matériel, le bouton le dit.
+      const enPleinEcran = () =>
+        !!(document.fullscreenElement || document.webkitFullscreenElement);
+
+      const passerEnPleinEcran = () => {
+        const e = document.documentElement;
+        const f = e.requestFullscreen || e.webkitRequestFullscreen;
+        if (!f) return Promise.reject(new Error("indisponible"));
+        try {
+          return Promise.resolve(f.call(e));
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      };
+
+      const quitterLePleinEcran = () => {
+        const f = document.exitFullscreen || document.webkitExitFullscreen;
+        // On peut demander la sortie alors qu'on n'y est déjà plus — après un
+        // Échap, par exemple. Le navigateur rejette alors la promesse : on
+        // l'attrape, ce n'est pas une erreur.
+        if (!f || !enPleinEcran()) return;
+        try {
+          const sortie = f.call(document);
+          if (sortie && sortie.catch) sortie.catch(() => {});
+        } catch (err) {
+          /* rien à faire : on n'y était déjà plus */
+        }
+      };
+
       // ================= OUTILS DU BOOKMAKER =================
 
       // Générateur pseudo-aléatoire semé. Toute la course en découle : à
@@ -2097,6 +2130,164 @@
           const t = setInterval(() => setMaintenant(Date.now()), 1000);
           return () => clearInterval(t);
         }, []);
+
+        // ---- Plein écran ----
+        // Le verrou sert à la borne : Échap fait toujours sortir du plein
+        // écran — aucun navigateur ne laisse le bloquer, c'est une garantie
+        // faite à l'utilisateur. On rattrape donc la sortie : dès qu'elle
+        // arrive, un panneau couvre la borne tant que le code n'est pas donné.
+        const [pleinEcran, setPleinEcran] = React.useState(false);
+        const [verrouEcran, setVerrouEcran] = React.useState(false);
+        const [demandeSortie, setDemandeSortie] = React.useState(false);
+        const [codeSortie, setCodeSortie] = React.useState("");
+
+        React.useEffect(() => {
+          const suivre = () => {
+            const actif = enPleinEcran();
+            setPleinEcran(actif);
+            if (!actif && verrouEcran) setDemandeSortie(true);
+          };
+          suivre();
+          document.addEventListener("fullscreenchange", suivre);
+          document.addEventListener("webkitfullscreenchange", suivre);
+          return () => {
+            document.removeEventListener("fullscreenchange", suivre);
+            document.removeEventListener("webkitfullscreenchange", suivre);
+          };
+        }, [verrouEcran]);
+
+        const basculerPleinEcran = (verrouiller) => {
+          if (!enPleinEcran()) {
+            passerEnPleinEcran()
+              .then(() => {
+                if (verrouiller) setVerrouEcran(true);
+              })
+              .catch(() =>
+                alert(
+                  "Cet appareil ne propose pas le plein écran.\n\n" +
+                    "Sur iPhone, Safari le réserve aux vidéos : passez par " +
+                    "« Ajouter à l'écran d'accueil » pour ouvrir la page sans " +
+                    "les barres du navigateur."
+                )
+              );
+            return;
+          }
+          if (verrouiller && verrouEcran) {
+            setDemandeSortie(true);
+            return;
+          }
+          quitterLePleinEcran();
+        };
+
+        const boutonPleinEcran = (verrouiller) => (
+          <button
+            onClick={() => basculerPleinEcran(verrouiller)}
+            className="bouton-plein-ecran no-print"
+            title={pleinEcran ? "Quitter le plein écran" : "Passer en plein écran"}
+            style={{
+              background: "rgba(0,0,0,0.45)",
+              color: "#fff",
+              border: "1px solid #555",
+              borderRadius: "8px",
+              padding: "6px 10px",
+              fontSize: "1rem",
+              lineHeight: 1,
+              cursor: "pointer"
+            }}
+          >
+            {pleinEcran ? "⛶✕" : "⛶"}
+          </button>
+        );
+
+        const validerSortie = () => {
+          if (String(codeSortie) !== String(configGlobale.codeAdmin)) {
+            alert("Code incorrect.");
+            return;
+          }
+          setVerrouEcran(false);
+          setDemandeSortie(false);
+          setCodeSortie("");
+          quitterLePleinEcran();
+        };
+
+        // Le panneau de déverrouillage de la borne. Il couvre tout : tant que
+        // le code n'est pas donné, il n'y a rien d'autre à faire que revenir
+        // en plein écran.
+        const panneauVerrou = () =>
+          demandeSortie ? (
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                zIndex: 9999,
+                background: "#0b0b0b",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "16px",
+                padding: "24px",
+                textAlign: "center"
+              }}
+            >
+              <div style={{ fontSize: "3rem" }}>🔒</div>
+              <h2 style={{ margin: 0, color: "#FFC107" }}>Borne verrouillée</h2>
+              <p style={{ color: "#aaa", maxWidth: "420px", margin: 0 }}>
+                Le code administrateur est demandé pour quitter le plein écran.
+              </p>
+              <input
+                type="password"
+                inputMode="numeric"
+                value={codeSortie}
+                onChange={(e) => setCodeSortie(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") validerSortie();
+                }}
+                placeholder="Code administrateur"
+                style={{
+                  padding: "12px",
+                  fontSize: "1.2rem",
+                  textAlign: "center",
+                  width: "220px",
+                  borderRadius: "8px",
+                  border: "1px solid #555"
+                }}
+              />
+              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "center" }}>
+                <button
+                  onClick={validerSortie}
+                  style={{
+                    padding: "12px 18px",
+                    background: "#F44336",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "8px",
+                    fontWeight: "bold",
+                    cursor: "pointer"
+                  }}
+                >
+                  Déverrouiller
+                </button>
+                <button
+                  onClick={() => {
+                    setDemandeSortie(false);
+                    setCodeSortie("");
+                    passerEnPleinEcran().catch(() => {});
+                  }}
+                  style={{
+                    padding: "12px 18px",
+                    background: "#333",
+                    color: "#ddd",
+                    border: "none",
+                    borderRadius: "8px",
+                    cursor: "pointer"
+                  }}
+                >
+                  Revenir en plein écran
+                </button>
+              </div>
+            </div>
+          ) : null;
 
         const course = infosCourse(
           maintenant,
@@ -5336,6 +5527,17 @@
                 position: "relative"
               }}
             >
+              {panneauVerrou()}
+              <div
+                style={{
+                  position: "fixed",
+                  top: "10px",
+                  left: "10px",
+                  zIndex: 40
+                }}
+              >
+                {boutonPleinEcran(true)}
+              </div>
               {/* Superposition de l'animation globale pour synchronisation visuelle */}
               {animationActive && (
                 <div
@@ -7695,6 +7897,16 @@
             <div style={{ padding: "26px", minHeight: "100vh" }}>
               <div
                 style={{
+                  position: "fixed",
+                  top: "10px",
+                  left: "10px",
+                  zIndex: 40
+                }}
+              >
+                {boutonPleinEcran(false)}
+              </div>
+              <div
+                style={{
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
@@ -8449,6 +8661,16 @@
                 position: "relative"
               }}
             >
+              <div
+                style={{
+                  position: "fixed",
+                  top: "10px",
+                  left: "10px",
+                  zIndex: 40
+                }}
+              >
+                {boutonPleinEcran(false)}
+              </div>
               {/* Décompte discret, dans un coin, seulement à l'approche. */}
               {course.active &&
                 soireeDebut &&
