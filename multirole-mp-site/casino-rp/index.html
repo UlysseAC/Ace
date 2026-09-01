@@ -221,6 +221,64 @@
             "Rien à négocier, rien à viser : c'est le coup de pouce le plus simple du jeu.",
           delaiAvantUsage: true,
           phraseAnim: "Un billet retrouvé au fond d'une poche."
+        },
+        {
+          id: "heritage",
+          nom: "Héritage",
+          definition:
+            "Une tante d'Amérique dont vous ignoriez tout : activez-la, elle vous crédite une somme et disparaît.",
+          modeEmploi:
+            "Activez-la depuis votre deck. Le montant tombe aussitôt sur votre compte et la carte est consommée.\n\n" +
+            "Plus généreuse que l'argent de poche, et tout aussi simple.",
+          delaiAvantUsage: true,
+          phraseAnim: "Un notaire a de bonnes nouvelles."
+        },
+        {
+          id: "garde_du_corps",
+          nom: "Garde du corps",
+          definition:
+            "Tant qu'il est en poste, personne ne peut vous faire les poches. Il ne se consomme jamais.",
+          modeEmploi:
+            "Activez-le depuis votre deck : il prend son poste et y reste. Aucun pickpocket ne peut plus vous atteindre, et le garde ne s'use pas — il tient jusqu'au bout de la soirée.\n\n" +
+            "Il ne peut rien contre le fisc : le contrôle fiscal et l'impôt de fin de bloc passent outre. Ce sont des lois, pas des voleurs.\n\n" +
+            "Attention : le garde reste dans votre deck, donc un pickpocket peut vous voler la carte elle-même s'il vous prend de vitesse.",
+          delaiAvantUsage: true,
+          phraseAnim: "Une carrure imposante prend position."
+        },
+        {
+          id: "fonds_investissement",
+          nom: "Fonds d'investissement",
+          definition:
+            "Une enveloppe qui ne passe pas par votre compte : à dépenser chez le financier, en pari ou en investissement.",
+          modeEmploi:
+            "Activez-la depuis votre deck : le fonds est ouvert et le bookmaker le voit apparaître à votre nom.\n\n" +
+            "Chez le financier, dites-lui que vous payez avec le fonds et non avec votre solde — il coche la case, et c'est le fonds qui est débité. Ce qui reste dedans reste disponible pour un prochain coup.\n\n" +
+            "Les gains, eux, tombent normalement sur votre compte.",
+          delaiAvantUsage: true,
+          phraseAnim: "Une enveloppe scellée arrive chez le financier."
+        },
+        {
+          id: "assurance",
+          nom: "Assurance tous risques",
+          definition:
+            "Le prochain pari ou investissement perdu chez le financier vous est remboursé en grande partie. Un gain ne la consomme pas.",
+          modeEmploi:
+            "Activez-la depuis votre deck, puis allez jouer. Le premier pari ou investissement que vous PERDEZ chez le financier vous est remboursé, et la carte est consommée à ce moment-là.\n\n" +
+            "Si vous gagnez, elle ne bouge pas : elle attend la prochaine perte. Vous pouvez la garder armée toute la soirée.",
+          delaiAvantUsage: true,
+          phraseAnim: "Un contrat vient d'être signé."
+        },
+        {
+          id: "herbes_medicinales",
+          nom: "Herbes médicinales",
+          definition:
+            "Un cheval qui court mieux : plus de chances de gagner, et la certitude de ne pas finir dernier.",
+          modeEmploi:
+            "Activez-la depuis votre deck AVANT de miser, puis allez parier chez le bookmaker : elle s'appliquera au cheval sur lequel vous misez, pour cette course-là.\n\n" +
+            "Le cheval gagne plus souvent, et surtout il ne finit jamais dernier. La carte est consommée une fois la course courue.\n\n" +
+            "Une seule fiole par course : si quelqu'un a déjà versé la sienne, il faut attendre la course suivante.",
+          delaiAvantUsage: true,
+          phraseAnim: "Un seau d'eau trouble à l'écurie..."
         }
       ];
 
@@ -1828,7 +1886,12 @@
           // Ce que rapporte la Fontaine de Jouvence, et ce que verse l'Argent
           // de poche.
           bonusFontainePct: 20,
-          montantArgentPoche: 500,
+          // Les montants sont en francs comme le reste de la table.
+          montantArgentPoche: 50,
+          montantHeritage: 100,
+          montantFonds: 70,
+          pctAssurance: 75,
+          herbesPctPremier: 20,
           modeLocal: false,
           modeScanneur: "simulator",
           bonusVeinardGain: 5,
@@ -2122,6 +2185,19 @@
         const [investissements, setInvestissements] = useEtatPartage(
           "investissements",
           []
+        );
+
+        // --- TABLE 16 : LA PAUSE ---
+        // { depuis } quand la soirée est suspendue, null sinon. Partagée,
+        // pour que les huit écrans se figent au même instant.
+        const [pauseSoiree, setPauseSoiree] = useEtatPartage("pauseSoiree", null);
+
+        // --- TABLE 15 : LA FIOLE D'HERBES DE LA COURSE ---
+        // Une seule par course, et tous les appareils doivent tirer la même
+        // course : l'information est donc partagée, pas locale.
+        const [herbesEnCours, setHerbesEnCours] = useEtatPartage(
+          "herbesEnCours",
+          null
         );
 
         // --- TABLE 14 : LE DERNIER BLOC DÉJÀ IMPOSÉ ---
@@ -2575,6 +2651,9 @@
           jeuEnCours: null,
           veinardActif: false,
           fontaineActive: false,
+          gardeDuCorpsActif: false,
+          assuranceActive: false,
+          fondsDispo: 0,
           achatsBoutique: 0,
           argentVole: 0,
           argentGagneCarte: 0,
@@ -2604,6 +2683,8 @@
           setParisCourse([]);
           setInvestissements([]);
           setDernierBlocImpose(0);
+          setPauseSoiree(null);
+          setHerbesEnCours(null);
           setSoireeDebut(0);
           // Sans ça, la course lancée à la main pendant la partie précédente
           // survivrait à la remise à zéro, avec son numéro.
@@ -2617,6 +2698,85 @@
         // cartes, dés, chevaux, croupiers et surtout les projets
         // d'investissement restent en place. On efface les parties d'argent
         // en cours, pas le travail de préparation.
+        // Reprendre après une pause : tout ce qui était daté en absolu doit
+        // reculer d'autant, sinon une pause de dix minutes ferait passer trois
+        // courses et expirer les paradis fiscaux dans le vide.
+        const reprendreLaSoiree = () => {
+          if (!pauseSoiree) return;
+          const ecart = Math.max(
+            0,
+            Date.now() - nombreSur(pauseSoiree.depuis, Date.now())
+          );
+          if (ecart > 0) {
+            if (soireeDebut) setSoireeDebut(soireeDebut + ecart);
+            setCourseManuelle((c) =>
+              c && c.depart ? { ...c, depart: c.depart + ecart } : c
+            );
+            setInvestissements((prev) =>
+              prev.map((i) =>
+                i.premierTs ? { ...i, premierTs: i.premierTs + ecart } : i
+              )
+            );
+            setJoueurs((prev) =>
+              prev.map((j) => ({
+                ...j,
+                finParadis: j.finParadis ? j.finParadis + ecart : j.finParadis,
+                deck: (j.deck || []).map((c) =>
+                  c.recuLe ? { ...c, recuLe: c.recuLe + ecart } : c
+                ),
+                tuyau:
+                  j.tuyau && j.tuyau.depart
+                    ? { ...j.tuyau, depart: j.tuyau.depart + ecart }
+                    : j.tuyau
+              }))
+            );
+          }
+          setPauseSoiree(null);
+        };
+
+        // Vingt-cinq joueurs de test, soldes tirés entre 0 et 1000 : de quoi
+        // voir l'impôt, le classement et les cartes se comporter sur une vraie
+        // table plutôt que sur quatre lignes.
+        const tableDEssai = () => {
+          const prenoms = [
+            "Alice", "Bruno", "Chloé", "Damien", "Elsa", "Farid", "Gaëlle",
+            "Hugo", "Inès", "Jonas", "Katia", "Louis", "Maya", "Nadir",
+            "Olivia", "Pierre", "Quentin", "Rania", "Samuel", "Théa",
+            "Ulysse", "Vera", "Willem", "Xénia", "Yanis"
+          ];
+          return prenoms.map((nom, i) => ({
+            id: `test${i + 1}`,
+            code: String(1000 + i + 1),
+            nom,
+            ordre: i + 1,
+            solde: Math.floor(Math.random() * 1001),
+            totalMissions: 0,
+            totalJeux: 0,
+            nbPenalites: 0,
+            totalPenalites: 0,
+            jetonsEnJeu: 0,
+            croupierVendeur: null,
+            veinardActif: false,
+            fontaineActive: false,
+            gardeDuCorpsActif: false,
+            assuranceActive: false,
+            fondsDispo: 0,
+            achatsBoutique: 0,
+            argentVole: 0,
+            argentGagneCarte: 0,
+            paradisFiscal: false,
+            finParadis: 0,
+            tuyau: null,
+            deck: [],
+            historique: [],
+            avisBookmaker: [],
+            codesUtilises: [],
+            missionsFaites: [],
+            produitsAchetes: [],
+            penalitesSubies: []
+          }));
+        };
+
         const nouvellePartie = () => {
           if (
             !window.confirm(
@@ -2718,11 +2878,18 @@
         // — courses, blocs d'investissement, délais des projets — se lisent
         // sur cette horloge, elle-même calée sur l'heure de début de soirée
         // partagée par tous les appareils.
-        const [maintenant, setMaintenant] = React.useState(Date.now());
+        const [horloge, setHorloge] = React.useState(Date.now());
         React.useEffect(() => {
-          const t = setInterval(() => setMaintenant(Date.now()), 1000);
+          const t = setInterval(() => setHorloge(Date.now()), 1000);
           return () => clearInterval(t);
         }, []);
+        // En pause, l'heure du jeu se fige à l'instant où l'on a appuyé :
+        // courses, blocs, échéances de projets, durée du paradis fiscal et
+        // temps de garde des cartes s'arrêtent tous d'un coup, puisqu'ils
+        // lisent tous cette horloge-là.
+        const maintenant = pauseSoiree
+          ? nombreSur(pauseSoiree.depuis, horloge)
+          : horloge;
 
         // ---- Plein écran ----
         // Le verrou sert à la borne : Échap fait toujours sortir du plein
@@ -3064,6 +3231,58 @@
         // Le délit d'initié révèle le vainqueur d'une course sur laquelle on
         // peut encore parier — sinon le tuyau ne vaut rien. Si les paris de la
         // course en cours sont clos, on donne celui de la suivante.
+        // Ce que verse une carte à versement simple.
+        const versementDe = (id) =>
+          Math.max(
+            0,
+            Math.round(
+              id === "heritage"
+                ? nombreSur(configGlobale.montantHeritage, 100)
+                : nombreSur(configGlobale.montantArgentPoche, 50)
+            )
+          );
+
+        // La fiole d'herbes se verse sur la course encore ouverte aux paris :
+        // c'est celle sur laquelle le joueur pourra miser. Elle attend son
+        // cheval — le bookmaker l'y rattachera au moment du pari.
+        const verserLesHerbes = (carte) => {
+          if (herbesEnCours && herbesEnCours.joueurId !== joueurActuel.id) {
+            alert(
+              "Une fiole a déjà été versée pour cette course.\n\n" +
+                "Gardez la vôtre : elle ne se consomme pas."
+            );
+            return;
+          }
+          if (herbesEnCours) {
+            alert(
+              `Votre fiole est déjà versée pour la course n°${herbesEnCours.numero}.\n\n` +
+                "Allez miser chez le bookmaker : elle s'appliquera au cheval " +
+                "que vous choisirez."
+            );
+            return;
+          }
+          const cible = courseAParier();
+          if (!cible) {
+            alert(
+              "Aucune course n'est ouverte aux paris pour l'instant.\n\n" +
+                "Gardez votre carte : elle ne se consomme pas."
+            );
+            return;
+          }
+          setHerbesEnCours({
+            joueurId: joueurActuel.id,
+            numero: cible.numero,
+            chevalId: null
+          });
+          annoncerSalle([carte.phraseAnim]);
+          alert(
+            `Fiole versée pour la course n°${cible.numero}.\n\n` +
+              "Allez miser chez le bookmaker : elle s'appliquera au cheval que " +
+              "vous choisirez. La carte partira une fois la course courue."
+          );
+          setSousMenuBanque("accueil");
+        };
+
         // ================= LE PICKPOCKET =================
         // On désigne une victime, pas une carte : le tirage décide de ce qui
         // change de mains, et le voleur ne le découvre qu'après coup. Les deux
@@ -3076,6 +3295,9 @@
           }
           // On ne détrousse pas quelqu'un qui s'est isolé au paradis fiscal :
           // il n'est plus dans la salle. Même règle que le contrôle fiscal.
+          // Un joueur protégé reste dans la liste : le voleur ne sait pas
+          // qui a un garde du corps, et c'est tout l'intérêt — il perd son
+          // coup en le découvrant.
           const cibles = joueursActifs.filter(
             (j) =>
               j.id !== joueurActuel.id &&
@@ -3109,10 +3331,46 @@
             alert(`${choix.nom} n'a plus rien en poche.`);
             return;
           }
-          // Ici viendrait le garde du corps : s'il était actif chez la cible,
-          // le vol échouerait et le Pickpocket reviendrait dans la main du
-          // voleur, temps de garde remis à zéro.
           const maintenantLa = Date.now();
+
+          // Un garde du corps en poste renvoie le voleur d'où il vient. La
+          // carte lui reste en main, mais son temps de garde repart à zéro :
+          // il faudra patienter avant de retenter le coup.
+          if (choix.gardeDuCorpsActif) {
+            setJoueurs((prev) =>
+              prev.map((j) => {
+                if (j.id === joueurActuel.id)
+                  return {
+                    ...j,
+                    deck: j.deck.map((x) =>
+                      x.id === carte.id ? { ...x, recuLe: maintenantLa } : x
+                    ),
+                    historique: [
+                      `Pickpocket sur ${choix.nom} : un garde du corps vous a repoussé`,
+                      ...j.historique
+                    ]
+                  };
+                if (j.id === choix.id) {
+                  const ligne =
+                    "Votre garde du corps a repoussé un pickpocket";
+                  return {
+                    ...j,
+                    historique: [ligne, ...j.historique],
+                    avisBookmaker: [ligne, ...(j.avisBookmaker || [])]
+                  };
+                }
+                return j;
+              })
+            );
+            alert(
+              `${choix.nom} a un garde du corps : vous vous êtes fait ` +
+                "repousser.\n\n" +
+                "Votre carte vous reste, mais il va falloir laisser passer le " +
+                "temps de garde avant de retenter votre chance."
+            );
+            setSousMenuBanque("accueil");
+            return;
+          }
           setJoueurs((prev) =>
             prev.map((j) => {
               if (j.id === joueurActuel.id) {
@@ -3153,7 +3411,9 @@
                   veinardActif:
                     volee.id === "veinard" ? false : j.veinardActif,
                   fontaineActive:
-                    volee.id === "fontaine_jouvence" ? false : j.fontaineActive
+                    volee.id === "fontaine_jouvence" ? false : j.fontaineActive,
+                  assuranceActive:
+                    volee.id === "assurance" ? false : j.assuranceActive
                 };
               }
               return j;
@@ -3726,7 +3986,9 @@
         // d'assommer la table de trois prélèvements d'un coup.
         React.useEffect(() => {
           if (interfaceActive !== "bookmaker") return;
-          if (!soireeDebut || configBookmaker.modeSimulation) return;
+          // L'impôt tombe aussi en simulation : c'est le seul moyen de le
+          // répéter avant la soirée, en raccourcissant la durée d'un bloc.
+          if (!soireeDebut) return;
           // Rien au premier bloc : il n'y a encore rien à redistribuer.
           if (blocInvest < 2) return;
           const suivant = Math.max(1, nombreSur(dernierBlocImpose, 0)) + 1;
@@ -3743,8 +4005,7 @@
           interfaceActive,
           blocInvest,
           soireeDebut,
-          dernierBlocImpose,
-          configBookmaker.modeSimulation
+          dernierBlocImpose
         ]);
 
         // Le poste du bookmaker fait office d'arbitre : c'est lui, et lui
@@ -4763,6 +5024,20 @@
                     🗄️ Voir la base de données
                   </button>
                   <button
+                    onClick={() => setInterfaceActive("adminCartes")}
+                    style={{
+                      padding: "10px 18px",
+                      background: "#6A1B9A",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "6px",
+                      fontWeight: "bold",
+                      cursor: "pointer"
+                    }}
+                  >
+                    🃏 Réglages Cartes
+                  </button>
+                  <button
                     onClick={() => setInterfaceActive("adminBookmaker")}
                     style={{
                       padding: "10px 18px",
@@ -4779,6 +5054,19 @@
                   <button
                     onClick={() => {
                       const actif = !configBookmaker.modeSimulation;
+                      // Une table de quatre ne dit rien de ce que donnera
+                      // l'impôt ou le classement à vingt-cinq.
+                      if (
+                        actif &&
+                        window.confirm(
+                          "Passer en simulation.\n\n" +
+                            "OK : remplacer la table par 25 joueurs de test, " +
+                            "soldes tirés entre 0 et 1000$.\n" +
+                            "Annuler : garder les joueurs actuels."
+                        )
+                      ) {
+                        setJoueurs(tableDEssai());
+                      }
                       setConfigBookmaker({
                         ...configBookmaker,
                         modeSimulation: actif
@@ -4862,8 +5150,52 @@
                       ? `⏱️ Soirée en cours — bloc ${blocInvest}`
                       : "▶️ Démarrer la soirée"}
                   </button>
+                  {/* Tout suspendre d'un coup : courses, blocs, échéances des
+                      projets, durée du paradis fiscal, temps de garde des
+                      cartes. Ils lisent tous la même horloge, et cette
+                      horloge se fige. */}
+                  {soireeDebut ? (
+                    <button
+                      onClick={() => {
+                        if (pauseSoiree) {
+                          reprendreLaSoiree();
+                          return;
+                        }
+                        setPauseSoiree({ depuis: Date.now() });
+                      }}
+                      style={{
+                        padding: "10px 18px",
+                        background: pauseSoiree ? "#F57C00" : "#37474F",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "6px",
+                        fontWeight: "bold",
+                        cursor: "pointer"
+                      }}
+                    >
+                      {pauseSoiree ? "▶️ Reprendre" : "⏸️ Tout mettre en pause"}
+                    </button>
+                  ) : null}
                 </div>
               </div>
+
+              {pauseSoiree && (
+                <div
+                  style={{
+                    margin: "12px 0 0",
+                    padding: "12px 16px",
+                    borderRadius: "8px",
+                    background: "#E65100",
+                    color: "#fff",
+                    fontWeight: "bold"
+                  }}
+                >
+                  ⏸️ SOIRÉE EN PAUSE depuis{" "}
+                  {compteARebours(Date.now() - nombreSur(pauseSoiree.depuis, Date.now()))}
+                  {" "}— tout est figé. « Reprendre » décale les horloges
+                  d'autant : rien ne sera perdu.
+                </div>
+              )}
 
               {/* Où en est l'horloge des courses. Sans cette ligne, la
                   première demi-heure d'une soirée ne montre rien nulle part
@@ -5073,57 +5405,8 @@
                       </span>
                     </label>
 
-                    <label>
-                      Temps de garde d'une carte (min) :{" "}
-                      <input
-                        type="number"
-                        value={nombreSur(
-                          configGlobale.delaiCarteMin,
-                          DELAI_CARTE_DEFAUT
-                        )}
-                        onChange={(e) =>
-                          setConfigGlobale({
-                            ...configGlobale,
-                            delaiCarteMin: Number(e.target.value)
-                          })
-                        }
-                        style={{ width: "100%", padding: "5px" }}
-                      />
-                      <span style={{ color: "#777", fontSize: "0.78rem" }}>
-                        Après le scan, avant de pouvoir la jouer. Carte par
-                        carte, la case se décoche dans l'éditeur des cartes.
-                      </span>
-                    </label>
-
-                    <label>
-                      Fontaine de Jouvence — bonus mission (%) :{" "}
-                      <input
-                        type="number"
-                        value={nombreSur(configGlobale.bonusFontainePct, 20)}
-                        onChange={(e) =>
-                          setConfigGlobale({
-                            ...configGlobale,
-                            bonusFontainePct: Number(e.target.value)
-                          })
-                        }
-                        style={{ width: "100%", padding: "5px" }}
-                      />
-                    </label>
-
-                    <label>
-                      Argent de poche — montant ($) :{" "}
-                      <input
-                        type="number"
-                        value={nombreSur(configGlobale.montantArgentPoche, 500)}
-                        onChange={(e) =>
-                          setConfigGlobale({
-                            ...configGlobale,
-                            montantArgentPoche: Number(e.target.value)
-                          })
-                        }
-                        style={{ width: "100%", padding: "5px" }}
-                      />
-                    </label>
+                    {/* Le temps de garde, les bonus et les montants des
+                        cartes ont leur propre écran : « 🃏 Réglages Cartes ». */}
 
                     <label>
                       Déconnexion borne après (s) :{" "}
@@ -5613,253 +5896,6 @@
                   >
                     + Pénalité
                   </button>
-                </div>
-
-                {/* Éditeur de Cartes de Jeu */}
-                <div
-                  style={{
-                    background: "#222",
-                    padding: "20px",
-                    borderRadius: "12px"
-                  }}
-                >
-                  <h3 style={{ color: "#9C27B0", margin: "0 0 15px 0" }}>
-                    🃏 Cartes du Jeu & Phrases Affichage
-                  </h3>
-                  {cartesJeu.map((c, idx) => (
-                    <div
-                      key={c.id}
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "5px",
-                        marginBottom: "15px",
-                        background: "#333",
-                        padding: "10px",
-                        borderRadius: "6px"
-                      }}
-                    >
-                      <div style={{ display: "flex", gap: "10px" }}>
-                        <input
-                          type="text"
-                          value={c.nom}
-                          onChange={(e) => {
-                            let n = [...cartesJeu];
-                            n[idx].nom = e.target.value;
-                            setCartesJeu(n);
-                          }}
-                          style={{ flex: 1, padding: "5px" }}
-                        />
-                        <button
-                          onClick={() =>
-                            setCartesJeu(
-                              cartesJeu.filter((item) => item.id !== c.id)
-                            )
-                          }
-                          style={{
-                            background: "#f44336",
-                            color: "#fff",
-                            border: "none",
-                            padding: "5px 10px",
-                            cursor: "pointer"
-                          }}
-                        >
-                          Supprimer
-                        </button>
-                      </div>
-                      <label style={{ fontSize: "0.75rem", color: "#aaa" }}>
-                        Résumé — une ligne, en tête de la carte dans le deck
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Définition"
-                        value={c.definition}
-                        onChange={(e) => {
-                          let n = [...cartesJeu];
-                          n[idx].definition = e.target.value;
-                          setCartesJeu(n);
-                        }}
-                        style={{ padding: "5px" }}
-                      />
-                      <label style={{ fontSize: "0.75rem", color: "#aaa" }}>
-                        Mode d'emploi — le texte que le joueur lit dans son
-                        deck. Sautez des lignes, elles sont conservées.
-                      </label>
-                      <textarea
-                        rows="5"
-                        placeholder="Comment s'en sert-on, et à quoi sert-elle ?"
-                        value={c.modeEmploi || ""}
-                        onChange={(e) =>
-                          setCartesJeu(
-                            cartesJeu.map((x, i) =>
-                              i === idx ? { ...x, modeEmploi: e.target.value } : x
-                            )
-                          )
-                        }
-                        style={{
-                          padding: "6px",
-                          fontFamily: "inherit",
-                          fontSize: "0.9rem",
-                          borderLeft: "3px solid #8D6E63",
-                          resize: "vertical"
-                        }}
-                      />
-                      {/* Certaines cartes doivent mûrir en main, d'autres
-                          se jouent tout de suite. Le délai lui-même se règle
-                          une fois pour toutes dans la configuration
-                          globale. */}
-                      <label
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                          fontSize: "0.8rem",
-                          color: c.delaiAvantUsage === false ? "#81C784" : "#FFC107"
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={c.delaiAvantUsage !== false}
-                          onChange={(e) =>
-                            setCartesJeu(
-                              cartesJeu.map((x, i) =>
-                                i === idx
-                                  ? { ...x, delaiAvantUsage: e.target.checked }
-                                  : x
-                              )
-                            )
-                          }
-                        />
-                        {c.delaiAvantUsage === false
-                          ? "Jouable dès le scan"
-                          : `À garder ${nombreSur(
-                              configGlobale.delaiCarteMin,
-                              DELAI_CARTE_DEFAUT
-                            )} min en main avant de pouvoir la jouer`}
-                      </label>
-                      <label style={{ fontSize: "0.75rem", color: "#aaa" }}>
-                        Phrase pour l'écran de la salle, à l'activation
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Phrase pour l'écran d'affichage"
-                        value={c.phraseAnim}
-                        onChange={(e) => {
-                          let n = [...cartesJeu];
-                          n[idx].phraseAnim = e.target.value;
-                          setCartesJeu(n);
-                        }}
-                        style={{
-                          padding: "5px",
-                          borderLeft: "3px solid #2196F3"
-                        }}
-                      />
-                      {/* Les textes livrés avec le jeu, carte par carte : une
-                          partie enregistrée avant une refonte garde les
-                          anciens, et on ne veut pas écraser les vôtres en
-                          bloc. */}
-                      {CARTES_LIVREES.some(
-                        (l) =>
-                          l.id === c.id &&
-                          (l.definition !== c.definition ||
-                            (l.modeEmploi || "") !== (c.modeEmploi || ""))
-                      ) && (
-                        <button
-                          onClick={() => {
-                            const livree = CARTES_LIVREES.find(
-                              (l) => l.id === c.id
-                            );
-                            setCartesJeu(
-                              cartesJeu.map((x, i) =>
-                                i === idx
-                                  ? {
-                                      ...x,
-                                      definition: livree.definition,
-                                      modeEmploi: livree.modeEmploi
-                                    }
-                                  : x
-                              )
-                            );
-                          }}
-                          style={{
-                            alignSelf: "flex-start",
-                            background: "transparent",
-                            color: "#80CBC4",
-                            border: "1px solid #00695C",
-                            borderRadius: "4px",
-                            padding: "4px 10px",
-                            fontSize: "0.78rem",
-                            cursor: "pointer"
-                          }}
-                        >
-                          ↺ Remettre les textes livrés pour cette carte
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  <button
-                    onClick={() =>
-                      setCartesJeu([
-                        ...cartesJeu,
-                        {
-                          id: "c_" + Date.now(),
-                          nom: "Nouvelle Carte",
-                          definition: "...",
-                          delaiAvantUsage: true,
-                          phraseAnim: "Effet mystère !"
-                        }
-                      ])
-                    }
-                    style={{
-                      background: "#9C27B0",
-                      color: "#fff",
-                      border: "none",
-                      padding: "8px 15px",
-                      borderRadius: "4px"
-                    }}
-                  >
-                    + Ajouter une Carte
-                  </button>
-                  {/* Les réglages sont partagés et sauvegardés : une carte
-                      ajoutée au jeu après le début d'une partie n'apparaît
-                      pas toute seule dans une liste déjà enregistrée. Ce
-                      bouton complète les manquantes sans toucher aux vôtres. */}
-                  {CARTES_LIVREES.some(
-                    (l) => !cartesJeu.some((c) => c.id === l.id)
-                  ) && (
-                    <button
-                      onClick={() =>
-                        setCartesJeu([
-                          ...cartesJeu,
-                          ...CARTES_LIVREES.filter(
-                            (l) => !cartesJeu.some((c) => c.id === l.id)
-                          )
-                        ])
-                      }
-                      style={{
-                        background: "#00838F",
-                        color: "#fff",
-                        border: "none",
-                        padding: "8px 15px",
-                        borderRadius: "4px",
-                        marginLeft: "8px"
-                      }}
-                    >
-                      ➕ Rétablir les cartes livrées (
-                      {
-                        CARTES_LIVREES.filter(
-                          (l) => !cartesJeu.some((c) => c.id === l.id)
-                        ).length
-                      }{" "}
-                      manquante
-                      {CARTES_LIVREES.filter(
-                        (l) => !cartesJeu.some((c) => c.id === l.id)
-                      ).length > 1
-                        ? "s"
-                        : ""}
-                      )
-                    </button>
-                  )}
                 </div>
 
                 {/* Table 1 : les joueurs */}
@@ -7580,25 +7616,69 @@
                               >
                                 🔎 Obtenir le tuyau
                               </button>
-                            ) : c.id === "argent_poche" ? (
+                            ) : c.id === "garde_du_corps" ? (
+                              // Il ne se consomme jamais : une fois en poste,
+                              // il y reste. Le bouton devient un état.
+                              joueurActuel.gardeDuCorpsActif ? (
+                                <div
+                                  style={{
+                                    padding: "10px",
+                                    background: "#37474F",
+                                    color: "#B0BEC5",
+                                    borderRadius: "4px",
+                                    fontWeight: "bold",
+                                    textAlign: "center"
+                                  }}
+                                >
+                                  🛡️ En poste — aucun pickpocket ne passe
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    setJoueurs((prev) =>
+                                      prev.map((j) =>
+                                        j.id === joueurActuel.id
+                                          ? { ...j, gardeDuCorpsActif: true }
+                                          : j
+                                      )
+                                    );
+                                    annoncerSalle([c.phraseAnim]);
+                                    alert(
+                                      "Votre garde du corps prend son poste.\n\n" +
+                                        "Il ne s'usera pas, mais il ne peut rien " +
+                                        "contre le fisc."
+                                    );
+                                  }}
+                                  style={{
+                                    padding: "8px",
+                                    background: "#546E7A",
+                                    color: "#fff",
+                                    border: "none",
+                                    borderRadius: "4px",
+                                    cursor: "pointer",
+                                    fontWeight: "bold",
+                                    width: "100%"
+                                  }}
+                                >
+                                  🛡️ Le mettre en poste
+                                </button>
+                              )
+                            ) : c.id === "fonds_investissement" ? (
                               <button
                                 onClick={() => {
                                   const montant = Math.max(
                                     0,
-                                    Math.round(
-                                      nombreSur(configGlobale.montantArgentPoche, 500)
-                                    )
+                                    Math.round(nombreSur(configGlobale.montantFonds, 70))
                                   );
                                   setJoueurs((prev) =>
                                     prev.map((j) =>
                                       j.id === joueurActuel.id
                                         ? {
                                             ...j,
-                                            solde: j.solde + montant,
-                                            argentGagneCarte:
-                                              nombreSur(j.argentGagneCarte, 0) + montant,
+                                            fondsDispo:
+                                              nombreSur(j.fondsDispo, 0) + montant,
                                             historique: [
-                                              `Argent de poche : +${montant}$`,
+                                              `Fonds d'investissement ouvert : ${montant}$ disponibles chez le financier`,
                                               ...j.historique
                                             ],
                                             deck: j.deck.filter(
@@ -7609,7 +7689,137 @@
                                     )
                                   );
                                   annoncerSalle([c.phraseAnim]);
-                                  alert(`Argent de poche : +${montant}$ sur votre compte.`);
+                                  alert(
+                                    `Fonds ouvert : ${montant}$ disponibles chez le financier.\n\n` +
+                                      "Dites-lui bien que vous payez avec le fonds, " +
+                                      "et pas avec votre solde."
+                                  );
+                                  setSousMenuBanque("accueil");
+                                }}
+                                style={{
+                                  padding: "8px",
+                                  background: "#00695C",
+                                  color: "#fff",
+                                  border: "none",
+                                  borderRadius: "4px",
+                                  cursor: "pointer",
+                                  fontWeight: "bold",
+                                  width: "100%"
+                                }}
+                              >
+                                📈 Ouvrir le fonds (
+                                {Math.max(
+                                  0,
+                                  Math.round(nombreSur(configGlobale.montantFonds, 70))
+                                )}
+                                $)
+                              </button>
+                            ) : c.id === "assurance" ? (
+                              // Elle attend une perte : un gain ne la
+                              // consomme pas.
+                              joueurActuel.assuranceActive ? (
+                                <div
+                                  style={{
+                                    padding: "10px",
+                                    background: "#1A237E",
+                                    color: "#C5CAE9",
+                                    borderRadius: "4px",
+                                    fontWeight: "bold",
+                                    textAlign: "center"
+                                  }}
+                                >
+                                  🧾 Signée — la prochaine perte chez le
+                                  financier vous sera remboursée à{" "}
+                                  {Math.max(0, nombreSur(configGlobale.pctAssurance, 75))} %
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    setJoueurs((prev) =>
+                                      prev.map((j) =>
+                                        j.id === joueurActuel.id
+                                          ? { ...j, assuranceActive: true }
+                                          : j
+                                      )
+                                    );
+                                    annoncerSalle([c.phraseAnim]);
+                                  }}
+                                  style={{
+                                    padding: "8px",
+                                    background: "#303F9F",
+                                    color: "#fff",
+                                    border: "none",
+                                    borderRadius: "4px",
+                                    cursor: "pointer",
+                                    fontWeight: "bold",
+                                    width: "100%"
+                                  }}
+                                >
+                                  🧾 Signer le contrat
+                                </button>
+                              )
+                            ) : c.id === "herbes_medicinales" ? (
+                              <button
+                                onClick={() => verserLesHerbes(c)}
+                                disabled={
+                                  !!herbesEnCours &&
+                                  herbesEnCours.joueurId !== joueurActuel.id
+                                }
+                                style={{
+                                  padding: "8px",
+                                  background:
+                                    herbesEnCours &&
+                                    herbesEnCours.joueurId !== joueurActuel.id
+                                      ? "#555"
+                                      : "#558B2F",
+                                  color:
+                                    herbesEnCours &&
+                                    herbesEnCours.joueurId !== joueurActuel.id
+                                      ? "#999"
+                                      : "#fff",
+                                  border: "none",
+                                  borderRadius: "4px",
+                                  cursor:
+                                    herbesEnCours &&
+                                    herbesEnCours.joueurId !== joueurActuel.id
+                                      ? "not-allowed"
+                                      : "pointer",
+                                  fontWeight: "bold",
+                                  width: "100%"
+                                }}
+                              >
+                                {herbesEnCours &&
+                                herbesEnCours.joueurId === joueurActuel.id
+                                  ? `🌿 Versée — course n°${herbesEnCours.numero}`
+                                  : herbesEnCours
+                                    ? "🌿 Une fiole a déjà été versée"
+                                    : "🌿 Verser la fiole"}
+                              </button>
+                            ) : c.id === "heritage" || c.id === "argent_poche" ? (
+                              <button
+                                onClick={() => {
+                                  const montant = versementDe(c.id);
+                                  setJoueurs((prev) =>
+                                    prev.map((j) =>
+                                      j.id === joueurActuel.id
+                                        ? {
+                                            ...j,
+                                            solde: j.solde + montant,
+                                            argentGagneCarte:
+                                              nombreSur(j.argentGagneCarte, 0) + montant,
+                                            historique: [
+                                              `${c.nom} : +${montant}$`,
+                                              ...j.historique
+                                            ],
+                                            deck: j.deck.filter(
+                                              (card) => card.id !== c.id
+                                            )
+                                          }
+                                        : j
+                                    )
+                                  );
+                                  annoncerSalle([c.phraseAnim]);
+                                  alert(`${c.nom} : +${montant}$ sur votre compte.`);
                                   setSousMenuBanque("accueil");
                                 }}
                                 style={{
@@ -7623,14 +7833,7 @@
                                   width: "100%"
                                 }}
                               >
-                                💵 Empocher{" "}
-                                {Math.max(
-                                  0,
-                                  Math.round(
-                                    nombreSur(configGlobale.montantArgentPoche, 500)
-                                  )
-                                )}
-                                $
+                                💵 Empocher {versementDe(c.id)}$
                               </button>
                             ) : c.id === "pickpocket" ? (
                               <button
@@ -8385,6 +8588,389 @@
         // --- RÉGLAGES DU BOOKMAKER ---
         // Tout ce qui porte un chiffre se règle ici, pour rééquilibrer la
         // soirée sans toucher au code.
+        // --- RÉGLAGES DES CARTES ---
+        // Les cartes ont fini par avoir autant de boutons que le bookmaker :
+        // elles méritaient leur propre écran, hors de l'admin principal.
+        if (interfaceActive === "adminCartes") {
+          const champCarte = (libelle, cle, secours, aide) => (
+            <label style={{ fontSize: "0.85rem" }}>
+              {libelle}
+              <input
+                type="number"
+                value={nombreSur(configGlobale[cle], secours)}
+                onChange={(e) =>
+                  setConfigGlobale({
+                    ...configGlobale,
+                    [cle]: Number(e.target.value)
+                  })
+                }
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  background: "#333",
+                  color: "#fff",
+                  border: "1px solid #555",
+                  borderRadius: "4px"
+                }}
+              />
+              {aide ? (
+                <span style={{ color: "#777", fontSize: "0.78rem" }}>{aide}</span>
+              ) : null}
+            </label>
+          );
+          return (
+            <div style={{ padding: "30px", maxWidth: "900px", margin: "0 auto" }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: "10px",
+                  marginBottom: "18px"
+                }}
+              >
+                <h1 style={{ color: "#CE93D8", margin: 0 }}>🃏 Réglages Cartes</h1>
+                <button
+                  onClick={() => setInterfaceActive("admin")}
+                  style={{
+                    padding: "8px 14px",
+                    background: "#333",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "6px",
+                    cursor: "pointer"
+                  }}
+                >
+                  Retour à l'admin
+                </button>
+              </div>
+
+              <div
+                style={{
+                  background: "#222",
+                  padding: "20px",
+                  borderRadius: "12px",
+                  marginBottom: "20px"
+                }}
+              >
+                <h3 style={{ marginTop: 0, color: "#CE93D8" }}>
+                  Ce que valent les cartes
+                </h3>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
+                    gap: "14px"
+                  }}
+                >
+                  {champCarte(
+                    "Temps de garde d'une carte (min)",
+                    "delaiCarteMin",
+                    DELAI_CARTE_DEFAUT,
+                    "après le scan, avant de pouvoir la jouer ; 10 s en simulation"
+                  )}
+                  {champCarte(
+                    "Fontaine de Jouvence — bonus mission (%)",
+                    "bonusFontainePct",
+                    20
+                  )}
+                  {champCarte("Argent de poche ($)", "montantArgentPoche", 50)}
+                  {champCarte("Héritage ($)", "montantHeritage", 100)}
+                  {champCarte(
+                    "Fonds d'investissement ($)",
+                    "montantFonds",
+                    70,
+                    "à dépenser chez le financier, hors du solde"
+                  )}
+                  {champCarte(
+                    "Assurance tous risques — remboursement (%)",
+                    "pctAssurance",
+                    75,
+                    "de la perte du prochain pari ou investissement perdu"
+                  )}
+                  {champCarte(
+                    "Herbes médicinales — chances en plus (%)",
+                    "herbesPctPremier",
+                    20,
+                    "de finir premier ; le cheval ne finit jamais dernier"
+                  )}
+                  {champCarte(
+                    "Le Veinard — perte réduite de (%)",
+                    "bonusVeinardPertes",
+                    50
+                  )}
+                  {champCarte(
+                    "Le Veinard — gain majoré de (%)",
+                    "bonusVeinardGain",
+                    5
+                  )}
+                  {champCarte(
+                    "Paradis fiscal — durée (min)",
+                    "dureeParadisFiscalMin",
+                    15
+                  )}
+                </div>
+              </div>
+
+                {/* Éditeur de Cartes de Jeu */}
+                <div
+                  style={{
+                    background: "#222",
+                    padding: "20px",
+                    borderRadius: "12px"
+                  }}
+                >
+                  <h3 style={{ color: "#9C27B0", margin: "0 0 15px 0" }}>
+                    🃏 Cartes du Jeu & Phrases Affichage
+                  </h3>
+                  {cartesJeu.map((c, idx) => (
+                    <div
+                      key={c.id}
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "5px",
+                        marginBottom: "15px",
+                        background: "#333",
+                        padding: "10px",
+                        borderRadius: "6px"
+                      }}
+                    >
+                      <div style={{ display: "flex", gap: "10px" }}>
+                        <input
+                          type="text"
+                          value={c.nom}
+                          onChange={(e) => {
+                            let n = [...cartesJeu];
+                            n[idx].nom = e.target.value;
+                            setCartesJeu(n);
+                          }}
+                          style={{ flex: 1, padding: "5px" }}
+                        />
+                        <button
+                          onClick={() =>
+                            setCartesJeu(
+                              cartesJeu.filter((item) => item.id !== c.id)
+                            )
+                          }
+                          style={{
+                            background: "#f44336",
+                            color: "#fff",
+                            border: "none",
+                            padding: "5px 10px",
+                            cursor: "pointer"
+                          }}
+                        >
+                          Supprimer
+                        </button>
+                      </div>
+                      <label style={{ fontSize: "0.75rem", color: "#aaa" }}>
+                        Résumé — une ligne, en tête de la carte dans le deck
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Définition"
+                        value={c.definition}
+                        onChange={(e) => {
+                          let n = [...cartesJeu];
+                          n[idx].definition = e.target.value;
+                          setCartesJeu(n);
+                        }}
+                        style={{ padding: "5px" }}
+                      />
+                      <label style={{ fontSize: "0.75rem", color: "#aaa" }}>
+                        Mode d'emploi — le texte que le joueur lit dans son
+                        deck. Sautez des lignes, elles sont conservées.
+                      </label>
+                      <textarea
+                        rows="5"
+                        placeholder="Comment s'en sert-on, et à quoi sert-elle ?"
+                        value={c.modeEmploi || ""}
+                        onChange={(e) =>
+                          setCartesJeu(
+                            cartesJeu.map((x, i) =>
+                              i === idx ? { ...x, modeEmploi: e.target.value } : x
+                            )
+                          )
+                        }
+                        style={{
+                          padding: "6px",
+                          fontFamily: "inherit",
+                          fontSize: "0.9rem",
+                          borderLeft: "3px solid #8D6E63",
+                          resize: "vertical"
+                        }}
+                      />
+                      {/* Certaines cartes doivent mûrir en main, d'autres
+                          se jouent tout de suite. Le délai lui-même se règle
+                          une fois pour toutes dans la configuration
+                          globale. */}
+                      <label
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          fontSize: "0.8rem",
+                          color: c.delaiAvantUsage === false ? "#81C784" : "#FFC107"
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={c.delaiAvantUsage !== false}
+                          onChange={(e) =>
+                            setCartesJeu(
+                              cartesJeu.map((x, i) =>
+                                i === idx
+                                  ? { ...x, delaiAvantUsage: e.target.checked }
+                                  : x
+                              )
+                            )
+                          }
+                        />
+                        {c.delaiAvantUsage === false
+                          ? "Jouable dès le scan"
+                          : `À garder ${nombreSur(
+                              configGlobale.delaiCarteMin,
+                              DELAI_CARTE_DEFAUT
+                            )} min en main avant de pouvoir la jouer`}
+                      </label>
+                      <label style={{ fontSize: "0.75rem", color: "#aaa" }}>
+                        Phrase pour l'écran de la salle, à l'activation
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Phrase pour l'écran d'affichage"
+                        value={c.phraseAnim}
+                        onChange={(e) => {
+                          let n = [...cartesJeu];
+                          n[idx].phraseAnim = e.target.value;
+                          setCartesJeu(n);
+                        }}
+                        style={{
+                          padding: "5px",
+                          borderLeft: "3px solid #2196F3"
+                        }}
+                      />
+                      {/* Les textes livrés avec le jeu, carte par carte : une
+                          partie enregistrée avant une refonte garde les
+                          anciens, et on ne veut pas écraser les vôtres en
+                          bloc. */}
+                      {CARTES_LIVREES.some(
+                        (l) =>
+                          l.id === c.id &&
+                          (l.definition !== c.definition ||
+                            (l.modeEmploi || "") !== (c.modeEmploi || ""))
+                      ) && (
+                        <button
+                          onClick={() => {
+                            const livree = CARTES_LIVREES.find(
+                              (l) => l.id === c.id
+                            );
+                            setCartesJeu(
+                              cartesJeu.map((x, i) =>
+                                i === idx
+                                  ? {
+                                      ...x,
+                                      definition: livree.definition,
+                                      modeEmploi: livree.modeEmploi
+                                    }
+                                  : x
+                              )
+                            );
+                          }}
+                          style={{
+                            alignSelf: "flex-start",
+                            background: "transparent",
+                            color: "#80CBC4",
+                            border: "1px solid #00695C",
+                            borderRadius: "4px",
+                            padding: "4px 10px",
+                            fontSize: "0.78rem",
+                            cursor: "pointer"
+                          }}
+                        >
+                          ↺ Remettre les textes livrés pour cette carte
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <button
+                    onClick={() =>
+                      setCartesJeu([
+                        ...cartesJeu,
+                        {
+                          id: "c_" + Date.now(),
+                          nom: "Nouvelle Carte",
+                          definition: "...",
+                          delaiAvantUsage: true,
+                          phraseAnim: "Effet mystère !"
+                        }
+                      ])
+                    }
+                    style={{
+                      background: "#9C27B0",
+                      color: "#fff",
+                      border: "none",
+                      padding: "8px 15px",
+                      borderRadius: "4px"
+                    }}
+                  >
+                    + Ajouter une Carte
+                  </button>
+                  {/* Les réglages sont partagés et sauvegardés : une carte
+                      ajoutée au jeu après le début d'une partie n'apparaît
+                      pas toute seule dans une liste déjà enregistrée. Ce
+                      bouton complète les manquantes sans toucher aux vôtres. */}
+                  {CARTES_LIVREES.some(
+                    (l) => !cartesJeu.some((c) => c.id === l.id)
+                  ) && (
+                    <button
+                      onClick={() =>
+                        setCartesJeu([
+                          ...cartesJeu,
+                          ...CARTES_LIVREES.filter(
+                            (l) => !cartesJeu.some((c) => c.id === l.id)
+                          )
+                        ])
+                      }
+                      style={{
+                        background: "#00838F",
+                        color: "#fff",
+                        border: "none",
+                        padding: "8px 15px",
+                        borderRadius: "4px",
+                        marginLeft: "8px"
+                      }}
+                    >
+                      ➕ Rétablir les cartes livrées (
+                      {
+                        CARTES_LIVREES.filter(
+                          (l) => !cartesJeu.some((c) => c.id === l.id)
+                        ).length
+                      }{" "}
+                      manquante
+                      {CARTES_LIVREES.filter(
+                        (l) => !cartesJeu.some((c) => c.id === l.id)
+                      ).length > 1
+                        ? "s"
+                        : ""}
+                      )
+                    </button>
+                  )}
+                </div>
+
+              <button
+                onClick={() => setInterfaceActive("admin")}
+                className="checkbox-btn"
+                style={{ marginTop: "20px" }}
+              >
+                Retour à l'admin
+              </button>
+            </div>
+          );
+        }
+
         if (interfaceActive === "adminBookmaker") {
           const majCfg = (cle, valeur) =>
             setConfigBookmaker({ ...configBookmaker, [cle]: valeur });
@@ -11182,6 +11768,23 @@
                       ) : null}
                     </h3>
                   )}
+                </div>
+              )}
+
+              {pauseSoiree && (
+                <div
+                  style={{
+                    background: "#E65100",
+                    color: "#fff",
+                    borderRadius: "12px",
+                    padding: "14px 20px",
+                    marginBottom: "18px",
+                    textAlign: "center",
+                    fontSize: "1.4rem",
+                    fontWeight: "bold"
+                  }}
+                >
+                  ⏸️ PARTIE EN PAUSE
                 </div>
               )}
 
