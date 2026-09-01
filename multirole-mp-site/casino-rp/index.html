@@ -53,14 +53,21 @@
       // garder un moment en main. Le délai se règle dans l'admin, et chaque
       // carte dit si elle l'observe — sinon elle est jouable tout de suite.
       const DELAI_CARTE_DEFAUT = 15;
+      // En simulation on ne va pas attendre un quart d'heure pour essayer une
+      // carte : dix secondes suffisent à voir le décompte tourner, et à
+      // vérifier que le bouton revient bien ensuite.
+      const DELAI_CARTE_SIMULATION_SEC = 10;
 
-      const attenteCarte = (carte, cartes, cfg) => {
+      const attenteCarte = (carte, cartes, cfg, simulation) => {
         // On lit le réglage sur la carte du jeu, pas sur la copie posée dans
         // le deck : décocher la case dans l'admin libère aussitôt les cartes
         // déjà distribuées.
         const modele =
           (cartes || []).find((x) => x.id === (carte || {}).id) || carte || {};
+        // Une carte réglée sur « jouable dès le scan » le reste, même en
+        // simulation : le raccourci ne rallonge jamais une attente.
         if (modele.delaiAvantUsage === false) return 0;
+        if (simulation) return DELAI_CARTE_SIMULATION_SEC * 1000;
         return (
           Math.max(0, nombreSur((cfg || {}).delaiCarteMin, DELAI_CARTE_DEFAUT)) *
           60000
@@ -68,8 +75,8 @@
       };
 
       // Ce qu'il reste à patienter, en millisecondes. Zéro = jouable.
-      const resteAvantUsage = (carte, cartes, cfg, maintenant) => {
-        const attente = attenteCarte(carte, cartes, cfg);
+      const resteAvantUsage = (carte, cartes, cfg, maintenant, simulation) => {
+        const attente = attenteCarte(carte, cartes, cfg, simulation);
         if (!attente) return 0;
         const recu = nombreSur((carte || {}).recuLe, 0);
         // Une carte ramassée avant ce réglage n'a pas d'horodatage : on ne va
@@ -6905,12 +6912,15 @@
                               </div>
                             ) : null}
 
-                            {resteAvantUsage(
-                              c,
-                              cartesJeu,
-                              configGlobale,
-                              maintenant
-                            ) > 0 ? (
+                            {(() => {
+                              const reste = resteAvantUsage(
+                                c,
+                                cartesJeu,
+                                configGlobale,
+                                maintenant,
+                                configBookmaker.modeSimulation
+                              );
+                              return reste > 0 ? (
                               // Le temps de garde n'est pas écoulé : la carte
                               // est là, lisible, mais elle ne se joue pas
                               // encore.
@@ -6925,15 +6935,7 @@
                                 }}
                               >
                                 <div style={{ fontWeight: "bold" }}>
-                                  ⏳ Jouable dans{" "}
-                                  {compteARebours(
-                                    resteAvantUsage(
-                                      c,
-                                      cartesJeu,
-                                      configGlobale,
-                                      maintenant
-                                    )
-                                  )}
+                                  ⏳ Jouable dans {compteARebours(reste)}
                                 </div>
                                 <div
                                   style={{
@@ -7179,7 +7181,8 @@
                               >
                                 Activer
                               </button>
-                            )}
+                              );
+                            })()}
                           </div>
                         ))
                       )}
@@ -9861,7 +9864,8 @@
             veinardEnMain,
             cartesJeu,
             configGlobale,
-            maintenant
+            maintenant,
+            configBookmaker.modeSimulation
           );
 
           return (
