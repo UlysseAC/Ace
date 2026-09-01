@@ -2881,12 +2881,19 @@
           if (
             !window.confirm(
               "Repartir à la course n°1 ?\n\n" +
-                "La course en cours ou préparée est annulée. Les paris déjà " +
-                "réglés et le reste de la partie ne bougent pas."
+                "La course en cours ou préparée est annulée, et les tuyaux " +
+                "des délits d'initié avec elle. Les paris déjà réglés et le " +
+                "reste de la partie ne bougent pas."
             )
           )
             return;
           setCourseManuelle(null);
+          // Les tuyaux désignent des courses qui n'existeront plus : gardés,
+          // ils réapparaîtraient au joueur dès que la numérotation les
+          // rattraperait.
+          setJoueurs((prev) =>
+            prev.map((j) => (j.tuyau ? { ...j, tuyau: null } : j))
+          );
         };
 
         const placerPariCourse = (joueurId, chevalId, mise) => {
@@ -3341,6 +3348,29 @@
           );
           aSolder.forEach(reglerCourse);
           reglerInvestissementsSiBesoin();
+          // Un délit d'initié ne vaut que pour SA course : dès qu'elle est
+          // lancée, le tuyau a servi et s'efface. Sinon le joueur garde sous
+          // les yeux le nom d'un cheval qui a déjà couru — et le retrouve
+          // même après une remise à zéro du compteur.
+          const tuyauPerime = (t) => {
+            if (!t) return false;
+            if (course.numero === undefined || course.numero === null)
+              return false;
+            const sien = Number(t.numero);
+            const encours = Number(course.numero);
+            if (encours > sien) return true;
+            return (
+              encours === sien &&
+              (course.phase === PHASES.COURSE ||
+                course.phase === PHASES.RESULTAT)
+            );
+          };
+          if (joueurs.some((j) => tuyauPerime(j.tuyau)))
+            setJoueurs((prev) =>
+              prev.map((j) =>
+                tuyauPerime(j.tuyau) ? { ...j, tuyau: null } : j
+              )
+            );
           // Volontairement sans les fonctions en dépendance : elles changent
           // d'identité à chaque rendu, l'horloge suffit à cadencer l'arbitrage.
         }, [interfaceActive, course.phase, course.numero, maintenant]);
@@ -6828,8 +6858,16 @@
                       {/* Le tuyau du délit d'initié reste affiché tant que la
                           course n'a pas eu lieu : on l'a payé assez cher pour
                           pouvoir le relire. Il ne quitte jamais cette borne. */}
+                      {/* Le tuyau tient jusqu'au départ de sa course, pas
+                          au-delà : c'est le poste du bookmaker qui l'efface,
+                          et cette condition sert de garde-fou si ce poste est
+                          fermé. */}
                       {joueurActuel.tuyau &&
-                        course.numero <= joueurActuel.tuyau.numero && (
+                        !(
+                          course.numero !== undefined &&
+                          course.numero !== null &&
+                          Number(course.numero) > Number(joueurActuel.tuyau.numero)
+                        ) && (
                           <div
                             style={{
                               background: "#3E2723",
