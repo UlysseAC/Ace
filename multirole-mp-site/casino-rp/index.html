@@ -154,6 +154,23 @@
         // franchie. Réglable : c'est le temps que la salle commente.
         const resultat = nombreSur(cfg.courseResultatSec, 20) * 1000;
 
+        // Une course préparée mais pas encore lancée : les paris sont ouverts
+        // et rien ne court après. On y reste tant que le bookmaker n'a pas
+        // donné le top, ce qui laisse tout le temps de saisir les paris.
+        if (manuelle && !manuelle.depart) {
+          return {
+            active: true,
+            manuelle: true,
+            enPreparation: true,
+            numero: manuelle.numero,
+            depart: null,
+            avantDepart: null,
+            phase: PHASES.ANNONCE,
+            avancement: 0,
+            parisOuverts: true
+          };
+        }
+
         // Une course lancée à la main prime sur l'horaire : c'est elle qu'on
         // regarde, du top départ jusqu'à la fin du temps de résultat.
         if (manuelle && manuelle.depart) {
@@ -2474,20 +2491,34 @@
         // Lance une course tout de suite, sans attendre l'horaire. Le top
         // départ est conservé pour que l'écran de la salle ait le temps
         // d'afficher le décompte et que les paris se ferment proprement.
-        const lancerCourseMaintenant = () => {
-          const top = nombreSur(configBookmaker.courseTopDepartSec, 15) * 1000;
-          // Une fenêtre de paris avant le top départ : sans elle, une course
-          // lancée à la main partait déjà fermée et l'on ne pouvait rien
-          // essayer. Vingt-cinq secondes, le temps de saisir deux paris.
-          const fenetre = 25000;
-          // On numerote a partir de 1, comme les courses a l'horaire. Aucun
-          // risque de confusion : le lancement a la main n'existe qu'en
+        // En deux temps : on prépare la course — les paris s'ouvrent et rien
+        // ne part —, puis on donne le top quand tout le monde a misé. Une
+        // fenêtre minutée aurait obligé à courir après le chronomètre.
+        const preparerCourse = () => {
+          // On numérote à partir de 1, comme les courses à l'horaire. Aucun
+          // risque de confusion : le lancement à la main n'existe qu'en
           // simulation, et la simulation ne programme aucune course.
           const precedent = courseManuelle ? nombreSur(courseManuelle.numero, 0) : 0;
-          setCourseManuelle({
-            numero: Math.max(1, precedent + 1),
-            depart: Date.now() + top + fenetre
-          });
+          setCourseManuelle({ numero: Math.max(1, precedent + 1), depart: null });
+        };
+
+        const donnerLeTopDepart = () => {
+          if (!courseManuelle) return;
+          const top = nombreSur(configBookmaker.courseTopDepartSec, 15) * 1000;
+          setCourseManuelle({ ...courseManuelle, depart: Date.now() + top });
+        };
+
+        // Repartir à la course n°1 sans toucher au reste de la partie.
+        const remettreLeCompteurDeCourses = () => {
+          if (
+            !window.confirm(
+              "Repartir à la course n°1 ?\n\n" +
+                "La course en cours ou préparée est annulée. Les paris déjà " +
+                "réglés et le reste de la partie ne bougent pas."
+            )
+          )
+            return;
+          setCourseManuelle(null);
         };
 
         const placerPariCourse = (joueurId, chevalId, mise) => {
@@ -7387,14 +7418,16 @@
                 </div>
               )}
 
-              {soireeDebut && course.active && (
+              {course.active && (
                 <div style={{ ...cadre, background: "#01579B" }}>
                   <strong>Course n°{course.numero}</strong> —{" "}
                   {course.phase === PHASES.COURSE
                     ? "en cours !"
                     : course.phase === PHASES.RESULTAT
                       ? `terminée, vainqueur : ${(chevalGagnant(course.numero) || {}).nom || "?"}`
-                      : `départ dans ${Math.max(0, Math.ceil(course.avantDepart / 1000))} s`}
+                      : course.enPreparation
+                        ? "en préparation, elle part quand vous voulez"
+                        : `départ dans ${Math.max(0, Math.ceil(course.avantDepart / 1000))} s`}
                   {" · "}
                   Paris {course.parisOuverts ? "ouverts" : "fermés"}
                   {" · Bloc d'investissement n°"}
@@ -7555,13 +7588,38 @@
                     Pari sur la course
                   </h3>
                   {configBookmaker.modeSimulation && (
-                    <button
-                      onClick={lancerCourseMaintenant}
-                      className="checkbox-btn"
-                      style={{ background: "#FF6B00", marginBottom: "14px" }}
-                    >
-                      🏇 Lancer une course maintenant
-                    </button>
+                    <div style={{ marginBottom: "14px" }}>
+                      {course.enPreparation ? (
+                        <button
+                          onClick={donnerLeTopDepart}
+                          className="checkbox-btn"
+                          style={{ background: "#2E7D32" }}
+                        >
+                          🚦 Top départ de la course n°{course.numero}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={preparerCourse}
+                          className="checkbox-btn"
+                          style={{ background: "#FF6B00" }}
+                        >
+                          🏇 Préparer une course — les paris s'ouvrent
+                        </button>
+                      )}
+                      <button
+                        onClick={remettreLeCompteurDeCourses}
+                        className="checkbox-btn"
+                        style={{ background: "#455A64", marginTop: "8px" }}
+                      >
+                        🔄 Repartir à la course n°1
+                      </button>
+                      {course.enPreparation && (
+                        <p style={{ color: "#8BC34A", fontSize: "0.85rem", margin: "8px 0 0" }}>
+                          Course n°{course.numero} prête. Prenez les paris,
+                          puis donnez le top quand vous voulez.
+                        </p>
+                      )}
+                    </div>
                   )}
                   <label>Le joueur</label>
                   <select
@@ -8152,11 +8210,17 @@
                   </h2>
                   {course.active && (
                     <p style={{ fontSize: "1.3rem" }}>
-                      Départ dans{" "}
-                      <strong>
-                        {Math.max(0, Math.ceil(course.avantDepart / 60000))} min
-                      </strong>{" "}
-                      — paris {course.parisOuverts ? "ouverts" : "clos"}
+                      {course.enPreparation ? (
+                        <strong>Les paris sont ouverts</strong>
+                      ) : (
+                        <>
+                          Départ dans{" "}
+                          <strong>
+                            {Math.max(0, Math.ceil(course.avantDepart / 60000))} min
+                          </strong>{" "}
+                          — paris {course.parisOuverts ? "ouverts" : "clos"}
+                        </>
+                      )}
                     </p>
                   )}
                   <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
