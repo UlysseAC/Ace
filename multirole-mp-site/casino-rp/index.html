@@ -2660,6 +2660,7 @@
             const gains = {};
             const lignes = {};
             const gagnantsSalle = new Set();
+            // La salle veut savoir combien, pas seulement qui.
             aRegler.forEach((p) => {
               const place = placeDe(p.chevalId);
               // Le barème figé au moment du pari fait foi.
@@ -2719,7 +2720,7 @@
             annoncerSalle(
               [...gagnantsSalle].map((id) => {
                 const j = joueurs.find((x) => x.id === id);
-                return `🏇 ${(j || {}).nom || "Un joueur"} touche sur la course n°${numero}`;
+                return `🏇 ${(j || {}).nom || "Un joueur"} touche ${gains[id] || 0}$ sur la course n°${numero}`;
               })
             );
           },
@@ -2902,13 +2903,27 @@
                 };
               })
             );
+            // Une ligne par investisseur, avec ce qu'il encaisse : « les
+            // investisseurs encaissent » ne disait rien à personne.
+            const nomDe = (id) =>
+              (joueursActifs.find((j) => j.id === id) || {}).nom || "Un joueur";
             annoncerSalle(
               reussi
-                ? `💼 « ${projet.titre} » a réussi — les investisseurs encaissent`
-                : `💼 « ${projet.titre} » a échoué`
+                ? [
+                    `💼 « ${projet.titre} » a réussi`,
+                    ...Object.keys(mouvements).map(
+                      (id) => `💼 ${nomDe(id)} encaisse ${mouvements[id]}$`
+                    )
+                  ]
+                : [
+                    `💼 « ${projet.titre} » a échoué`,
+                    ...Object.keys(mouvements).map(
+                      (id) => `💼 ${nomDe(id)} récupère ${mouvements[id]}$`
+                    )
+                  ]
             );
           },
-          [setInvestissements, setJoueurs, annoncerSalle]
+          [setInvestissements, setJoueurs, annoncerSalle, joueursActifs]
         );
 
         // Passe en revue les projets ouverts et solde ceux qui doivent l'être.
@@ -3255,7 +3270,7 @@
             if (gagne) {
               const parieur = joueurs.find((j) => j.id === pari.parieurId);
               annoncesSalle.push(
-                `🎯 ${(parieur || {}).nom || "Un joueur"} remporte son pari sur ${jC.nom}`
+                `🎯 ${(parieur || {}).nom || "Un joueur"} remporte ${gain}$ sur son pari sur ${jC.nom}`
               );
             }
           });
@@ -6008,6 +6023,36 @@
                       <h3 style={{ color: "#4CAF50", marginTop: 0 }}>
                         💳 Détails du Compte
                       </h3>
+                      {/* La place au classement, comptée sur TOUS les joueurs :
+                          celui qui se cache au paradis fiscal disparaît du
+                          tableau de la salle, pas de son propre rang. */}
+                      <div
+                        style={{
+                          background: "#1a1a1a",
+                          border: "1px solid #FFD700",
+                          borderRadius: "10px",
+                          padding: "12px 14px",
+                          marginBottom: "14px",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "12px"
+                        }}
+                      >
+                        <span style={{ fontSize: "2rem" }}>🏆</span>
+                        <div>
+                          <div style={{ fontSize: "1.5rem", fontWeight: "bold", color: "#FFD700" }}>
+                            {rangsReels[joueurActuel.id] !== undefined
+                              ? `${rangsReels[joueurActuel.id] + 1}${rangsReels[joueurActuel.id] === 0 ? "er" : "e"} sur ${joueurs.length}`
+                              : "—"}
+                          </div>
+                          <div style={{ color: "#aaa", fontSize: "0.82rem" }}>
+                            Votre place au classement
+                            {joueurActuel.paradisActif
+                              ? " — masquée sur l'écran de la salle"
+                              : ""}
+                          </div>
+                        </div>
+                      </div>
                       <ul
                         style={{
                           listStyle: "none",
@@ -7688,6 +7733,23 @@
                         >
                           🚦 Top départ de la course n°{course.numero}
                         </button>
+                      ) : course.active ? (
+                        // Une course est lancée : on ne propose pas d'en
+                        // préparer une autre, un clic de trop l'effacerait.
+                        <div
+                          style={{
+                            background: "#263238",
+                            borderRadius: "8px",
+                            padding: "12px 14px",
+                            color: "#B0BEC5"
+                          }}
+                        >
+                          🏇 Course n°{course.numero}{" "}
+                          {course.phase === PHASES.RESULTAT
+                            ? "terminée — résultat à l'écran"
+                            : "en piste"}
+                          . La suivante se prépare une fois celle-ci finie.
+                        </div>
                       ) : (
                         <button
                           onClick={preparerCourse}
