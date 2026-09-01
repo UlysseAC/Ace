@@ -7156,6 +7156,61 @@
                         </div>
                       )}
 
+                      {/* La règle de chaque couleur, sous le dé : trois
+                          lignes valent mieux que la même phrase répétée sous
+                          les six faces. */}
+                      <div
+                        style={{
+                          background: "#111",
+                          borderRadius: "6px",
+                          padding: "12px 14px",
+                          marginBottom: "15px"
+                        }}
+                      >
+                        <div
+                          style={{
+                            color: "#bbb",
+                            fontSize: "0.78rem",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.06em",
+                            marginBottom: "10px"
+                          }}
+                        >
+                          Ce que font les couleurs
+                        </div>
+                        {REGLES_COULEURS.map((r, i) => (
+                          <div
+                            key={r.type}
+                            style={{
+                              borderLeft: `4px solid ${COULEURS_FACE[r.type]}`,
+                              paddingLeft: "10px",
+                              marginBottom:
+                                i === REGLES_COULEURS.length - 1 ? 0 : "12px"
+                            }}
+                          >
+                            <div
+                              style={{
+                                color: COULEURS_FACE[r.type],
+                                fontWeight: "bold",
+                                fontSize: "0.9rem"
+                              }}
+                            >
+                              {r.titre}
+                            </div>
+                            <div
+                              style={{
+                                color: "#ddd",
+                                fontSize: "0.85rem",
+                                lineHeight: 1.45,
+                                marginTop: "2px"
+                              }}
+                            >
+                              {r.texte}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
                       <button
                         onClick={lancerControleFiscal}
                         style={{
