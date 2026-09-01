@@ -50,6 +50,41 @@
         "#AD1457" // framboise
       ];
 
+      // Les cartes livrées avec le jeu. Chacune a son bouton dédié sur la
+      // borne, donc le code les connaît par leur identifiant. Une partie
+      // enregistrée avant l'ajout d'une carte ne la verra pas apparaître
+      // toute seule : ces réglages-là sont partagés et sauvegardés, et la
+      // valeur par défaut ne sert qu'à une base vierge. D'où le bouton
+      // « Rétablir les cartes livrées » dans l'admin.
+      const CARTES_LIVREES = [
+        {
+          id: "veinard",
+          nom: "Le Veinard",
+          definition:
+            "Usage unique : quand vous rendez vos jetons au croupier, réduit votre perte de 50% ou augmente votre gain de 5%.",
+          phraseAnim: "La chance sourit !"
+        },
+        {
+          id: "paradis_fiscal",
+          nom: "Paradis Fiscal",
+          definition: "Masque votre position du classement.",
+          phraseAnim: "Disparition dans les îles..."
+        },
+        {
+          id: "controle_fiscal",
+          nom: "Contrôle Fiscal",
+          definition: "Saisit des fonds selon le lancer de dé.",
+          phraseAnim: "Le fisc frappe à la porte !"
+        },
+        {
+          id: "delit_initie",
+          nom: "Délit d'initié",
+          definition:
+            "Usage unique : vous révèle le vainqueur de la prochaine course dont les paris sont encore ouverts, et l'heure de son départ. À vous d'aller miser chez le bookmaker.",
+          phraseAnim: "Une enveloppe change de mains..."
+        }
+      ];
+
       // ================= LE PLEIN ÉCRAN =================
       // Le navigateur n'accorde le plein écran que sur un geste de
       // l'utilisateur : impossible de le déclencher tout seul, d'où un bouton.
@@ -1340,34 +1375,10 @@
         const [penalites, setPenalites] = useEtatPartage("penalites", [
           { id: 1, nom: "Infraction Règle", montant: 300, type: "penalite" }
         ]);
-        const [cartesJeu, setCartesJeu] = useEtatPartage("cartesJeu", [
-          {
-            id: "veinard",
-            nom: "Le Veinard",
-            definition:
-              "Usage unique : quand vous rendez vos jetons au croupier, réduit votre perte de 50% ou augmente votre gain de 5%.",
-            phraseAnim: "La chance sourit !"
-          },
-          {
-            id: "paradis_fiscal",
-            nom: "Paradis Fiscal",
-            definition: "Masque votre position du classement.",
-            phraseAnim: "Disparition dans les îles..."
-          },
-          {
-            id: "controle_fiscal",
-            nom: "Contrôle Fiscal",
-            definition: "Saisit des fonds selon le lancer de dé.",
-            phraseAnim: "Le fisc frappe à la porte !"
-          },
-          {
-            id: "delit_initie",
-            nom: "Délit d'initié",
-            definition:
-              "Usage unique : vous révèle le vainqueur de la prochaine course dont les paris sont encore ouverts. À vous d'aller miser chez le bookmaker.",
-            phraseAnim: "Une enveloppe change de mains..."
-          }
-        ]);
+        const [cartesJeu, setCartesJeu] = useEtatPartage(
+          "cartesJeu",
+          CARTES_LIVREES
+        );
 
         // --- TABLE 6 : CONFIGURATION DES 3 DÉS (6 FACES CHACUN) ---
         const [desConfig, setDesConfig] = useEtatPartage("desConfig", [
@@ -4646,6 +4657,46 @@
                   >
                     + Ajouter une Carte
                   </button>
+                  {/* Les réglages sont partagés et sauvegardés : une carte
+                      ajoutée au jeu après le début d'une partie n'apparaît
+                      pas toute seule dans une liste déjà enregistrée. Ce
+                      bouton complète les manquantes sans toucher aux vôtres. */}
+                  {CARTES_LIVREES.some(
+                    (l) => !cartesJeu.some((c) => c.id === l.id)
+                  ) && (
+                    <button
+                      onClick={() =>
+                        setCartesJeu([
+                          ...cartesJeu,
+                          ...CARTES_LIVREES.filter(
+                            (l) => !cartesJeu.some((c) => c.id === l.id)
+                          )
+                        ])
+                      }
+                      style={{
+                        background: "#00838F",
+                        color: "#fff",
+                        border: "none",
+                        padding: "8px 15px",
+                        borderRadius: "4px",
+                        marginLeft: "8px"
+                      }}
+                    >
+                      ➕ Rétablir les cartes livrées (
+                      {
+                        CARTES_LIVREES.filter(
+                          (l) => !cartesJeu.some((c) => c.id === l.id)
+                        ).length
+                      }{" "}
+                      manquante
+                      {CARTES_LIVREES.filter(
+                        (l) => !cartesJeu.some((c) => c.id === l.id)
+                      ).length > 1
+                        ? "s"
+                        : ""}
+                      )
+                    </button>
+                  )}
                 </div>
 
                 {/* Table 1 : les joueurs */}
