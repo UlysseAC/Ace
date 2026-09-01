@@ -2063,6 +2063,61 @@
 
         // Remet à zéro tout ce qui appartient à la partie jouée, et rien de
         // ce qui a été réglé pour la soirée : missions, produits, pénalités,
+        // Un compte remis à neuf : le joueur garde son identité — nom,
+        // identifiant, code, ordre d'affichage — et perd tout le reste. Une
+        // seule définition, pour que « Nouvelle Partie » et « comptes à zéro »
+        // ne divergent jamais.
+        const compteVierge = (j) => ({
+          id: j.id,
+          code: j.code,
+          nom: j.nom,
+          ordre: j.ordre,
+          solde: 0,
+          totalMissions: 0,
+          totalJeux: 0,
+          nbPenalites: 0,
+          totalPenalites: 0,
+          jetonsEnJeu: 0,
+          croupierVendeur: null,
+          veinardActif: false,
+          achatsBoutique: 0,
+          argentVole: 0,
+          argentGagneCarte: 0,
+          paradisFiscal: false,
+          finParadis: 0,
+          tuyau: null,
+          deck: [],
+          historique: [],
+          avisBookmaker: [],
+          codesUtilises: [],
+          missionsFaites: [],
+          produitsAchetes: [],
+          penalitesSubies: []
+        });
+
+        // Vide la partie. Les deux boutons de remise à zéro passent par ici :
+        // sans ça, celui qui garde les joueurs oublierait l'historique de la
+        // salle, les paris et les investissements, et la « nouvelle » partie
+        // repartirait avec les traces de l'ancienne.
+        const viderLaPartie = (garderLesJoueurs) => {
+          setJoueurs((prev) => (garderLesJoueurs ? prev.map(compteVierge) : []));
+          setChequesImprimerie([]);
+          setCodesRegistre([]);
+          // Le bookmaker : paris en cours, argent engagé dans les projets, et
+          // l'horloge de la soirée qui cadence courses et blocs.
+          setParisJoueurs([]);
+          setParisCourse([]);
+          setInvestissements([]);
+          setSoireeDebut(0);
+          // Sans ça, la course lancée à la main pendant la partie précédente
+          // survivrait à la remise à zéro, avec son numéro.
+          setCourseManuelle(null);
+          setVitrine({ mode: "accueil" });
+          // Les traces de la partie précédente.
+          setHistoriqueFiscal([]);
+          setHistoriqueAffichage([configGlobale.phraseAucunHistorique]);
+        };
+
         // cartes, dés, chevaux, croupiers et surtout les projets
         // d'investissement restent en place. On efface les parties d'argent
         // en cours, pas le travail de préparation.
@@ -2079,22 +2134,7 @@
           ) {
             return;
           }
-          setJoueurs([]);
-          setChequesImprimerie([]);
-          setCodesRegistre([]);
-          // Le bookmaker : paris en cours, argent engagé dans les projets, et
-          // l'horloge de la soirée qui cadence courses et blocs.
-          setParisJoueurs([]);
-          setParisCourse([]);
-          setInvestissements([]);
-          setSoireeDebut(0);
-          // Sans ca, la course lancee a la main pendant la partie precedente
-          // survivrait a la remise a zero, avec son numero.
-          setCourseManuelle(null);
-          setVitrine({ mode: "accueil" });
-          // Les traces de la partie précédente.
-          setHistoriqueFiscal([]);
-          setHistoriqueAffichage([configGlobale.phraseAucunHistorique]);
+          viderLaPartie(false);
           setInterfaceActive("menu");
           alert(
             "Nouvelle partie initialisée !\n\n" +
@@ -4811,9 +4851,54 @@
                     borderRadius: "12px"
                   }}
                 >
-                  <h3 style={{ color: "#4CAF50", margin: "0 0 5px 0" }}>
-                    Table 1 : Joueurs ({joueurs.length})
-                  </h3>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "12px",
+                      flexWrap: "wrap"
+                    }}
+                  >
+                    <h3 style={{ color: "#4CAF50", margin: "0 0 5px 0" }}>
+                      Table 1 : Joueurs ({joueurs.length})
+                    </h3>
+                    {/* Rejouer avec les mêmes personnes sans les ressaisir :
+                        « Nouvelle Partie » les efface, celui-ci les garde. */}
+                    {joueurs.length > 0 && (
+                      <button
+                        onClick={() => {
+                          if (
+                            !window.confirm(
+                              "Repartir de zéro en gardant les joueurs ?\n\n" +
+                                `Les ${joueurs.length} joueurs sont conservés avec leur nom, ` +
+                                "leur identifiant et leur code. Vos réglages aussi.\n\n" +
+                                "Sont remis à zéro : soldes, jetons en jeu, cartes en main, " +
+                                "codes scannés, missions faites, achats et pénalités — et " +
+                                "aussi les paris, les investissements, les chèques imprimés, " +
+                                "l'historique de la salle et l'heure de début de soirée."
+                            )
+                          )
+                            return;
+                          viderLaPartie(true);
+                          alert(
+                            "Comptes remis à zéro. Les joueurs sont conservés."
+                          );
+                        }}
+                        style={{
+                          background: "#455A64",
+                          color: "#fff",
+                          border: "none",
+                          padding: "8px 14px",
+                          borderRadius: "6px",
+                          cursor: "pointer",
+                          fontSize: "0.85rem"
+                        }}
+                      >
+                        🧹 Remettre tous les comptes à 0
+                      </button>
+                    )}
+                  </div>
                   <p
                     style={{
                       margin: "0 0 15px 0",
