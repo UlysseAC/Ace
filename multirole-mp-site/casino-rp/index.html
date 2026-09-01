@@ -6965,27 +6965,72 @@
                   {champNombre("Plafond cumulé par cible", "misePlafondCumul", "0 = pas de plafond")}
                 </div>
 
-                <p style={{ color: "#888", fontSize: "0.8rem", marginTop: "12px" }}>
-                  Exemple avec les valeurs actuelles : un joueur avec{" "}
-                  {nombreSur(configBookmaker.refJetons, 2000)}$ de jetons, pari à{" "}
-                  {nombreSur(configBookmaker.refPourcentage, 20)} % → cote{" "}
-                  <strong>
-                    {calculerCote(
-                      nombreSur(configBookmaker.refJetons, 2000),
-                      nombreSur(configBookmaker.refPourcentage, 20),
-                      configBookmaker
-                    )}
-                  </strong>
-                  . Le double de jetons → cote{" "}
-                  <strong>
-                    {calculerCote(
-                      nombreSur(configBookmaker.refJetons, 2000) * 2,
-                      nombreSur(configBookmaker.refPourcentage, 20),
-                      configBookmaker
-                    )}
-                  </strong>
-                  .
-                </p>
+                {/* L'exemple d'avant prenait le joueur étalon : par
+                    construction sa cote ne bougeait jamais quand on touchait
+                    aux étalons, ce qui donnait l'impression qu'ils ne
+                    servaient à rien. On montre donc des tapis en francs, qui
+                    eux réagissent. */}
+                {(() => {
+                  const seuil = nombreSur(
+                    ((configBookmaker.seuilsPari || [])[0] || {}).pct,
+                    20
+                  );
+                  const refJ = nombreSur(configBookmaker.refJetons, 2000) || 1;
+                  const refP =
+                    nombreSur(configBookmaker.refPourcentage, 20) || 1;
+                  const facteur = nombreSur(configBookmaker.facteurCote, 0.8);
+                  const tapis = [1000, 2000, 3000, 5000];
+                  return (
+                    <div
+                      style={{
+                        marginTop: "12px",
+                        background: "#1a1a1a",
+                        borderRadius: "8px",
+                        padding: "12px 14px"
+                      }}
+                    >
+                      <div style={{ color: "#ccc", fontSize: "0.85rem" }}>
+                        Cote d'un pari à {seuil} % selon le tapis du joueur :
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "14px",
+                          flexWrap: "wrap",
+                          marginTop: "6px"
+                        }}
+                      >
+                        {tapis.map((t) => {
+                          const cote = calculerCote(t, seuil, configBookmaker);
+                          const brute = 1 + (t / refJ) * (seuil / refP) * facteur;
+                          const borne = Math.abs(brute - cote) > 0.005;
+                          return (
+                            <span key={t} style={{ fontSize: "0.9rem" }}>
+                              {t.toLocaleString()}$ →{" "}
+                              <strong style={{ color: borne ? "#FF9800" : "#8BC34A" }}>
+                                {cote}
+                              </strong>
+                              {borne ? " (borné)" : ""}
+                            </span>
+                          );
+                        })}
+                      </div>
+                      <p style={{ color: "#888", fontSize: "0.78rem", margin: "10px 0 0" }}>
+                        Les deux étalons sont un point fixe : un joueur qui a
+                        exactement {refJ.toLocaleString()}$ et parie à {refP} %
+                        aura toujours la cote {Math.round((1 + facteur) * 100) / 100},
+                        quoi que vous mettiez dans les étalons. C'est ailleurs
+                        que leur réglage se voit — d'où le tableau ci-dessus.
+                      </p>
+                      <p style={{ color: "#888", fontSize: "0.78rem", margin: "6px 0 0" }}>
+                        En orange, une cote ramenée au plancher ou au plafond :
+                        la formule donnait autre chose. Et un joueur sans
+                        jetons en jeu n'a pas de cote du tout — le pari est
+                        refusé.
+                      </p>
+                    </div>
+                  );
+                })()}
 
                 <h4 style={{ color: "#81C784" }}>
                   Protection de la cible (dégressive, 3 paris au plus)
