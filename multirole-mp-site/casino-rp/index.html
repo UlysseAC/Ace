@@ -48,6 +48,44 @@
         return "";
       };
 
+      // ---- Le temps de garde d'une carte ----
+      // Une carte scannée ne part pas au quart de tour : le joueur doit la
+      // garder un moment en main. Le délai se règle dans l'admin, et chaque
+      // carte dit si elle l'observe — sinon elle est jouable tout de suite.
+      const DELAI_CARTE_DEFAUT = 15;
+
+      const attenteCarte = (carte, cartes, cfg) => {
+        // On lit le réglage sur la carte du jeu, pas sur la copie posée dans
+        // le deck : décocher la case dans l'admin libère aussitôt les cartes
+        // déjà distribuées.
+        const modele =
+          (cartes || []).find((x) => x.id === (carte || {}).id) || carte || {};
+        if (modele.delaiAvantUsage === false) return 0;
+        return (
+          Math.max(0, nombreSur((cfg || {}).delaiCarteMin, DELAI_CARTE_DEFAUT)) *
+          60000
+        );
+      };
+
+      // Ce qu'il reste à patienter, en millisecondes. Zéro = jouable.
+      const resteAvantUsage = (carte, cartes, cfg, maintenant) => {
+        const attente = attenteCarte(carte, cartes, cfg);
+        if (!attente) return 0;
+        const recu = nombreSur((carte || {}).recuLe, 0);
+        // Une carte ramassée avant ce réglage n'a pas d'horodatage : on ne va
+        // pas la bloquer pour autant.
+        if (!recu) return 0;
+        return Math.max(0, recu + attente - maintenant);
+      };
+
+      const compteARebours = (ms) => {
+        const s = Math.ceil(Math.max(0, ms) / 1000);
+        if (s < 60) return `${s} s`;
+        const m = Math.floor(s / 60);
+        const r = s % 60;
+        return r ? `${m} min ${String(r).padStart(2, "0")} s` : `${m} min`;
+      };
+
       const COULEURS_FACE = {
         Rouge: "#f44336",
         Vert: "#4CAF50",
@@ -106,6 +144,7 @@
             "Armez-la depuis votre deck AVANT de vous asseoir à une table.\n" +
             "Elle ne se consomme qu'au moment où vous rendez vos jetons au croupier : si vous avez perdu, votre perte est réduite de moitié ; si vous avez gagné, votre gain augmente. Tant qu'elle n'a pas joué, elle reste dans votre deck.\n\n" +
             "À savoir : tant que vous détenez cette carte, personne ne peut parier sur vous.",
+          delaiAvantUsage: true,
           phraseAnim: "La chance sourit !"
         },
         {
@@ -117,6 +156,7 @@
             "Activez-la depuis votre deck. Vous quittez le classement de l'écran de la salle pour la durée réglée par l'organisateur.\n\n" +
             "Les autres joueurs gardent leur numéro : si vous étiez premier, la liste commence au numéro 2. La salle devine donc qu'il y a quelqu'un à votre place, sans savoir qui.\n\n" +
             "Impossible à activer si vous avez des jetons en jeu : rendez-les d'abord à votre croupier.",
+          delaiAvantUsage: true,
           phraseAnim: "Disparition dans les îles..."
         },
         {
@@ -126,6 +166,7 @@
           modeEmploi:
             "Activez-la depuis votre deck, choisissez votre cible et lancez le dé. La face tirée décide de la part que vous lui prenez.\n\n" +
             "Deux limites : on ne peut pas viser quelqu'un qui s'est isolé au paradis fiscal, et l'attaque est bloquée juste avant et juste après une course de chevaux — la salle doit regarder la piste, pas deux animations à la fois.",
+          delaiAvantUsage: true,
           phraseAnim: "Le fisc frappe à la porte !"
         },
         {
@@ -137,6 +178,7 @@
             "Activez-la depuis votre deck. Elle vous donne le vainqueur de la prochaine course encore ouverte aux paris, et dans combien de temps elle part. Si les paris de la course en cours sont déjà clos, elle vous donne la suivante.\n\n" +
             "Le tuyau reste affiché sur cette borne jusqu'à ce que la course ait eu lieu : vous pouvez le relire. Personne d'autre ne le voit — la salle apprend seulement qu'une enveloppe a changé de mains.\n\n" +
             "À vous de filer chez le bookmaker avant le top départ.",
+          delaiAvantUsage: true,
           phraseAnim: "Une enveloppe change de mains..."
         }
       ];
@@ -1553,6 +1595,8 @@
           dureeArret: 2,
           dureeInactiviteSec: 120,
           raccourcisTactiles: [100, 500, 1000, 5000],
+          // Combien de temps une carte reste en main avant d'être jouable.
+          delaiCarteMin: DELAI_CARTE_DEFAUT,
           modeLocal: false,
           modeScanneur: "simulator",
           bonusVeinardGain: 5,
@@ -3372,7 +3416,9 @@
                   );
                   listMissionsFaites.push(objetDonnee.id);
                 } else if (type === "carte") {
-                  deckNv.push(objetDonnee);
+                  // L'heure du ramassage : c'est d'elle que part le temps de
+                  // garde avant de pouvoir jouer la carte.
+                  deckNv.push({ ...objetDonnee, recuLe: Date.now() });
                   histNv.unshift(`Carte récupérée : ${objetDonnee.nom}`);
                 }
 
@@ -4549,6 +4595,28 @@
                     </label>
 
                     <label>
+                      Temps de garde d'une carte (min) :{" "}
+                      <input
+                        type="number"
+                        value={nombreSur(
+                          configGlobale.delaiCarteMin,
+                          DELAI_CARTE_DEFAUT
+                        )}
+                        onChange={(e) =>
+                          setConfigGlobale({
+                            ...configGlobale,
+                            delaiCarteMin: Number(e.target.value)
+                          })
+                        }
+                        style={{ width: "100%", padding: "5px" }}
+                      />
+                      <span style={{ color: "#777", fontSize: "0.78rem" }}>
+                        Après le scan, avant de pouvoir la jouer. Carte par
+                        carte, la case se décoche dans l'éditeur des cartes.
+                      </span>
+                    </label>
+
+                    <label>
                       Déconnexion borne après (s) :{" "}
                       <input
                         type="number"
@@ -5127,6 +5195,39 @@
                           resize: "vertical"
                         }}
                       />
+                      {/* Certaines cartes doivent mûrir en main, d'autres
+                          se jouent tout de suite. Le délai lui-même se règle
+                          une fois pour toutes dans la configuration
+                          globale. */}
+                      <label
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          fontSize: "0.8rem",
+                          color: c.delaiAvantUsage === false ? "#81C784" : "#FFC107"
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={c.delaiAvantUsage !== false}
+                          onChange={(e) =>
+                            setCartesJeu(
+                              cartesJeu.map((x, i) =>
+                                i === idx
+                                  ? { ...x, delaiAvantUsage: e.target.checked }
+                                  : x
+                              )
+                            )
+                          }
+                        />
+                        {c.delaiAvantUsage === false
+                          ? "Jouable dès le scan"
+                          : `À garder ${nombreSur(
+                              configGlobale.delaiCarteMin,
+                              DELAI_CARTE_DEFAUT
+                            )} min en main avant de pouvoir la jouer`}
+                      </label>
                       <label style={{ fontSize: "0.75rem", color: "#aaa" }}>
                         Phrase pour l'écran de la salle, à l'activation
                       </label>
@@ -5195,6 +5296,7 @@
                           id: "c_" + Date.now(),
                           nom: "Nouvelle Carte",
                           definition: "...",
+                          delaiAvantUsage: true,
                           phraseAnim: "Effet mystère !"
                         }
                       ])
@@ -6803,7 +6905,48 @@
                               </div>
                             ) : null}
 
-                            {c.id === "controle_fiscal" ? (
+                            {resteAvantUsage(
+                              c,
+                              cartesJeu,
+                              configGlobale,
+                              maintenant
+                            ) > 0 ? (
+                              // Le temps de garde n'est pas écoulé : la carte
+                              // est là, lisible, mais elle ne se joue pas
+                              // encore.
+                              <div
+                                style={{
+                                  padding: "10px",
+                                  background: "#1a1a1a",
+                                  border: "1px dashed #666",
+                                  borderRadius: "4px",
+                                  textAlign: "center",
+                                  color: "#FFC107"
+                                }}
+                              >
+                                <div style={{ fontWeight: "bold" }}>
+                                  ⏳ Jouable dans{" "}
+                                  {compteARebours(
+                                    resteAvantUsage(
+                                      c,
+                                      cartesJeu,
+                                      configGlobale,
+                                      maintenant
+                                    )
+                                  )}
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: "0.78rem",
+                                    color: "#999",
+                                    marginTop: "3px"
+                                  }}
+                                >
+                                  Il faut la garder en main un moment avant de
+                                  s'en servir.
+                                </div>
+                              </div>
+                            ) : c.id === "controle_fiscal" ? (
                               <button
                                 onClick={() =>
                                   setSousMenuBanque("activer_fiscal")
@@ -9709,6 +9852,17 @@
             ? jC.deck.some((c) => c.id === "veinard")
             : false;
           const aLeVeinard = jC ? !!jC.veinardActif && detientVeinard : false;
+          // Le temps de garde vaut aussi à la table : le croupier ne peut pas
+          // armer pour le joueur une carte qu'il vient tout juste de scanner.
+          const veinardEnMain = jC
+            ? jC.deck.find((c) => c.id === "veinard")
+            : null;
+          const attenteVeinard = resteAvantUsage(
+            veinardEnMain,
+            cartesJeu,
+            configGlobale,
+            maintenant
+          );
 
           return (
             <div
@@ -9880,6 +10034,18 @@
                     <div style={{ fontWeight: "bold", marginBottom: "8px" }}>
                       ✨ Ce joueur possède la carte Le Veinard, non activée
                     </div>
+                    {attenteVeinard > 0 && (
+                      <div
+                        style={{
+                          fontWeight: "bold",
+                          marginBottom: "8px",
+                          color: "#7f1d1d"
+                        }}
+                      >
+                        ⏳ Pas encore jouable — {compteARebours(attenteVeinard)}
+                        {" à attendre."}
+                      </div>
+                    )}
                     <div style={{ fontSize: "0.9rem", marginBottom: "10px" }}>
                       Lui demander s'il souhaite l'utiliser sur cette table.
                       Usage unique : elle réduira sa perte de{" "}
@@ -9887,21 +10053,29 @@
                       de {configGlobale.bonusVeinardGain}%.
                     </div>
                     <button
-                      onClick={() =>
+                      onClick={() => {
+                        if (attenteVeinard > 0) {
+                          alert(
+                            "Cette carte vient d'être scannée : elle sera " +
+                              `jouable dans ${compteARebours(attenteVeinard)}.`
+                          );
+                          return;
+                        }
                         setJoueurs((prev) =>
                           prev.map((j) =>
                             j.id === jC.id ? { ...j, veinardActif: true } : j
                           )
-                        )
-                      }
+                        );
+                      }}
+                      disabled={attenteVeinard > 0}
                       style={{
                         padding: "10px 18px",
-                        background: "#00BCD4",
-                        color: "#000",
+                        background: attenteVeinard > 0 ? "#555" : "#00BCD4",
+                        color: attenteVeinard > 0 ? "#999" : "#000",
                         border: "none",
                         borderRadius: "6px",
                         fontWeight: "bold",
-                        cursor: "pointer"
+                        cursor: attenteVeinard > 0 ? "not-allowed" : "pointer"
                       }}
                     >
                       Activer pour ce joueur
