@@ -856,9 +856,30 @@
       // referait à chaque battement d'horloge pendant toute la course.
       const trameEnMemoire = new Map();
 
-      const tirerTrame = (numero, n, tours) => {
+      // `herbes` : { index, pct } quand une fiole a été versée sur un cheval
+      // de cette course. Elle lui donne des chances en plus de gagner, et la
+      // certitude de ne pas finir dernier.
+      const tirerTrame = (numero, n, tours, herbes) => {
         const alea = semer(numero * 7919 + 13);
-        const gagnant = Math.floor(alea() * n);
+        let gagnant = Math.floor(alea() * n);
+        // Le dé des herbes est toujours lancé, fiole ou pas : la suite du
+        // tirage reste identique, et un appareil qui n'aurait pas encore reçu
+        // la fiole ne verrait pas une tout autre course.
+        const deHerbes = alea();
+        const iHerbes =
+          herbes && Number.isFinite(Number(herbes.index)) ? Number(herbes.index) : -1;
+        const aLesHerbes = iHerbes >= 0 && iHerbes < n;
+        if (aLesHerbes) {
+          const part =
+            Math.max(0, Math.min(100, nombreSur((herbes || {}).pct, 20))) / 100;
+          // Le réglage dit « tant de chances EN PLUS ». Or le cheval gagnait
+          // déjà une course sur n tout seul : forcer la victoire une fois sur
+          // cinq ne lui rapporterait que quinze points, pas vingt. On force
+          // donc un peu plus souvent, pour que le compte y soit.
+          const naturel = 1 / n;
+          const force = naturel >= 1 ? 1 : Math.min(1, part / (1 - naturel));
+          if (deHerbes < force) gagnant = iHerbes;
+        }
 
         const tirerProfils = () => {
           const bruts = Array.from({ length: n }, (rien, i) => {
@@ -906,6 +927,23 @@
           // ligne : ce qui les départage, c'est le moment où ils la coupent.
           // Le vainqueur arrive avant la fin de l'animation, le dernier pile à
           // la fin — la course s'arrête donc quand le dernier est rentré.
+          // Le cheval aux herbes ne finit jamais dernier : s'il l'était, on
+          // échange son écart avec celui qui le précédait — les deux se
+          // doublent, personne d'autre ne bouge.
+          if (aLesHerbes && n > 1) {
+            const parEcart = bruts
+              .map((pr, i) => ({ i, ecart: pr.ecart }))
+              .sort((a, b) => a.ecart - b.ecart);
+            const dernier = parEcart[parEcart.length - 1];
+            if (dernier.i === iHerbes) {
+              const avant = parEcart[parEcart.length - 2];
+              const garde = bruts[iHerbes].ecart;
+              bruts[iHerbes].ecart = bruts[avant.i].ecart;
+              bruts[avant.i].ecart = garde;
+              bruts[iHerbes].arrivee = 1 - bruts[iHerbes].ecart;
+              bruts[avant.i].arrivee = 1 - bruts[avant.i].ecart;
+            }
+          }
           const retardMax = Math.max(0, ...bruts.map((pr) => pr.ecart));
           return bruts.map((pr) => ({
             ...pr,
@@ -932,8 +970,8 @@
 
       // L'ordre d'arrivée complet, du vainqueur au dernier. C'est l'écart à
       // l'arrivée tiré au sort qui le décide, pas le déroulé de la course.
-      const ordreArrivee = (numero, chevaux, cfg) => {
-        const { profils } = trameCourse(numero, chevaux, cfg);
+      const ordreArrivee = (numero, chevaux, cfg, herbes) => {
+        const { profils } = trameCourse(numero, chevaux, cfg, herbes);
         return profils
           .map((pr, i) => ({ i, arrivee: pr.arrivee }))
           .sort((a, b) => b.arrivee - a.arrivee)
@@ -1025,13 +1063,24 @@
 
       const libelleRang = (rang) => `${rang + 1}${rang === 0 ? "er" : "e"}`;
 
-      const trameCourse = (numero, chevaux, cfg) => {
+      const trameCourse = (numero, chevaux, cfg, herbes) => {
         const n = chevaux.length || 1;
         const tours = Math.max(1, nombreSur(cfg.courseTours, 3));
-        const cle = numero + "|" + n + "|" + tours;
+        // La fiole fait partie de la clé : verser les herbes doit changer la
+        // course, pas ressortir celle déjà en mémoire.
+        const cle =
+          numero +
+          "|" +
+          n +
+          "|" +
+          tours +
+          "|" +
+          (herbes && Number.isFinite(Number(herbes.index))
+            ? `${herbes.index}@${nombreSur(herbes.pct, 20)}`
+            : "-");
         let trame = trameEnMemoire.get(cle);
         if (!trame) {
-          trame = tirerTrame(numero, n, tours);
+          trame = tirerTrame(numero, n, tours, herbes);
           // Une soirée n'aligne pas cent courses : on repart de zéro plutôt
           // que de laisser la mémoire enfler.
           if (trameEnMemoire.size > 40) trameEnMemoire.clear();
@@ -1455,16 +1504,22 @@
         </g>
       );
 
-      function PisteCourse({ numero, chevaux, cfg, depart, compact }) {
+      function PisteCourse({ numero, chevaux, cfg, depart, compact, herbes }) {
         const [t, setT] = React.useState(0);
         const [changements, setChangements] = React.useState({});
         const ordrePrecedent = React.useRef(null);
 
         const duree = (Number(cfg.courseDureeSec) || 45) * 1000;
         const tours = Number(cfg.courseTours) || 3;
+        const cleHerbes =
+          herbes && Number.isFinite(Number(herbes.index))
+            ? `${herbes.index}@${herbes.pct}`
+            : "-";
         const trame = React.useMemo(
-          () => trameCourse(numero, chevaux, cfg),
-          [numero, chevaux, cfg]
+          () => trameCourse(numero, chevaux, cfg, herbes),
+          // La fiole passe par sa clé : l'objet change d'identité à chaque
+          // rendu, son contenu non.
+          [numero, chevaux, cfg, cleHerbes]
         );
 
         // Boucle d'animation propre : l'horloge du jeu bat à la seconde, bien
@@ -2256,6 +2311,9 @@
         const [bkInvJoueurId, setBkInvJoueurId] = React.useState("");
         const [bkInvProjetId, setBkInvProjetId] = React.useState("");
         const [bkInvRang, setBkInvRang] = React.useState("");
+        // « Je paie avec le fonds, pas avec mon solde » : le joueur le dit au
+        // financier, le financier coche.
+        const [bkSurLeFonds, setBkSurLeFonds] = React.useState(false);
 
         // États Croupier
         const [tableCroupier, setTableCroupier] = React.useState("");
@@ -3134,7 +3192,7 @@
             ? `ressort avec +${seuil.pct} % de bénéfice`
             : `ressort avec −${seuil.pct} % de perte`;
 
-        const placerPariJoueur = (parieurId, cibleId, seuilId, mise) => {
+        const placerPariJoueur = (parieurId, cibleId, seuilId, mise, surLeFonds) => {
           const cfg = configBookmaker;
           const parieur = joueurs.find((j) => j.id === parieurId);
           const cible = joueurs.find((j) => j.id === cibleId);
@@ -3181,7 +3239,14 @@
               return;
             }
           }
-          if (m > parieur.solde) {
+          const fondsParieur = nombreSur(parieur.fondsDispo, 0);
+          if (surLeFonds && m > fondsParieur) {
+            alert(
+              `Fonds d'investissement insuffisant : ${fondsParieur}$ disponibles.`
+            );
+            return;
+          }
+          if (!surLeFonds && m > parieur.solde) {
             alert("Solde insuffisant.");
             return;
           }
@@ -3204,9 +3269,13 @@
               j.id === parieurId
                 ? {
                     ...j,
-                    solde: Math.max(0, j.solde - m),
+                    solde: surLeFonds ? j.solde : Math.max(0, j.solde - m),
+                    fondsDispo: surLeFonds
+                      ? Math.max(0, nombreSur(j.fondsDispo, 0) - m)
+                      : j.fondsDispo,
                     historique: [
-                      `Pari ${m}$ sur ${cible.nom} (${libelleSeuil(seuil)}) — cote ${cote}`,
+                      `Pari ${m}$ sur ${cible.nom} (${libelleSeuil(seuil)}) — cote ${cote}` +
+                        (surLeFonds ? " — payé sur le fonds" : ""),
                       ...j.historique
                     ]
                   }
@@ -3222,9 +3291,46 @@
         // ================= PARIS SUR LA COURSE =================
         const chevauxCourse = configBookmaker.chevaux || [];
 
+        // L'assurance tous risques : elle rembourse une part de ce qu'un
+        // joueur vient de perdre chez le financier, puis se consomme. Un
+        // règlement gagnant ne la touche pas.
+        // Renvoie { montant, ligne } ou null.
+        const rembourserAssurance = (joueur, perte) => {
+          if (!joueur || !joueur.assuranceActive) return null;
+          const p = Math.max(0, Math.round(nombreSur(perte, 0)));
+          if (p <= 0) return null;
+          const pct = Math.max(0, nombreSur(configGlobale.pctAssurance, 75));
+          const montant = Math.round((p * pct) / 100);
+          if (montant <= 0) return null;
+          return {
+            montant,
+            ligne: `Assurance tous risques : ${pct} % de ${p}$ perdus remboursés, +${montant}$`
+          };
+        };
+
+        // La fiole de cette course-là, traduite en indice de cheval : c'est
+        // ce que le tirage attend.
+        const herbesDe = (numero) => {
+          if (!herbesEnCours || !herbesEnCours.chevalId) return null;
+          if (Number(herbesEnCours.numero) !== Number(numero)) return null;
+          const index = chevauxCourse.findIndex(
+            (c) => String(c.id) === String(herbesEnCours.chevalId)
+          );
+          if (index < 0) return null;
+          return {
+            index,
+            pct: Math.max(0, nombreSur(configGlobale.herbesPctPremier, 20))
+          };
+        };
+
         const chevalGagnant = (numero) => {
           if (!numero || !chevauxCourse.length) return null;
-          const { gagnant } = trameCourse(numero, chevauxCourse, configBookmaker);
+          const { gagnant } = trameCourse(
+            numero,
+            chevauxCourse,
+            configBookmaker,
+            herbesDe(numero)
+          );
           return chevauxCourse[gagnant] || null;
         };
 
@@ -3281,6 +3387,39 @@
               "vous choisirez. La carte partira une fois la course courue."
           );
           setSousMenuBanque("accueil");
+        };
+
+        // La case « payer sur le fonds », proposée au financier dès que le
+        // joueur choisi en a un d'ouvert. Elle se décoche dès qu'on change de
+        // joueur : un fonds ne se prête pas.
+        const caseFonds = (joueurId) => {
+          const j = joueurs.find((x) => x.id === joueurId);
+          const dispo = nombreSur((j || {}).fondsDispo, 0);
+          if (!j || dispo <= 0) return null;
+          return (
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                background: "#00352e",
+                border: "1px solid #00695C",
+                borderRadius: "8px",
+                padding: "10px 12px",
+                margin: "4px 0 10px",
+                fontSize: "0.9rem",
+                color: "#80CBC4"
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={bkSurLeFonds}
+                onChange={(e) => setBkSurLeFonds(e.target.checked)}
+              />
+              📈 Payer sur le fonds d'investissement de {j.nom} —{" "}
+              <strong>{dispo}$ disponibles</strong>, son solde ne bouge pas.
+            </label>
+          );
         };
 
         // ================= LE PICKPOCKET =================
@@ -3492,6 +3631,7 @@
           )
             return;
           setCourseManuelle(null);
+          setHerbesEnCours(null);
           // Les tuyaux désignent des courses qui n'existeront plus : gardés,
           // ils réapparaîtraient au joueur dès que la numérotation les
           // rattraperait.
@@ -3500,7 +3640,7 @@
           );
         };
 
-        const placerPariCourse = (joueurId, chevalId, mise) => {
+        const placerPariCourse = (joueurId, chevalId, mise, surLeFonds) => {
           const joueur = joueurs.find((j) => j.id === joueurId);
           const cheval = chevauxCourse.find(
             (c) => String(c.id) === String(chevalId)
@@ -3530,7 +3670,14 @@
             alert(`La mise ne peut pas dépasser ${plafond} par pari.`);
             return;
           }
-          if (m > joueur.solde) {
+          const fonds = nombreSur(joueur.fondsDispo, 0);
+          if (surLeFonds && m > fonds) {
+            alert(
+              `Fonds d'investissement insuffisant : ${fonds}$ disponibles.`
+            );
+            return;
+          }
+          if (!surLeFonds && m > joueur.solde) {
             alert("Solde insuffisant.");
             return;
           }
@@ -3552,14 +3699,28 @@
               ts: Date.now()
             }
           ]);
+          // La fiole d'herbes attendait un cheval : c'est celui-ci. Elle ne
+          // s'attache qu'au premier pari de son porteur sur cette course.
+          const saFiole =
+            herbesEnCours &&
+            herbesEnCours.joueurId === joueurId &&
+            !herbesEnCours.chevalId &&
+            Number(herbesEnCours.numero) === Number(course.numero);
+          if (saFiole) setHerbesEnCours({ ...herbesEnCours, chevalId: cheval.id });
+
           setJoueurs((prev) =>
             prev.map((j) =>
               j.id === joueurId
                 ? {
                     ...j,
-                    solde: Math.max(0, j.solde - m),
+                    solde: surLeFonds ? j.solde : Math.max(0, j.solde - m),
+                    fondsDispo: surLeFonds
+                      ? Math.max(0, nombreSur(j.fondsDispo, 0) - m)
+                      : j.fondsDispo,
                     historique: [
-                      `Pari course n°${course.numero} : ${m}$ sur ${cheval.nom} (cote ${cote})`,
+                      `Pari course n°${course.numero} : ${m}$ sur ${cheval.nom} (cote ${cote})` +
+                        (surLeFonds ? " — payé sur le fonds" : "") +
+                        (saFiole ? " — vos herbes sont pour lui" : ""),
                       ...j.historique
                     ]
                   }
@@ -3586,11 +3747,17 @@
             const gagnant = chevalGagnant(numero);
             if (!gagnant) return;
             // Toutes les places paient, pas seulement la première.
-            const arrivee = ordreArrivee(numero, chevauxCourse, configBookmaker);
+            const arrivee = ordreArrivee(
+              numero,
+              chevauxCourse,
+              configBookmaker,
+              herbesDe(numero)
+            );
             const placeDe = (chevalId) =>
               arrivee.findIndex((c) => String(c.id) === String(chevalId));
 
             const gains = {};
+            const pertes = {};
             const lignes = {};
             const gagnantsSalle = new Set();
             // La salle veut savoir combien, pas seulement qui.
@@ -3608,6 +3775,11 @@
               const cheval = arrivee[place];
               const rang = place + 1;
               if (gain > 0) gains[p.joueurId] = (gains[p.joueurId] || 0) + gain;
+              // Ce que la mise n'a pas rendu : c'est là-dessus que
+              // l'assurance travaille.
+              const perte = Math.max(0, nombreSur(p.mise, 0) - gain);
+              if (perte > 0)
+                pertes[p.joueurId] = (pertes[p.joueurId] || 0) + perte;
               lignes[p.joueurId] = [
                 gain > 0
                   ? `Course n°${numero} : ${(cheval || {}).nom || "?"} ${rang}${rang === 1 ? "er" : "e"} (×${rapport}) : +${gain}$`
@@ -3640,13 +3812,16 @@
             setJoueurs((prev) =>
               prev.map((j) => {
                 const gain = gains[j.id] || 0;
-                const l = lignes[j.id];
-                if (!gain && !l) return j;
+                const rembourse = rembourserAssurance(j, pertes[j.id] || 0);
+                const l = [...(lignes[j.id] || [])];
+                if (rembourse) l.unshift(rembourse.ligne);
+                if (!gain && !l.length && !rembourse) return j;
                 return {
                   ...j,
-                  solde: j.solde + gain,
-                  historique: [...(l || []), ...j.historique],
-                  avisBookmaker: [...(l || []), ...(j.avisBookmaker || [])]
+                  solde: j.solde + gain + (rembourse ? rembourse.montant : 0),
+                  assuranceActive: rembourse ? false : j.assuranceActive,
+                  historique: [...l, ...j.historique],
+                  avisBookmaker: [...l, ...(j.avisBookmaker || [])]
                 };
               })
             );
@@ -3713,7 +3888,7 @@
         // Le joueur prend une place précise : la mise et le bénéfice de
         // cette place sont fixés d'avance, il ne reste qu'à savoir laquelle
         // il veut — et si elle est libre.
-        const investir = (joueurId, projetId, rang) => {
+        const investir = (joueurId, projetId, rang, surLeFonds) => {
           const projet = (configBookmaker.projets || []).find(
             (pr) => String(pr.id) === String(projetId)
           );
@@ -3739,7 +3914,15 @@
             return;
           }
           const m = place.mise;
-          if (m > joueur.solde) {
+          const fondsInv = nombreSur(joueur.fondsDispo, 0);
+          if (surLeFonds && m > fondsInv) {
+            alert(
+              `Fonds d'investissement insuffisant : ${fondsInv}$ disponibles, ` +
+                `la place en coûte ${m}$.`
+            );
+            return;
+          }
+          if (!surLeFonds && m > joueur.solde) {
             alert(
               `Solde insuffisant : la place de ${libelleRang(r)} investisseur ` +
                 `coûte ${m}$, ${joueur.nom} en a ${joueur.solde}.`
@@ -3796,9 +3979,13 @@
               j.id === joueurId
                 ? {
                     ...j,
-                    solde: Math.max(0, j.solde - m),
+                    solde: surLeFonds ? j.solde : Math.max(0, j.solde - m),
+                    fondsDispo: surLeFonds
+                      ? Math.max(0, nombreSur(j.fondsDispo, 0) - m)
+                      : j.fondsDispo,
                     historique: [
-                      `Investissement ${m}$ dans « ${projet.titre} » — place de ` +
+                      (surLeFonds ? "[Fonds] " : "") +
+                        `Investissement ${m}$ dans « ${projet.titre} » — place de ` +
                         `${libelleRang(r)} investisseur (+${place.gain} % si ça réussit)`,
                       ...j.historique
                     ]
@@ -3820,6 +4007,7 @@
             const remb = nombreSur(projet.remboursement, 0);
             const mouvements = {};
             const lignes = {};
+            const assures = new Set();
             (inst.investisseurs || []).forEach((x, i) => {
               // Le rang n'est plus l'ordre d'arrivée : c'est la place que le
               // joueur a choisie, et c'est elle qui décide du bénéfice.
@@ -3838,6 +4026,22 @@
                 const rendu = Math.round((mise * remb) / 100);
                 if (rendu > 0)
                   mouvements[x.joueurId] = (mouvements[x.joueurId] || 0) + rendu;
+                // Ce qui n'est pas revenu est une perte chez le financier :
+                // l'assurance la couvre.
+                const joueurPerdant = joueurs.find((y) => y.id === x.joueurId);
+                const couvert = rembourserAssurance(
+                  joueurPerdant,
+                  Math.max(0, mise - rendu)
+                );
+                if (couvert) {
+                  mouvements[x.joueurId] =
+                    (mouvements[x.joueurId] || 0) + couvert.montant;
+                  assures.add(x.joueurId);
+                  lignes[x.joueurId] = [
+                    couvert.ligne,
+                    ...(lignes[x.joueurId] || [])
+                  ];
+                }
                 lignes[x.joueurId] = [
                   remb > 0
                     ? `« ${projet.titre} » a échoué — ${remb} % remboursés : +${rendu}$`
@@ -3862,6 +4066,7 @@
                 return {
                   ...j,
                   solde: j.solde + gain,
+                  assuranceActive: assures.has(j.id) ? false : j.assuranceActive,
                   historique: [...(l || []), ...j.historique],
                   avisBookmaker: [...(l || []), ...(j.avisBookmaker || [])]
                 };
@@ -4046,6 +4251,33 @@
                 course.phase === PHASES.RESULTAT)
             );
           };
+          // La fiole d'herbes ne vaut que pour sa course. On attend qu'une
+          // course ultérieure existe : la retirer plus tôt rejouerait le
+          // tirage sans elle, podium compris, sous les yeux de la salle.
+          if (
+            herbesEnCours &&
+            course.numero !== undefined &&
+            course.numero !== null &&
+            Number(course.numero) > Number(herbesEnCours.numero)
+          ) {
+            const porteur = herbesEnCours.joueurId;
+            setHerbesEnCours(null);
+            setJoueurs((prev) =>
+              prev.map((j) =>
+                j.id === porteur
+                  ? {
+                      ...j,
+                      deck: j.deck.filter((c) => c.id !== "herbes_medicinales"),
+                      historique: [
+                        "Herbes médicinales : la course est passée, la fiole est vide",
+                        ...j.historique
+                      ]
+                    }
+                  : j
+              )
+            );
+          }
+
           if (joueurs.some((j) => tuyauPerime(j.tuyau)))
             setJoueurs((prev) =>
               prev.map((j) =>
@@ -4326,6 +4558,7 @@
 
           const gainsParParieur = {};
           const lignesParieur = {};
+          const pertesParParieur = {};
           const annoncesSalle = [];
           parisSurLui.forEach((pari) => {
             const gagne = pariGagne(pari);
@@ -4333,6 +4566,9 @@
             if (gain > 0) {
               gainsParParieur[pari.parieurId] =
                 (gainsParParieur[pari.parieurId] || 0) + gain;
+            } else {
+              pertesParParieur[pari.parieurId] =
+                (pertesParParieur[pari.parieurId] || 0) + nombreSur(pari.mise, 0);
             }
             const sens =
               pari.sens === "gain" ? `+${pari.pct} %` : `−${pari.pct} %`;
@@ -4383,11 +4619,16 @@
               // Les parieurs encaissent leur gain au passage.
               if (j.id !== jC.id) {
                 const gain = gainsParParieur[j.id] || 0;
-                const lignes = lignesParieur[j.id];
-                if (!gain && !lignes) return j;
+                const perdu = pertesParParieur[j.id] || 0;
+                const couvert = rembourserAssurance(j, perdu);
+                const lignes = couvert
+                  ? [couvert.ligne, ...(lignesParieur[j.id] || [])]
+                  : lignesParieur[j.id];
+                if (!gain && !lignes && !couvert) return j;
                 return {
                   ...j,
-                  solde: j.solde + gain,
+                  solde: j.solde + gain + (couvert ? couvert.montant : 0),
+                  assuranceActive: couvert ? false : j.assuranceActive,
                   historique: [...(lignes || []), ...j.historique],
                   // Avis à lire à sa prochaine connexion : le parieur n'était
                   // pas là au moment du dénouement.
@@ -9914,7 +10155,10 @@
                   <label>Le parieur</label>
                   <select
                     value={bkParieurId}
-                    onChange={(e) => setBkParieurId(e.target.value)}
+                    onChange={(e) => {
+                      setBkParieurId(e.target.value);
+                      setBkSurLeFonds(false);
+                    }}
                     style={champ}
                   >
                     <option value="">-- Choisir --</option>
@@ -9995,11 +10239,20 @@
                     style={champ}
                   />
 
+                  {caseFonds(bkParieurId)}
+
                   <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                     <button
                       onClick={() => {
-                        placerPariJoueur(bkParieurId, bkCibleId, bkSeuilId, bkMise);
+                        placerPariJoueur(
+                          bkParieurId,
+                          bkCibleId,
+                          bkSeuilId,
+                          bkMise,
+                          bkSurLeFonds
+                        );
                         setBkMise("");
+                        setBkSurLeFonds(false);
                       }}
                       className="checkbox-btn"
                       style={{ background: "#4CAF50" }}
@@ -10106,7 +10359,10 @@
                   <label>Le joueur</label>
                   <select
                     value={bkCourseJoueurId}
-                    onChange={(e) => setBkCourseJoueurId(e.target.value)}
+                    onChange={(e) => {
+                      setBkCourseJoueurId(e.target.value);
+                      setBkSurLeFonds(false);
+                    }}
                     style={champ}
                   >
                     <option value="">-- Choisir --</option>
@@ -10171,15 +10427,19 @@
                     style={champ}
                   />
 
+                  {caseFonds(bkCourseJoueurId)}
+
                   <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
                     <button
                       onClick={() => {
                         placerPariCourse(
                           bkCourseJoueurId,
                           bkCourseChevalId,
-                          bkCourseMise
+                          bkCourseMise,
+                          bkSurLeFonds
                         );
                         setBkCourseMise("");
+                        setBkSurLeFonds(false);
                       }}
                       className="checkbox-btn"
                       style={{ background: "#FFC107", color: "#000" }}
@@ -10398,7 +10658,10 @@
                   <label>L'investisseur</label>
                   <select
                     value={bkInvJoueurId}
-                    onChange={(e) => setBkInvJoueurId(e.target.value)}
+                    onChange={(e) => {
+                      setBkInvJoueurId(e.target.value);
+                      setBkSurLeFonds(false);
+                    }}
                     style={champ}
                   >
                     <option value="">-- Choisir --</option>
@@ -10544,10 +10807,18 @@
                     );
                   })()}
 
+                  {caseFonds(bkInvJoueurId)}
+
                   <button
                     onClick={() => {
-                      investir(bkInvJoueurId, bkInvProjetId, bkInvRang);
+                      investir(
+                        bkInvJoueurId,
+                        bkInvProjetId,
+                        bkInvRang,
+                        bkSurLeFonds
+                      );
                       setBkInvRang("");
+                      setBkSurLeFonds(false);
                       // La place devient « prise » : plus rien à désigner,
                       // mais le projet reste à l'écran pour le suivant.
                       if (bkInvProjetId)
@@ -10651,6 +10922,7 @@
                           numero={course.numero}
                           chevaux={chevauxCourse}
                           cfg={configBookmaker}
+                          herbes={herbesDe(course.numero)}
                           depart={course.depart}
                         />
                         {course.phase === PHASES.TOP && (
@@ -11601,6 +11873,7 @@
                         numero={course.numero}
                         chevaux={chevauxCourse}
                         cfg={configBookmaker}
+                        herbes={herbesDe(course.numero)}
                         depart={course.depart}
                       />
                       {course.phase === PHASES.TOP && (
@@ -11660,7 +11933,8 @@
                         {ordreArrivee(
                           course.numero,
                           chevauxCourse,
-                          configBookmaker
+                          configBookmaker,
+                          herbesDe(course.numero)
                         ).map((c, rang) => {
                           const rapport = rapportPourRang(configBookmaker, rang);
                           return (
