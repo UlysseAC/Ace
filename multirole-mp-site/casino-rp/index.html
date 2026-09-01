@@ -44,7 +44,11 @@
         if (face.type === "Vert")
           return `Attaque réussie : vous saisissez ${pct} % du solde de votre cible.`;
         if (face.type === "Don")
-          return `Solidarité : ${pct} % de chacun des deux soldes partent aux plus démunis.`;
+          return (
+            `Solidarité : ${pct} % de chacun des deux soldes sont saisis et ` +
+            `versés aux trois derniers du classement, pour les remettre à ` +
+            `hauteur.`
+          );
         return "";
       };
 
@@ -171,6 +175,77 @@
       const nombreSur = (v, secours) => {
         const n = Number(v);
         return Number.isFinite(n) ? n : secours;
+      };
+
+      // ---- Le don de solidarité ----
+      // Une face « Don » ne saupoudre pas : elle remonte le bas du classement.
+      // La cagnotte va aux trois derniers — y compris l'attaquant ou sa cible
+      // s'ils en font partie —, et sert d'abord à les mettre à hauteur, à dix
+      // dollars près. Quand elle n'y suffit pas on se rabat sur les deux
+      // derniers, et quand elle n'y suffit toujours pas le dernier prend
+      // tout : il reste de toute façon derrière l'avant-dernier.
+      const ECART_SOLIDAIRE = 10;
+
+      // `comptes` : [{ id, solde }] avec les soldes D'APRÈS la saisie. Celui
+      // qu'on vient de délester peut avoir rejoint les derniers, et c'est à sa
+      // nouvelle place qu'il doit compter.
+      // Renvoie { id: montant } — la somme des montants vaut exactement la
+      // cagnotte, au dollar près.
+      const repartirSolidarite = (cagnotte, comptes) => {
+        const pot = Math.max(0, Math.round(nombreSur(cagnotte, 0)));
+        if (pot <= 0 || !comptes || !comptes.length) return {};
+
+        const classes = [...comptes].sort(
+          (a, b) => nombreSur(a.solde, 0) - nombreSur(b.solde, 0)
+        );
+        const parts = {};
+        const verser = (id, montant) => {
+          if (montant > 0) parts[id] = (parts[id] || 0) + montant;
+        };
+
+        // Ce qu'il faut pour amener tout un groupe au niveau du plus riche
+        // d'entre eux, à l'écart toléré près. Personne ne redescend.
+        const niveauDe = (groupe) =>
+          Math.max(
+            0,
+            nombreSur(groupe[groupe.length - 1].solde, 0) - ECART_SOLIDAIRE
+          );
+        const manqueDe = (groupe, niveau) =>
+          groupe.reduce(
+            (t, j) => t + Math.max(0, niveau - nombreSur(j.solde, 0)),
+            0
+          );
+        // Le surplus se partage à parts égales ; les dollars indivisibles
+        // vont aux plus bas, le groupe étant rangé du plus pauvre au moins
+        // pauvre.
+        const partagerLeReste = (groupe, reste) => {
+          if (reste <= 0) return;
+          const part = Math.floor(reste / groupe.length);
+          let sup = reste - part * groupe.length;
+          groupe.forEach((j) => {
+            verser(j.id, part + (sup > 0 ? 1 : 0));
+            if (sup > 0) sup -= 1;
+          });
+        };
+
+        // 1. Les trois derniers à hauteur.
+        // 2. Sinon les deux derniers.
+        for (const combien of [3, 2]) {
+          if (classes.length < combien) continue;
+          const groupe = classes.slice(0, combien);
+          const niveau = niveauDe(groupe);
+          const manque = manqueDe(groupe, niveau);
+          if (pot < manque) continue;
+          groupe.forEach((j) =>
+            verser(j.id, Math.max(0, niveau - nombreSur(j.solde, 0)))
+          );
+          partagerLeReste(groupe, pot - manque);
+          return parts;
+        }
+
+        // 3. Sinon le dernier prend tout.
+        verser(classes[0].id, pot);
+        return parts;
       };
 
       // Cote d'un pari sur un joueur. Proportionnelle aux jetons engagés par
@@ -3771,11 +3846,33 @@
             valeurReelleAttaquant = -valL;
             valeurReelleCible = -valC;
 
-            const minSolde = Math.min(...joueursActifs.map((j) => j.solde));
-            const pauvres = joueursActifs.filter((j) => j.solde === minSolde);
-            const part = Math.round(cagnotte / pauvres.length);
-            donsDistribues = pauvres.map((p) => ({ id: p.id, montant: part }));
-            texteResultat = `Solidarité ! ${cagnotte}$ saisis et redistribués aux plus démunis.`;
+            // On classe sur les soldes d'APRÈS la saisie : l'attaquant et sa
+            // cible viennent de perdre de l'argent, et peuvent très bien être
+            // parmi les derniers — auquel cas ils touchent leur part comme
+            // les autres.
+            const apresSaisie = joueursActifs.map((j) => ({
+              id: j.id,
+              nom: j.nom,
+              solde: Math.max(
+                0,
+                j.solde +
+                  (j.id === jL.id ? -valL : 0) +
+                  (j.id === jC.id ? -valC : 0)
+              )
+            }));
+            const parts = repartirSolidarite(cagnotte, apresSaisie);
+            donsDistribues = Object.keys(parts).map((id) => ({
+              id,
+              montant: parts[id]
+            }));
+            const nomsServis = apresSaisie
+              .filter((j) => parts[j.id])
+              .sort((a, b) => a.solde - b.solde)
+              .map((j) => j.nom);
+            texteResultat =
+              `Solidarité ! ${cagnotte}$ saisis et versés au bas du ` +
+              `classement` +
+              (nomsServis.length ? ` : ${nomsServis.join(", ")}.` : ".");
           }
 
           const phraseInitiale = configGlobale.phraseAttaqueCible
