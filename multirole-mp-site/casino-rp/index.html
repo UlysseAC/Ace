@@ -269,15 +269,29 @@
         const intervalle = nombreSur(cfg.courseIntervalleMin, 30) * 60000;
         if (intervalle <= 0) return { active: false, phase: PHASES.AUCUNE };
 
+        // Combien de temps après « Démarrer la soirée » part la première
+        // course. Sans réglage, un intervalle entier — une demi-heure avec les
+        // valeurs livrées, pendant laquelle il ne se passe rien et où l'on
+        // croit que les courses ne se lancent pas. Une minute au minimum,
+        // sinon la première serait déjà partie avant le premier pari.
+        const premier = Math.max(
+          60000,
+          nombreSur(
+            cfg.coursePremiereMin,
+            Math.min(intervalle, 5 * 60000) / 60000
+          ) * 60000
+        );
+        const departDe = (n) => debutSoiree + premier + (n - 1) * intervalle;
+
         const ecoule = maintenant - debutSoiree;
-        // La première course a lieu au bout d'un intervalle, pas au démarrage.
-        const numeroSuivant = Math.floor(ecoule / intervalle) + 1;
+        const numeroSuivant =
+          ecoule < premier ? 1 : Math.floor((ecoule - premier) / intervalle) + 2;
 
         // Tant que la course précédente n'est pas finie — course puis temps
         // de résultat — c'est elle qui compte. Sans ça, l'horloge annoncerait
         // la course suivante alors que les chevaux sont encore en piste.
         const numeroPrecedent = numeroSuivant - 1;
-        const departPrecedent = debutSoiree + numeroPrecedent * intervalle;
+        const departPrecedent = departDe(numeroPrecedent);
         const depuisPrecedent = maintenant - departPrecedent;
         if (numeroPrecedent >= 1 && depuisPrecedent < dureeSec + resultat) {
           const enCourse = depuisPrecedent < dureeSec;
@@ -294,7 +308,7 @@
           };
         }
 
-        const depart = debutSoiree + numeroSuivant * intervalle;
+        const depart = departDe(numeroSuivant);
         const avantDepart = depart - maintenant;
         let phase = PHASES.AUCUNE;
         if (avantDepart <= topSec) phase = PHASES.TOP;
@@ -510,6 +524,16 @@
         const r = rapportsCourse(cfg);
         return rang >= 0 && rang < r.length ? r[rang] : 0;
       };
+
+      // La couleur d'un rapport dit une seule chose : est-ce que le joueur
+      // récupère au moins sa mise ? ×3 et ×1.5 rapportent, ×1 rend la mise,
+      // mais ×0.5 n'en rend que la moitié — c'est une perte, donc du rouge,
+      // au même titre que ×0.
+      const COULEUR_GAIN = "#4CAF50";
+      const COULEUR_PERTE = "#EF5350";
+      const gagnantPour = (rapport) => nombreSur(rapport, 0) >= 1;
+      const couleurRapport = (rapport) =>
+        gagnantPour(rapport) ? COULEUR_GAIN : COULEUR_PERTE;
 
       const trameCourse = (numero, chevaux, cfg) => {
         const n = chevaux.length || 1;
@@ -1569,6 +1593,7 @@
 
             // --- Course de chevaux ---
             courseIntervalleMin: 30,
+            coursePremiereMin: 5,
             courseAnnonceMin: 10,
             courseTopDepartSec: 15,
             courseDureeSec: 45,
@@ -4033,6 +4058,23 @@
                         )
                           return;
                       }
+                      // Le mode simulation reste en place d'une partie à
+                      // l'autre : démarrer la soirée sans s'en apercevoir,
+                      // c'est une soirée où aucune course ne part.
+                      if (configBookmaker.modeSimulation) {
+                        if (
+                          confirm(
+                            "Le mode simulation est actif : aucune course ne partira à l'heure.\n\n" +
+                              "OK : quitter la simulation et démarrer la vraie soirée.\n" +
+                              "Annuler : rester en simulation (courses lancées à la main)."
+                          )
+                        ) {
+                          setConfigBookmaker({
+                            ...configBookmaker,
+                            modeSimulation: false
+                          });
+                        }
+                      }
                       setSoireeDebut(Date.now());
                     }}
                     style={{
@@ -4050,6 +4092,57 @@
                       : "▶️ Démarrer la soirée"}
                   </button>
                 </div>
+              </div>
+
+              {/* Où en est l'horloge des courses. Sans cette ligne, la
+                  première demi-heure d'une soirée ne montre rien nulle part
+                  et l'on croit que les courses ne partent pas. */}
+              <div
+                style={{
+                  margin: "12px 0 0",
+                  padding: "10px 14px",
+                  borderRadius: "8px",
+                  background: "#1a1a1a",
+                  borderLeft: `4px solid ${
+                    configBookmaker.modeSimulation
+                      ? "#AB47BC"
+                      : soireeDebut
+                        ? "#FFC107"
+                        : "#5D4037"
+                  }`,
+                  fontSize: "0.9rem",
+                  color: "#ddd"
+                }}
+              >
+                {configBookmaker.modeSimulation ? (
+                  <span>
+                    🧪 Mode simulation : <strong>aucune course ne part à
+                    l'heure</strong>. Il faut les lancer à la main depuis le
+                    poste du bookmaker. Repassez en normal pour la vraie
+                    soirée.
+                  </span>
+                ) : !soireeDebut ? (
+                  <span>
+                    ⏸️ Soirée non démarrée : aucune course n'est programmée.
+                  </span>
+                ) : course.active && !course.enPreparation ? (
+                  <span>
+                    🏇 Course n°{course.numero} —{" "}
+                    {course.phase === PHASES.COURSE
+                      ? "en piste !"
+                      : course.phase === PHASES.RESULTAT
+                        ? "arrivée à l'écran"
+                        : delaiAvantDepart(course.depart)}
+                    {course.phase === PHASES.ANNONCE ||
+                    course.phase === PHASES.AUCUNE
+                      ? course.parisOuverts
+                        ? " · paris ouverts"
+                        : " · paris fermés"
+                      : ""}
+                  </span>
+                ) : (
+                  <span>⏱️ Aucune course programmée.</span>
+                )}
               </div>
 
               <div
@@ -7319,6 +7412,11 @@
                 </h3>
                 <div style={grille}>
                   {champNombre("Intervalle entre courses (min)", "courseIntervalleMin")}
+                  {champNombre(
+                    "Première course après (min)",
+                    "coursePremiereMin",
+                    "délai après « Démarrer la soirée » ; 1 min au minimum"
+                  )}
                   {champNombre("Annonce avant la course (min)", "courseAnnonceMin")}
                   {champNombre("Top départ (s)", "courseTopDepartSec")}
                   {champNombre(
@@ -8049,7 +8147,7 @@
                       >
                         {i + 1}
                         {i === 0 ? "er" : "e"}{" "}
-                        <strong style={{ color: r > 0 ? "#4CAF50" : "#EF5350" }}>
+                        <strong style={{ color: couleurRapport(r) }}>
                           ×{r}
                         </strong>
                       </span>
@@ -8691,8 +8789,10 @@
                       <span
                         key={`rapport-${i}`}
                         style={{
-                          background: r > 0 ? "#1a1a1a" : "#221414",
-                          border: `1px solid ${r > 0 ? "#455A64" : "#5d2a2a"}`,
+                          background: gagnantPour(r) ? "#1a1a1a" : "#221414",
+                          border: `1px solid ${
+                            gagnantPour(r) ? "#455A64" : "#5d2a2a"
+                          }`,
                           borderRadius: "10px",
                           padding: "8px 14px",
                           fontSize: "1.15rem"
@@ -8702,7 +8802,7 @@
                           {i + 1}
                           {i === 0 ? "er" : "e"}
                         </strong>{" "}
-                        <strong style={{ color: r > 0 ? "#4CAF50" : "#EF5350" }}>
+                        <strong style={{ color: couleurRapport(r) }}>
                           ×{r}
                         </strong>
                       </span>
@@ -9349,7 +9449,7 @@
                               <span style={{ flex: 1 }}>{c.nom}</span>
                               <strong
                                 style={{
-                                  color: rapport > 0 ? "#4CAF50" : "#EF5350"
+                                  color: couleurRapport(rapport)
                                 }}
                               >
                                 {/* Un tiret laissait croire à une place non
