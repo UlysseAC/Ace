@@ -3404,6 +3404,10 @@
           if (!cible) {
             alert(
               "Aucune course n'est ouverte aux paris pour l'instant.\n\n" +
+                (soireeDebut
+                  ? ""
+                  : "La soirée n'a pas démarré : l'organisateur doit appuyer " +
+                    "sur « Démarrer la soirée ».\n\n") +
                 "Gardez votre carte : elle ne se consomme pas."
             );
             return;
@@ -3602,7 +3606,18 @@
         };
 
         const courseAParier = () => {
-          if (!course.active || !course.numero) return null;
+          // En simulation, tant que le bookmaker n'a rien préparé, il n'y a
+          // aucune course « active » — et les cartes qui en dépendent, le
+          // délit d'initié et les herbes, refusaient de se jouer. Or le
+          // vainqueur ne dépend que du numéro de la course : on peut donc
+          // viser celle qui sera préparée ensuite, sans rien attendre.
+          if (!course.active || !course.numero) {
+            if (!configBookmaker.modeSimulation) return null;
+            const numeroAVenir = prochainNumeroManuel();
+            const chevalAVenir = chevalGagnant(numeroAVenir);
+            if (!chevalAVenir) return null;
+            return { numero: numeroAVenir, cheval: chevalAVenir, depart: null };
+          }
           const ouvert = course.parisOuverts;
           const numero = ouvert ? course.numero : course.numero + 1;
           const gagnant = chevalGagnant(numero);
@@ -3638,12 +3653,18 @@
         // En deux temps : on prépare la course — les paris s'ouvrent et rien
         // ne part —, puis on donne le top quand tout le monde a misé. Une
         // fenêtre minutée aurait obligé à courir après le chronomètre.
+        // Le numéro qu'aura la prochaine course lancée à la main. Il ne
+        // dépend que de la précédente, donc on peut le connaître avant même
+        // qu'elle soit préparée — et c'est ce qui permet de jouer les cartes
+        // liées aux courses en simulation, sans rien avoir lancé.
+        const prochainNumeroManuel = () =>
+          Math.max(1, (courseManuelle ? nombreSur(courseManuelle.numero, 0) : 0) + 1);
+
         const preparerCourse = () => {
           // On numérote à partir de 1, comme les courses à l'horaire. Aucun
           // risque de confusion : le lancement à la main n'existe qu'en
           // simulation, et la simulation ne programme aucune course.
-          const precedent = courseManuelle ? nombreSur(courseManuelle.numero, 0) : 0;
-          setCourseManuelle({ numero: Math.max(1, precedent + 1), depart: null });
+          setCourseManuelle({ numero: prochainNumeroManuel(), depart: null });
         };
 
         const donnerLeTopDepart = () => {
@@ -7917,6 +7938,10 @@
                                   if (!tuyau) {
                                     alert(
                                       "Aucune course n'est ouverte aux paris pour l'instant.\n\n" +
+                                        (soireeDebut
+                                          ? ""
+                                          : "La soirée n'a pas démarré : l'organisateur doit " +
+                                            "appuyer sur « Démarrer la soirée ».\n\n") +
                                         "Gardez votre carte : elle ne se consomme pas."
                                     );
                                     return;
