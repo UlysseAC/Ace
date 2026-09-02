@@ -187,6 +187,7 @@
           modeEmploi:
             "Activez-la depuis votre deck. Elle vous donne le vainqueur de la prochaine course encore ouverte aux paris, et dans combien de temps elle part. Si les paris de la course en cours sont déjà clos, elle vous donne la suivante.\n\n" +
             "Le tuyau reste affiché sur cette borne jusqu'au top départ : vous pouvez le relire autant que vous voulez d'ici là. Personne d'autre ne le voit — la salle apprend seulement qu'une enveloppe a changé de mains.\n\n" +
+            "Votre informateur est bon, mais la piste est vivante : s'il arrive que le tuyau se révèle faux avant le départ, la carte vous est rendue.\n\n" +
             "À vous de filer chez le bookmaker avant le top départ.",
           delaiAvantUsage: true,
           phraseAnim: "Une enveloppe change de mains..."
@@ -3407,14 +3408,31 @@
             );
             return;
           }
+          // Un délit d'initié a déjà nommé le vainqueur de cette course :
+          // verser les herbes dessus ferait mentir un tuyau déjà lu, et son
+          // porteur n'y pourrait rien. La fiole part donc sur la première
+          // course encore vierge de tuyau. Rien ne le dit à personne : le
+          // joueur lit juste un autre numéro, et le porteur du tuyau ignore
+          // qu'on a failli le souffler.
+          const tuyauPose = (n) =>
+            joueurs.some(
+              (j) =>
+                j.id !== joueurActuel.id &&
+                j.tuyau &&
+                Number(j.tuyau.numero) === Number(n)
+            );
+          let numeroFiole = Number(cible.numero);
+          // Bornée : au-delà de quelques courses d'avance, on s'arrête là.
+          for (let saut = 0; saut < 8 && tuyauPose(numeroFiole); saut++)
+            numeroFiole += 1;
           setHerbesEnCours({
             joueurId: joueurActuel.id,
-            numero: cible.numero,
+            numero: numeroFiole,
             chevalId: null
           });
           annoncerSalle([carte.phraseAnim]);
           alert(
-            `Fiole versée pour la course n°${cible.numero}.\n\n` +
+            `Fiole versée pour la course n°${numeroFiole}.\n\n` +
               "Allez miser chez le bookmaker : elle s'appliquera au cheval que " +
               "vous choisirez. La carte partira une fois la course courue."
           );
@@ -3722,6 +3740,63 @@
           );
         };
 
+        // L'autre ordre : une fiole versée AVANT qu'un délit d'initié ne
+        // soit lu. Le tuyau est alors calculé sans les herbes — elles n'ont
+        // pas encore de cheval — et la fiole ne se rattache qu'au moment où
+        // son porteur mise. Le tuyau, lui, est déjà figé sur un nom.
+        // Plutôt que de le laisser mentir, on lui rend sa carte : il ne saura
+        // jamais ni pourquoi, ni qui.
+        const rendreLesTuyauxSouffles = (numero, chevalHerbes, porteurFiole) => {
+          const index = chevauxCourse.findIndex(
+            (c) => String(c.id) === String(chevalHerbes)
+          );
+          if (index < 0) return;
+          const gagnantDe = (herbes) =>
+            (chevauxCourse[
+              trameCourse(numero, chevauxCourse, configBookmaker, herbes).gagnant
+            ] || {}).nom;
+          const avant = gagnantDe(null);
+          const apres = gagnantDe({
+            index,
+            pct: Math.max(0, nombreSur(configGlobale.herbesPctPremier, 20))
+          });
+          // Les herbes n'ont rien changé au vainqueur : tous les tuyaux
+          // tiennent encore.
+          if (!apres || avant === apres) return;
+          const modele = cartesJeu.find((c) => c.id === "delit_initie");
+          const rendue = Date.now();
+          setJoueurs((prev) =>
+            prev.map((j) => {
+              const souffle =
+                j.id !== porteurFiole &&
+                j.tuyau &&
+                Number(j.tuyau.numero) === Number(numero) &&
+                j.tuyau.cheval !== apres;
+              if (!souffle) return j;
+              const ligne =
+                `Tuyau soufflé sur la course n°${numero} : votre informateur ` +
+                "s'est trompé";
+              return {
+                ...j,
+                tuyau: null,
+                deck: modele
+                  ? [...(j.deck || []), { ...modele, recuLe: rendue }]
+                  : j.deck,
+                historique: [
+                  `${ligne} — carte [${modele ? modele.nom : "Délit d'initié"}] rendue`,
+                  ...j.historique
+                ],
+                // Il n'est pas devant sa borne : l'avis l'y attend.
+                avisBookmaker: [
+                  `${ligne}.\n\nVotre carte vous est rendue : elle repart avec ` +
+                    "son temps de garde à purger.",
+                  ...(j.avisBookmaker || [])
+                ]
+              };
+            })
+          );
+        };
+
         const placerPariCourse = (joueurId, chevalId, mise, surLeFonds) => {
           const joueur = joueurs.find((j) => j.id === joueurId);
           const cheval = chevauxCourse.find(
@@ -3782,7 +3857,10 @@
             herbesEnCours.joueurId === joueurId &&
             !herbesEnCours.chevalId &&
             Number(herbesEnCours.numero) === Number(course.numero);
-          if (saFiole) setHerbesEnCours({ ...herbesEnCours, chevalId: cheval.id });
+          if (saFiole) {
+            setHerbesEnCours({ ...herbesEnCours, chevalId: cheval.id });
+            rendreLesTuyauxSouffles(course.numero, cheval.id, joueurId);
+          }
 
           setJoueurs((prev) =>
             prev.map((j) =>
