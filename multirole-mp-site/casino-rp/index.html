@@ -150,6 +150,7 @@
           modeEmploi:
             "Armez-la depuis votre deck AVANT de vous asseoir à une table.\n" +
             "Elle ne se consomme qu'au moment où vous rendez vos jetons au croupier : si vous avez perdu, votre perte est réduite ; si vous avez gagné, votre gain augmente. Les chiffres exacts sont rappelés ci-dessous. Tant qu'elle n'a pas joué, elle reste dans votre deck.\n\n" +
+            "Si vous rendez exactement les jetons que vous aviez pris, elle n'a rien à bonifier : elle reste en main ET armée, prête pour la table suivante.\n\n" +
             "À savoir : tant que vous détenez cette carte, personne ne peut parier sur vous.",
           delaiAvantUsage: true,
           phraseAnim: "La chance sourit !"
@@ -5092,25 +5093,45 @@
             configBookmaker
           );
 
-          let bonus = 0;
+          // Les deux bonifications sont comptées à part. Le total seul ne
+          // dirait pas si la carte a joué : c'est pourtant lui qui décidait
+          // de la consommer.
+          let bonusVeinard = 0;
           if (aLeVeinard && resultat < 0) {
-            bonus += Math.round(
+            bonusVeinard = Math.round(
               (-resultat * configGlobale.bonusVeinardPertes) / 100
             );
           } else if (aLeVeinard && resultat > 0) {
-            bonus += Math.round(
+            bonusVeinard = Math.round(
               (resultat * configGlobale.bonusVeinardGain) / 100
             );
           }
           // Un joueur visé par un pari ne peut pas détenir de Veinard : les
           // deux effets ne se rencontrent jamais. On les additionne quand
           // même, pour que le crédit reste juste si la règle changeait.
+          let bonusProtection = 0;
           if (parisSurLui.length > 0 && resultat < 0) {
-            bonus += Math.round((-resultat * protection.perte) / 100);
+            bonusProtection = Math.round((-resultat * protection.perte) / 100);
           } else if (parisSurLui.length > 0 && resultat > 0) {
-            bonus += Math.round((resultat * protection.gain) / 100);
+            bonusProtection = Math.round((resultat * protection.gain) / 100);
           }
+          const bonus = bonusVeinard + bonusProtection;
           const credite = montant + bonus;
+
+          /*
+           * La carte n'a joué que si elle a réellement bonifié quelque chose.
+           *
+           * Rendre exactement le nombre de jetons qu'on avait pris — ni gain
+           * ni perte — ne lui donne rien à faire : elle reste en main, et
+           * armée. Elle était bien conservée jusqu'ici, mais on la désarmait
+           * au passage, sans le dire : le joueur repartait avec une carte
+           * qu'il croyait prête et qui ne l'était plus.
+           *
+           * On regarde la bonification du Veinard seule, et non le total :
+           * avec un pourcentage réglé à zéro, la protection d'un pari
+           * pouvait à elle seule faire croire que la carte avait servi.
+           */
+          const veinardAJoue = aLeVeinard && bonusVeinard > 0;
 
           // Un pari est gagné si le seuil est atteint dans le sens visé.
           const pariGagne = (pari) =>
@@ -5174,6 +5195,13 @@
                 ? `${origine} : perte de ${-resultat}$ réduite à ${-resultat - bonus}$. Crédit : ${credite}$`
                 : `${origine} : gain de ${resultat}$ porté à ${resultat + bonus}$. Crédit : ${credite}$`
             );
+          } else if (aLeVeinard) {
+            // Le croupier doit pouvoir le dire au joueur : sa carte n'a pas
+            // été gâchée.
+            alert(
+              "Partie à l'équilibre : [Le Veinard] n'avait rien à bonifier.\n\n" +
+                "Il reste en main, toujours armé pour la prochaine table."
+            );
           }
 
           setJoueurs((prev) =>
@@ -5208,8 +5236,11 @@
                 ...j.historique
               ];
               // La carte n'est consommée que si elle a réellement joué.
-              if (aLeVeinard && bonus > 0)
-                nvHist.unshift("Carte [Le Veinard] consommée");
+              if (veinardAJoue) nvHist.unshift("Carte [Le Veinard] consommée");
+              else if (aLeVeinard)
+                nvHist.unshift(
+                  "Carte [Le Veinard] : rien à bonifier, elle reste armée"
+                );
               return {
                 ...j,
                 solde: Math.max(0, j.solde + credite),
@@ -5217,11 +5248,12 @@
                 jetonsEnJeu: 0,
                 croupierVendeur: null,
                 jeuEnCours: null,
-                veinardActif: false,
-                deck:
-                  aLeVeinard && bonus > 0
-                    ? j.deck.filter((c) => c.id !== "veinard")
-                    : j.deck,
+                // Désarmée seulement si elle a servi : sinon elle reste
+                // prête, sans qu'on ait à la réarmer.
+                veinardActif: veinardAJoue ? false : j.veinardActif,
+                deck: veinardAJoue
+                  ? j.deck.filter((c) => c.id !== "veinard")
+                  : j.deck,
                 historique: nvHist
               };
             })
