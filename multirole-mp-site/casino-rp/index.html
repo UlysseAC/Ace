@@ -4361,7 +4361,12 @@
         const scannerCodeSimule = (type, objetDonnee) => {
           if (!joueurActuel) return;
           if (configGlobale.modeScanneur === "disabled") {
-            alert("Scanner désactivé. Activez-le dans l'Admin pour continuer.");
+            alert(
+              "La distribution des cartes à la borne est masquée.\n\n" +
+                "L'organisateur la remet dans l'Admin, « Distribution des " +
+                "cartes à la borne » — ce réglage n'a rien à voir avec le " +
+                "mode simulation du bookmaker."
+            );
             return;
           }
           if (configGlobale.modeLocal && type === "carte") {
@@ -5748,7 +5753,7 @@
                   </div>
                   <div style={{ marginTop: "15px" }}>
                     <label>
-                      Mode Scanneur :{" "}
+                      Distribution des cartes à la borne :{" "}
                       <select
                         value={
                           configGlobale.modeScanneur === "disabled"
@@ -5763,9 +5768,26 @@
                         }
                         style={{ width: "100%", padding: "8px", marginTop: "5px" }}
                       >
-                        <option value="disabled">🚫 Désactivé</option>
-                        <option value="simulator">🎮 Simulateur (codes générés)</option>
+                        <option value="simulator">
+                          🃏 Boutons affichés (missions et cartes)
+                        </option>
+                        <option value="disabled">
+                          🚫 Masqués — plus que la saisie de code
+                        </option>
                       </select>
+                      <span
+                        style={{
+                          display: "block",
+                          color: "#FFC107",
+                          fontSize: "0.8rem",
+                          marginTop: "4px"
+                        }}
+                      >
+                        Rien à voir avec le mode simulation du bookmaker.
+                        Masqués, les cartes deviennent impossibles à donner :
+                        la saisie de code ne reconnaît que les chèques de
+                        mission.
+                      </span>
                     </label>
                   </div>
                   <div style={{ marginTop: "15px" }}>
@@ -8648,10 +8670,29 @@
                         </div>
                       </div>
 
-                      {/* OPTION 2 : SIMULATEUR (si activé) */}
+                      {/* OPTION 2 : LES BOUTONS DE DISTRIBUTION */}
                       {/* Une partie enregistrée avant la suppression du scanner
                           caméra peut encore porter l'ancienne valeur "real" :
-                          tout ce qui n'est pas "disabled" affiche le simulateur. */}
+                          tout ce qui n'est pas "disabled" affiche les boutons. */}
+                      {configGlobale.modeScanneur === "disabled" && (
+                        <div
+                          style={{
+                            background: "#3E2723",
+                            border: "1px solid #8D6E63",
+                            borderRadius: "8px",
+                            padding: "12px 14px",
+                            marginBottom: "20px",
+                            color: "#D7CCC8",
+                            fontSize: "0.9rem",
+                            textAlign: "left"
+                          }}
+                        >
+                          🚫 Les boutons de distribution sont masqués. Seuls les
+                          codes de chèque fonctionnent ; aucune carte ne peut
+                          être donnée. L'organisateur les remet dans l'Admin,
+                          « Distribution des cartes à la borne ».
+                        </div>
+                      )}
                       {configGlobale.modeScanneur !== "disabled" && (
                         <div
                           style={{
@@ -8663,7 +8704,7 @@
                           }}
                         >
                           <h4 style={{ marginTop: 0, color: "#4CAF50" }}>
-                            🎮 Option 2 : Simuler un Scanning
+                            🃏 Option 2 : Missions et cartes
                           </h4>
                           <div
                             style={{
