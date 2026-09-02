@@ -1932,7 +1932,9 @@
                 dans la page et c'est leur position qui glisse. */}
             <div
               style={{
-                minWidth: compact ? "180px" : "220px",
+                // De quoi loger un nom de cheval un peu long sans que le
+                // gras du premier le fasse déborder.
+                minWidth: compact ? "200px" : "260px",
                 position: "relative",
                 height: `${classement.length * PAS_CLASSEMENT_COURSE}px`
               }}
@@ -1974,8 +1976,22 @@
                       fontWeight: rang === 0 ? "bold" : "normal"
                     }}
                   >
-                    <span style={{ width: "22px" }}>{rang + 1}.</span>
-                    <span style={{ flex: 1 }}>
+                    {/* Le rang garde sa colonne même en gras. */}
+                    <span style={{ width: "22px", flexShrink: 0 }}>
+                      {rang + 1}.
+                    </span>
+                    {/* minWidth:0 laisse la case rétrécir sous la taille du
+                        texte — sans lui, un nom long pousserait le tour hors
+                        de la ligne au lieu de se laisser rogner. */}
+                    <span
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis"
+                      }}
+                    >
                       {p.cheval.nom}
                       {boit && (
                         <span style={{ color: "#4FC3F7" }}> 🪣 il boit</span>
@@ -1984,7 +2000,13 @@
                         <span style={{ color: "#FFC107" }}> 💨 il rattrape</span>
                       )}
                     </span>
-                    <span style={{ color: "#888", fontSize: "0.78rem" }}>
+                    <span
+                      style={{
+                        color: "#888",
+                        fontSize: "0.78rem",
+                        flexShrink: 0
+                      }}
+                    >
                       tour {p.tour}
                     </span>
                   </div>
@@ -7802,7 +7824,7 @@
                           n'a pas encore parié est invité à passer voir le
                           bookmaker. S'il a déjà parié, on lui rappelle sur
                           quel cheval. */}
-                      {soireeDebut &&
+                      {!!soireeDebut &&
                         course.active &&
                         course.phase === PHASES.ANNONCE &&
                         (() => {
@@ -11697,7 +11719,7 @@
                   <p style={{ fontSize: "1.15rem", color: "#bbb" }}>
                     Paris sur les joueurs · Courses de chevaux · Investissements
                   </p>
-                  {course.active && soireeDebut && (
+                  {course.active && !!soireeDebut && (
                     <p style={{ fontSize: "1.3rem" }}>
                       🏇 Prochaine course dans{" "}
                       <strong>
@@ -12247,7 +12269,7 @@
               </div>
               {/* Décompte discret, dans un coin, seulement à l'approche. */}
               {course.active &&
-                soireeDebut &&
+                !!soireeDebut &&
                 course.phase === PHASES.ANNONCE && (
                   <div
                     style={{
@@ -12360,9 +12382,12 @@
                         <div style={{ fontSize: "5rem" }}>🏆</div>
                         <div
                           style={{
-                            fontSize: "3rem",
+                            // Sur un téléphone, un nom de deux mots en
+                            // 3 rem gras faisait déborder la page entière.
+                            fontSize: "clamp(1.8rem, 6vw, 3rem)",
                             fontWeight: "bold",
-                            color: vainqueur.couleur
+                            color: vainqueur.couleur,
+                            overflowWrap: "anywhere"
                           }}
                         >
                           {vainqueur.nom}
@@ -12371,7 +12396,7 @@
                       </div>
                       {/* Le reste du classement : ceux qui ont misé sur une
                           place payante doivent le voir tout de suite. */}
-                      <div style={{ minWidth: "320px" }}>
+                      <div style={{ minWidth: "min(320px, 100%)" }}>
                         {ordreArrivee(
                           course.numero,
                           chevauxCourse,
@@ -12394,11 +12419,19 @@
                                 fontSize: "1.4rem"
                               }}
                             >
-                              <strong style={{ width: "42px" }}>
+                              <strong style={{ width: "42px", flexShrink: 0 }}>
                                 {rang + 1}
                                 {rang === 0 ? "er" : "e"}
                               </strong>
-                              <span style={{ flex: 1 }}>{c.nom}</span>
+                              <span
+                                style={{
+                                  flex: 1,
+                                  minWidth: 0,
+                                  overflowWrap: "anywhere"
+                                }}
+                              >
+                                {c.nom}
+                              </span>
                               <strong
                                 style={{
                                   color: couleurRapport(rapport)
@@ -12506,7 +12539,7 @@
 
               {/* Les projets d'investissement ouverts, pour que la salle les
                   voie sans passer devant la vitrine du bookmaker. */}
-              {soireeDebut && projetsDuBloc.length > 0 && (
+              {!!soireeDebut && projetsDuBloc.length > 0 && (
                 <div
                   style={{
                     display: "flex",
