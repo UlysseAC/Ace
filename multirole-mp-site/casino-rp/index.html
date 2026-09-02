@@ -146,10 +146,10 @@
           id: "veinard",
           nom: "Le Veinard",
           definition:
-            "Usage unique : quand vous rendez vos jetons au croupier, réduit votre perte de 50% ou augmente votre gain de 5%.",
+            "Usage unique : quand vous rendez vos jetons au croupier, réduit votre perte ou augmente votre gain.",
           modeEmploi:
             "Armez-la depuis votre deck AVANT de vous asseoir à une table.\n" +
-            "Elle ne se consomme qu'au moment où vous rendez vos jetons au croupier : si vous avez perdu, votre perte est réduite de moitié ; si vous avez gagné, votre gain augmente. Tant qu'elle n'a pas joué, elle reste dans votre deck.\n\n" +
+            "Elle ne se consomme qu'au moment où vous rendez vos jetons au croupier : si vous avez perdu, votre perte est réduite ; si vous avez gagné, votre gain augmente. Les chiffres exacts sont rappelés ci-dessous. Tant qu'elle n'a pas joué, elle reste dans votre deck.\n\n" +
             "À savoir : tant que vous détenez cette carte, personne ne peut parier sur vous.",
           delaiAvantUsage: true,
           phraseAnim: "La chance sourit !"
@@ -162,6 +162,7 @@
           modeEmploi:
             "Activez-la depuis votre deck. Vous quittez le classement de l'écran de la salle pour la durée réglée par l'organisateur.\n\n" +
             "Les autres joueurs gardent leur numéro : si vous étiez premier, la liste commence au numéro 2. La salle devine donc qu'il y a quelqu'un à votre place, sans savoir qui.\n\n" +
+            "Tant que vous y êtes, l'impôt de fin de bloc ne vous prend rien — mais ne vous verse rien non plus.\n\n" +
             "Impossible à activer si vous avez des jetons en jeu : rendez-les d'abord à votre croupier.",
           delaiAvantUsage: true,
           phraseAnim: "Disparition dans les îles..."
@@ -169,10 +170,12 @@
         {
           id: "controle_fiscal",
           nom: "Contrôle Fiscal",
-          definition: "Saisit des fonds selon le lancer de dé.",
+          definition:
+            "Un lancer de dé qui déplace de l'argent : à vous, à votre cible, ou aux plus démunis. Tout dépend de la face.",
           modeEmploi:
-            "Activez-la depuis votre deck, choisissez votre cible et lancez le dé. La face tirée décide de la part que vous lui prenez.\n\n" +
-            "Deux limites : on ne peut pas viser quelqu'un qui s'est isolé au paradis fiscal, et l'attaque est bloquée juste avant et juste après une course de chevaux — la salle doit regarder la piste, pas deux animations à la fois.",
+            "Activez-la depuis votre deck, choisissez votre cible et lancez le dé. La face tirée décide de tout, et elle ne vous est pas toujours favorable : une face rouge vous fait payer votre cible, une verte vous fait saisir chez elle, une bleue prend sur vous deux pour le bas du classement. Les faces du dé choisi sont affichées avant le lancer.\n\n" +
+            "Deux limites : on ne peut pas viser quelqu'un qui s'est isolé au paradis fiscal, et l'attaque est bloquée juste avant et juste après une course de chevaux — la salle doit regarder la piste, pas deux animations à la fois.\n\n" +
+            "En revanche, aucun garde du corps n'arrête le fisc.",
           delaiAvantUsage: true,
           phraseAnim: "Le fisc frappe à la porte !"
         },
@@ -183,7 +186,7 @@
             "Usage unique : vous révèle le vainqueur de la prochaine course dont les paris sont encore ouverts, et l'heure de son départ. À vous d'aller miser chez le bookmaker.",
           modeEmploi:
             "Activez-la depuis votre deck. Elle vous donne le vainqueur de la prochaine course encore ouverte aux paris, et dans combien de temps elle part. Si les paris de la course en cours sont déjà clos, elle vous donne la suivante.\n\n" +
-            "Le tuyau reste affiché sur cette borne jusqu'à ce que la course ait eu lieu : vous pouvez le relire. Personne d'autre ne le voit — la salle apprend seulement qu'une enveloppe a changé de mains.\n\n" +
+            "Le tuyau reste affiché sur cette borne jusqu'au top départ : vous pouvez le relire autant que vous voulez d'ici là. Personne d'autre ne le voit — la salle apprend seulement qu'une enveloppe a changé de mains.\n\n" +
             "À vous de filer chez le bookmaker avant le top départ.",
           delaiAvantUsage: true,
           phraseAnim: "Une enveloppe change de mains..."
@@ -207,7 +210,8 @@
           modeEmploi:
             "Activez-la depuis votre deck et désignez votre victime, parmi ceux qui ont au moins une carte en main. Une de ses cartes passe dans votre deck, tirée au hasard : vous ne choisissez pas, et vous découvrez ce que vous avez pris une fois le coup fait.\n\n" +
             "Le Pickpocket, lui, passe dans la poche de votre victime : à elle de trouver quelqu'un à détrousser à son tour.\n\n" +
-            "La carte volée arrive avec son temps de garde à purger, comme si vous veniez de la ramasser. Personne d'autre que vous et votre victime ne sait ce qui a changé de mains.",
+            "La carte volée arrive avec son temps de garde à purger, comme si vous veniez de la ramasser. Personne d'autre que vous et votre victime ne sait ce qui a changé de mains.\n\n" +
+            "Attention : si votre victime a un garde du corps en poste, vous vous faites repousser. La carte vous reste, mais son temps de garde repart à zéro — il faudra patienter avant de retenter le coup.",
           delaiAvantUsage: true,
           phraseAnim: "Une main s'est glissée dans une poche..."
         },
@@ -229,7 +233,7 @@
             "Une tante d'Amérique dont vous ignoriez tout : activez-la, elle vous crédite une somme et disparaît.",
           modeEmploi:
             "Activez-la depuis votre deck. Le montant tombe aussitôt sur votre compte et la carte est consommée.\n\n" +
-            "Plus généreuse que l'argent de poche, et tout aussi simple.",
+            "Rien à négocier, rien à viser : le montant tombe, la carte part.",
           delaiAvantUsage: true,
           phraseAnim: "Un notaire a de bonnes nouvelles."
         },
@@ -241,7 +245,7 @@
           modeEmploi:
             "Activez-le depuis votre deck : il prend son poste et y reste. Aucun pickpocket ne peut plus vous atteindre, et le garde ne s'use pas — il tient jusqu'au bout de la soirée.\n\n" +
             "Il ne peut rien contre le fisc : le contrôle fiscal et l'impôt de fin de bloc passent outre. Ce sont des lois, pas des voleurs.\n\n" +
-            "Attention : le garde reste dans votre deck, donc un pickpocket peut vous voler la carte elle-même s'il vous prend de vitesse.",
+            "Mettez-le en poste sans traîner : tant qu'il ne l'est pas, un pickpocket peut vous voler la carte elle-même. Une fois en poste, plus rien ne passe — pas même le vol de son propre contrat.",
           delaiAvantUsage: true,
           phraseAnim: "Une carrure imposante prend position."
         },
@@ -3337,6 +3341,35 @@
         // Le délit d'initié révèle le vainqueur d'une course sur laquelle on
         // peut encore parier — sinon le tuyau ne vaut rien. Si les paris de la
         // course en cours sont clos, on donne celui de la suivante.
+        // Les chiffres d'une carte, tels qu'ils sont réglés à l'instant. Ils
+        // ne sont pas écrits dans les textes : l'organisateur peut changer un
+        // pourcentage en pleine soirée, et la carte doit dire vrai.
+        const chiffresCarte = (id) => {
+          const n = (cle, secours) =>
+            Math.max(0, Math.round(nombreSur(configGlobale[cle], secours)));
+          if (id === "veinard")
+            return (
+              `Perte réduite de ${n("bonusVeinardPertes", 50)} %, ` +
+              `gain majoré de ${n("bonusVeinardGain", 5)} %.`
+            );
+          if (id === "fontaine_jouvence")
+            return `Bonus sur la mission : +${n("bonusFontainePct", 20)} %.`;
+          if (id === "argent_poche" || id === "heritage")
+            return `Versement : ${versementDe(id)}$.`;
+          if (id === "fonds_investissement")
+            return `Enveloppe : ${n("montantFonds", 70)}$ à dépenser chez le financier.`;
+          if (id === "assurance")
+            return `Remboursement : ${n("pctAssurance", 75)} % de la perte.`;
+          if (id === "herbes_medicinales")
+            return (
+              `+${n("herbesPctPremier", 20)} % de chances de gagner, ` +
+              "et jamais dernier."
+            );
+          if (id === "paradis_fiscal")
+            return `Durée : ${n("dureeParadisFiscalMin", 15)} minutes.`;
+          return null;
+        };
+
         // Ce que verse une carte à versement simple.
         const versementDe = (id) =>
           Math.max(
@@ -7679,6 +7712,21 @@
                             >
                               {c.definition}
                             </p>
+                            {/* Les valeurs réglées à l'instant : elles ne
+                                figurent pas dans les textes, qui seraient
+                                faux dès qu'on touche à un réglage. */}
+                            {chiffresCarte(c.id) ? (
+                              <p
+                                style={{
+                                  margin: "4px 0 6px",
+                                  fontSize: "0.85rem",
+                                  color: "#FFC107",
+                                  fontWeight: "bold"
+                                }}
+                              >
+                                {chiffresCarte(c.id)}
+                              </p>
+                            ) : null}
                             {/* Le mode d'emploi, tel que l'organisateur l'a
                                 écrit : les sauts de ligne sont conservés. */}
                             {c.modeEmploi ? (
@@ -9729,11 +9777,15 @@
               <div style={cadre}>
                 <h3 style={{ marginTop: 0, color: "#CE93D8" }}>Investissements</h3>
                 <div style={grille}>
-                  {champNombre("Durée d'un bloc (min)", "blocDureeMin", "45 min = 3 quarts d'heure")}
+                  {champNombre(
+                    "Durée d'un bloc (min)",
+                    "blocDureeMin",
+                    "rythme les projets et l'impôt de fin de bloc"
+                  )}
                   {champNombre(
                     "Impôt de fin de bloc (%)",
                     "impotBlocPct",
-                    "de la fortune de chaque contribuable ; 0 = pas d'impôt"
+                    "de la fortune — solde ET jetons sur la table ; 0 = pas d'impôt"
                   )}
                   {champNombre(
                     "Contribuables (les plus riches)",
@@ -9784,7 +9836,9 @@
                       </div>
                       <div style={grille}>
                         <label style={{ fontSize: "0.85rem" }}>
-                          Bloc de 45 min
+                          Bloc n° (de{" "}
+                          {Math.max(0, Math.round(nombreSur(configBookmaker.blocDureeMin, 45)))}{" "}
+                          min)
                           <input
                             type="number"
                             value={pr.bloc}
@@ -10105,8 +10159,10 @@
                   }}
                 >
                   🧪 MODE SIMULATION — aucune course ne part toute seule, tous les
-                  projets sont accessibles et aucune échéance ne tombe. À
-                  désactiver dans l'Admin avant la vraie soirée.
+                  projets sont accessibles et aucune échéance de projet ne
+                  tombe. L'impôt de fin de bloc, lui, tombe normalement : c'est
+                  ainsi qu'on le répète. À désactiver dans l'Admin avant la
+                  vraie soirée.
                 </div>
               )}
 
