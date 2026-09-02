@@ -59,6 +59,14 @@
     produits: versTableau,
     penalites: versTableau,
     cartesJeu: versTableau,
+    // Les fioles d'herbes : une par course, donc une liste. Les parties
+    // enregistrées avant n'en gardaient qu'une, sous forme d'objet — on la
+    // relève telle quelle plutôt que de la perdre au chargement.
+    herbesEnCours: (v) => {
+      if (Array.isArray(v)) return v.filter(nonVide);
+      if (v && typeof v === "object" && v.joueurId !== undefined) return [v];
+      return [];
+    },
     codesRegistre: versTableau,
     historiqueFiscal: versTableau,
     historiqueAffichage: versTableau,

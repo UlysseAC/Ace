@@ -2252,13 +2252,20 @@
         // pour que les huit écrans se figent au même instant.
         const [pauseSoiree, setPauseSoiree] = useEtatPartage("pauseSoiree", null);
 
-        // --- TABLE 15 : LA FIOLE D'HERBES DE LA COURSE ---
-        // Une seule par course, et tous les appareils doivent tirer la même
-        // course : l'information est donc partagée, pas locale.
-        const [herbesEnCours, setHerbesEnCours] = useEtatPartage(
-          "herbesEnCours",
-          null
-        );
+        // --- TABLE 15 : LES FIOLES D'HERBES VERSÉES ---
+        // Une par course — pas une pour toute la soirée. Deux joueurs peuvent
+        // donc servir deux courses différentes ; sur une même course, le
+        // second est averti et empêché. Tous les appareils doivent tirer la
+        // même course : la liste est partagée, pas locale.
+        const [fioles, setFioles] = useEtatPartage("herbesEnCours", []);
+
+        // La fiole qui vise cette course-là, quel qu'en soit le porteur.
+        const fioleDeCourse = (numero) =>
+          (fioles || []).find((f) => Number(f.numero) === Number(numero)) || null;
+
+        // Celle qu'un joueur a déjà en attente : il n'en verse qu'une à la fois.
+        const fioleDe = (joueurId) =>
+          (fioles || []).find((f) => f.joueurId === joueurId) || null;
 
         // --- TABLE 14 : LE DERNIER BLOC DÉJÀ IMPOSÉ ---
         // Partagé, pour qu'un prélèvement ne tombe qu'une fois même si
@@ -2747,7 +2754,7 @@
           setInvestissements([]);
           setDernierBlocImpose(0);
           setPauseSoiree(null);
-          setHerbesEnCours(null);
+          setFioles([]);
           setSoireeDebut(0);
           // Sans ça, la course lancée à la main pendant la partie précédente
           // survivrait à la remise à zéro, avec son numéro.
@@ -3311,10 +3318,10 @@
         // La fiole de cette course-là, traduite en indice de cheval : c'est
         // ce que le tirage attend.
         const herbesDe = (numero) => {
-          if (!herbesEnCours || !herbesEnCours.chevalId) return null;
-          if (Number(herbesEnCours.numero) !== Number(numero)) return null;
+          const fiole = fioleDeCourse(numero);
+          if (!fiole || !fiole.chevalId) return null;
           const index = chevauxCourse.findIndex(
-            (c) => String(c.id) === String(herbesEnCours.chevalId)
+            (c) => String(c.id) === String(fiole.chevalId)
           );
           if (index < 0) return null;
           return {
@@ -3381,16 +3388,10 @@
         // c'est celle sur laquelle le joueur pourra miser. Elle attend son
         // cheval — le bookmaker l'y rattachera au moment du pari.
         const verserLesHerbes = (carte) => {
-          if (herbesEnCours && herbesEnCours.joueurId !== joueurActuel.id) {
+          const mienne = fioleDe(joueurActuel.id);
+          if (mienne) {
             alert(
-              "Une fiole a déjà été versée pour cette course.\n\n" +
-                "Gardez la vôtre : elle ne se consomme pas."
-            );
-            return;
-          }
-          if (herbesEnCours) {
-            alert(
-              `Votre fiole est déjà versée pour la course n°${herbesEnCours.numero}.\n\n` +
+              `Votre fiole est déjà versée pour la course n°${mienne.numero}.\n\n` +
                 "Allez miser chez le bookmaker : elle s'appliquera au cheval " +
                 "que vous choisirez."
             );
@@ -3408,6 +3409,18 @@
             );
             return;
           }
+          // Deux fioles sur la même course, ce serait deux dopages sur un
+          // seul tirage : le second est refusé, et il sait pourquoi. Sa carte
+          // lui reste — c'est la course suivante qu'elle servira.
+          const dejaServie = fioleDeCourse(cible.numero);
+          if (dejaServie) {
+            alert(
+              `Une fiole a déjà été versée sur la course n°${cible.numero}.\n\n` +
+                "Une seule par course. Gardez la vôtre : elle ne se consomme " +
+                "pas, et vous pourrez la verser sur la prochaine."
+            );
+            return;
+          }
           // Un délit d'initié a déjà nommé le vainqueur de cette course :
           // verser les herbes dessus ferait mentir un tuyau déjà lu, et son
           // porteur n'y pourrait rien. La fiole part donc sur la première
@@ -3422,14 +3435,16 @@
                 Number(j.tuyau.numero) === Number(n)
             );
           let numeroFiole = Number(cible.numero);
-          // Bornée : au-delà de quelques courses d'avance, on s'arrête là.
-          for (let saut = 0; saut < 8 && tuyauPose(numeroFiole); saut++)
+          // Bornée : au-delà de quelques courses d'avance, on s'arrête là. On
+          // saute aussi les courses déjà servies, pour ne pas en doubler une
+          // en cherchant à en épargner une autre.
+          const occupee = (n) => tuyauPose(n) || !!fioleDeCourse(n);
+          for (let saut = 0; saut < 8 && occupee(numeroFiole); saut++)
             numeroFiole += 1;
-          setHerbesEnCours({
-            joueurId: joueurActuel.id,
-            numero: numeroFiole,
-            chevalId: null
-          });
+          setFioles((prev) => [
+            ...(prev || []),
+            { joueurId: joueurActuel.id, numero: numeroFiole, chevalId: null }
+          ]);
           annoncerSalle([carte.phraseAnim]);
           alert(
             `Fiole versée pour la course n°${numeroFiole}.\n\n` +
@@ -3437,6 +3452,55 @@
               "vous choisirez. La carte partira une fois la course courue."
           );
           setSousMenuBanque("accueil");
+        };
+
+        // Le bouton de la fiole a trois choses à dire : elle est versée, la
+        // course est déjà servie par quelqu'un d'autre, ou elle est libre. Le
+        // deuxième cas grise le bouton et dit pourquoi — le joueur ne se
+        // demande pas si sa carte est cassée.
+        const boutonDeLaFiole = (carte) => {
+          const mienne = fioleDe(joueurActuel && joueurActuel.id);
+          const cible = mienne ? null : courseAParier();
+          const prise = cible ? fioleDeCourse(cible.numero) : null;
+          const bloquee = !!prise;
+          const libelle = mienne
+            ? `🌿 Versée — course n°${mienne.numero}`
+            : prise
+              ? `🌿 Course n°${cible.numero} déjà servie`
+              : "🌿 Verser la fiole";
+          return (
+            <div>
+              <button
+                onClick={() => verserLesHerbes(carte)}
+                disabled={bloquee}
+                style={{
+                  padding: "8px",
+                  background: bloquee ? "#555" : "#558B2F",
+                  color: bloquee ? "#999" : "#fff",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: bloquee ? "not-allowed" : "pointer",
+                  fontWeight: "bold",
+                  width: "100%"
+                }}
+              >
+                {libelle}
+              </button>
+              {bloquee && (
+                <div
+                  style={{
+                    marginTop: "6px",
+                    fontSize: "0.8rem",
+                    color: "#AED581",
+                    lineHeight: 1.35
+                  }}
+                >
+                  Une seule fiole par course. Gardez la vôtre : elle ne se
+                  consomme pas, et vous pourrez la verser sur la prochaine.
+                </div>
+              )}
+            </div>
+          );
         };
 
         // Qui paie quoi. Le fonds d'investissement se dépense en premier,
@@ -3731,7 +3795,7 @@
           )
             return;
           setCourseManuelle(null);
-          setHerbesEnCours(null);
+          setFioles([]);
           // Les tuyaux désignent des courses qui n'existeront plus : gardés,
           // ils réapparaîtraient au joueur dès que la numérotation les
           // rattraperait.
@@ -3852,13 +3916,22 @@
           ]);
           // La fiole d'herbes attendait un cheval : c'est celui-ci. Elle ne
           // s'attache qu'au premier pari de son porteur sur cette course.
-          const saFiole =
-            herbesEnCours &&
-            herbesEnCours.joueurId === joueurId &&
-            !herbesEnCours.chevalId &&
-            Number(herbesEnCours.numero) === Number(course.numero);
+          const saFiole = (fioles || []).some(
+            (f) =>
+              f.joueurId === joueurId &&
+              !f.chevalId &&
+              Number(f.numero) === Number(course.numero)
+          );
           if (saFiole) {
-            setHerbesEnCours({ ...herbesEnCours, chevalId: cheval.id });
+            setFioles((prev) =>
+              (prev || []).map((f) =>
+                f.joueurId === joueurId &&
+                !f.chevalId &&
+                Number(f.numero) === Number(course.numero)
+                  ? { ...f, chevalId: cheval.id }
+                  : f
+              )
+            );
             rendreLesTuyauxSouffles(course.numero, cheval.id, joueurId);
           }
 
@@ -4399,17 +4472,21 @@
           // La fiole d'herbes ne vaut que pour sa course. On attend qu'une
           // course ultérieure existe : la retirer plus tôt rejouerait le
           // tirage sans elle, podium compris, sous les yeux de la salle.
-          if (
-            herbesEnCours &&
-            course.numero !== undefined &&
-            course.numero !== null &&
-            Number(course.numero) > Number(herbesEnCours.numero)
-          ) {
-            const porteur = herbesEnCours.joueurId;
-            setHerbesEnCours(null);
+          const perimees =
+            course.numero === undefined || course.numero === null
+              ? []
+              : (fioles || []).filter(
+                  (f) => Number(course.numero) > Number(f.numero)
+                );
+          if (perimees.length) {
+            const porteurs = new Set(perimees.map((f) => f.joueurId));
+            const passees = new Set(perimees.map((f) => Number(f.numero)));
+            setFioles((prev) =>
+              (prev || []).filter((f) => !passees.has(Number(f.numero)))
+            );
             setJoueurs((prev) =>
               prev.map((j) =>
-                j.id === porteur
+                porteurs.has(j.id)
                   ? {
                       ...j,
                       deck: j.deck.filter((c) => c.id !== "herbes_medicinales"),
@@ -8232,42 +8309,7 @@
                                 </button>
                               )
                             ) : c.id === "herbes_medicinales" ? (
-                              <button
-                                onClick={() => verserLesHerbes(c)}
-                                disabled={
-                                  !!herbesEnCours &&
-                                  herbesEnCours.joueurId !== joueurActuel.id
-                                }
-                                style={{
-                                  padding: "8px",
-                                  background:
-                                    herbesEnCours &&
-                                    herbesEnCours.joueurId !== joueurActuel.id
-                                      ? "#555"
-                                      : "#558B2F",
-                                  color:
-                                    herbesEnCours &&
-                                    herbesEnCours.joueurId !== joueurActuel.id
-                                      ? "#999"
-                                      : "#fff",
-                                  border: "none",
-                                  borderRadius: "4px",
-                                  cursor:
-                                    herbesEnCours &&
-                                    herbesEnCours.joueurId !== joueurActuel.id
-                                      ? "not-allowed"
-                                      : "pointer",
-                                  fontWeight: "bold",
-                                  width: "100%"
-                                }}
-                              >
-                                {herbesEnCours &&
-                                herbesEnCours.joueurId === joueurActuel.id
-                                  ? `🌿 Versée — course n°${herbesEnCours.numero}`
-                                  : herbesEnCours
-                                    ? "🌿 Une fiole a déjà été versée"
-                                    : "🌿 Verser la fiole"}
-                              </button>
+                              boutonDeLaFiole(c)
                             ) : c.id === "heritage" || c.id === "argent_poche" ? (
                               <button
                                 onClick={() => {
