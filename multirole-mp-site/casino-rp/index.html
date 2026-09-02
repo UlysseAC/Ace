@@ -3243,15 +3243,9 @@
               return;
             }
           }
-          const fondsParieur = nombreSur(parieur.fondsDispo, 0);
-          if (surLeFonds && m > fondsParieur) {
-            alert(
-              `Fonds d'investissement insuffisant : ${fondsParieur}$ disponibles.`
-            );
-            return;
-          }
-          if (!surLeFonds && m > parieur.solde) {
-            alert("Solde insuffisant.");
+          const part = partageDuPaiement(parieur, m, surLeFonds);
+          if (part.manque > 0) {
+            alert(refusDePaiement(parieur, part));
             return;
           }
 
@@ -3273,13 +3267,14 @@
               j.id === parieurId
                 ? {
                     ...j,
-                    solde: surLeFonds ? j.solde : Math.max(0, j.solde - m),
-                    fondsDispo: surLeFonds
-                      ? Math.max(0, nombreSur(j.fondsDispo, 0) - m)
-                      : j.fondsDispo,
+                    solde: Math.max(0, j.solde - part.surSolde),
+                    fondsDispo: Math.max(
+                      0,
+                      nombreSur(j.fondsDispo, 0) - part.surFonds
+                    ),
                     historique: [
                       `Pari ${m}$ sur ${cible.nom} (${libelleSeuil(seuil)}) — cote ${cote}` +
-                        (surLeFonds ? " — payé sur le fonds" : ""),
+                        part.mention,
                       ...j.historique
                     ]
                   }
@@ -3426,6 +3421,38 @@
           setSousMenuBanque("accueil");
         };
 
+        // Qui paie quoi. Le fonds d'investissement se dépense en premier,
+        // le solde complète : une mise de 100 $ sur un fonds de 70 $ prend
+        // les 70 $ du fonds et 30 $ sur le compte. Refuser tout, comme avant,
+        // laissait le joueur croire qu'il n'avait pas assez alors que son
+        // compte était plein.
+        const partageDuPaiement = (joueur, montant, surLeFonds) => {
+          const m = Math.max(0, Math.round(nombreSur(montant, 0)));
+          const fonds = Math.max(0, nombreSur((joueur || {}).fondsDispo, 0));
+          const surFonds = surLeFonds ? Math.min(m, fonds) : 0;
+          const surSolde = m - surFonds;
+          const solde = Math.max(0, nombreSur((joueur || {}).solde, 0));
+          return {
+            surFonds,
+            surSolde,
+            manque: Math.max(0, surSolde - solde),
+            // De quoi écrire une ligne d'historique juste.
+            mention:
+              surFonds > 0 && surSolde > 0
+                ? ` — ${surFonds}$ du fonds, ${surSolde}$ du solde`
+                : surFonds > 0
+                  ? " — payé sur le fonds"
+                  : ""
+          };
+        };
+
+        const refusDePaiement = (joueur, part) =>
+          part.surFonds > 0
+            ? `Il manque ${part.manque}$.\n\n` +
+              `Le fonds couvre ${part.surFonds}$, et le solde de ${joueur.nom} ` +
+              `n'a que ${Math.max(0, nombreSur(joueur.solde, 0))}$.`
+            : `Solde insuffisant : il manque ${part.manque}$.`;
+
         // La case « payer sur le fonds », proposée au financier dès que le
         // joueur choisi en a un d'ouvert. Elle se décoche dès qu'on change de
         // joueur : un fonds ne se prête pas.
@@ -3454,7 +3481,8 @@
                 onChange={(e) => setBkSurLeFonds(e.target.checked)}
               />
               📈 Payer sur le fonds d'investissement de {j.nom} —{" "}
-              <strong>{dispo}$ disponibles</strong>, son solde ne bouge pas.
+              <strong>{dispo}$ disponibles</strong>. Au-delà, la différence est
+              prise sur son solde.
             </label>
           );
         };
@@ -3724,15 +3752,9 @@
             alert(`La mise ne peut pas dépasser ${plafond} par pari.`);
             return;
           }
-          const fonds = nombreSur(joueur.fondsDispo, 0);
-          if (surLeFonds && m > fonds) {
-            alert(
-              `Fonds d'investissement insuffisant : ${fonds}$ disponibles.`
-            );
-            return;
-          }
-          if (!surLeFonds && m > joueur.solde) {
-            alert("Solde insuffisant.");
+          const part = partageDuPaiement(joueur, m, surLeFonds);
+          if (part.manque > 0) {
+            alert(refusDePaiement(joueur, part));
             return;
           }
           const bareme = rapportsCourse(configBookmaker);
@@ -3767,13 +3789,14 @@
               j.id === joueurId
                 ? {
                     ...j,
-                    solde: surLeFonds ? j.solde : Math.max(0, j.solde - m),
-                    fondsDispo: surLeFonds
-                      ? Math.max(0, nombreSur(j.fondsDispo, 0) - m)
-                      : j.fondsDispo,
+                    solde: Math.max(0, j.solde - part.surSolde),
+                    fondsDispo: Math.max(
+                      0,
+                      nombreSur(j.fondsDispo, 0) - part.surFonds
+                    ),
                     historique: [
                       `Pari course n°${course.numero} : ${m}$ sur ${cheval.nom} (cote ${cote})` +
-                        (surLeFonds ? " — payé sur le fonds" : "") +
+                        part.mention +
                         (saFiole ? " — vos herbes sont pour lui" : ""),
                       ...j.historique
                     ]
@@ -3968,19 +3991,9 @@
             return;
           }
           const m = place.mise;
-          const fondsInv = nombreSur(joueur.fondsDispo, 0);
-          if (surLeFonds && m > fondsInv) {
-            alert(
-              `Fonds d'investissement insuffisant : ${fondsInv}$ disponibles, ` +
-                `la place en coûte ${m}$.`
-            );
-            return;
-          }
-          if (!surLeFonds && m > joueur.solde) {
-            alert(
-              `Solde insuffisant : la place de ${libelleRang(r)} investisseur ` +
-                `coûte ${m}$, ${joueur.nom} en a ${joueur.solde}.`
-            );
+          const part = partageDuPaiement(joueur, m, surLeFonds);
+          if (part.manque > 0) {
+            alert(refusDePaiement(joueur, part));
             return;
           }
           const inst = instanceProjet(projetId);
@@ -4033,13 +4046,13 @@
               j.id === joueurId
                 ? {
                     ...j,
-                    solde: surLeFonds ? j.solde : Math.max(0, j.solde - m),
-                    fondsDispo: surLeFonds
-                      ? Math.max(0, nombreSur(j.fondsDispo, 0) - m)
-                      : j.fondsDispo,
+                    solde: Math.max(0, j.solde - part.surSolde),
+                    fondsDispo: Math.max(
+                      0,
+                      nombreSur(j.fondsDispo, 0) - part.surFonds
+                    ),
                     historique: [
-                      (surLeFonds ? "[Fonds] " : "") +
-                        `Investissement ${m}$ dans « ${projet.titre} » — place de ` +
+                      `Investissement ${m}$${part.mention} dans « ${projet.titre} » — place de ` +
                         `${libelleRang(r)} investisseur (+${place.gain} % si ça réussit)`,
                       ...j.historique
                     ]
