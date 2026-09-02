@@ -794,6 +794,11 @@
       // sert à faire glisser les lignes plutôt qu'à les réordonner d'un coup.
       const PAS_CLASSEMENT = 66;
       const PAS_CLASSEMENT_COURSE = 44;
+      // Le temps que met une ligne du classement à glisser d'un rang. Il sert
+      // deux fois : à l'animation, et à la cadence de rafraîchissement de
+      // l'ordre — les deux doivent rester d'accord, sans quoi une ligne
+      // repart avant d'être arrivée.
+      const GLISSE_CLASSEMENT_MS = 450;
 
       const AVANTAGE_CORDE = 0.014;
       const FIN_SANS_CORDE = 0.14;
@@ -1562,6 +1567,9 @@
         const [t, setT] = React.useState(0);
         const [changements, setChangements] = React.useState({});
         const ordrePrecedent = React.useRef(null);
+        // L'ordre effectivement affiché, et l'instant où on l'a adopté.
+        const ordreAffiche = React.useRef(null);
+        const derniereBascule = React.useRef(0);
 
         const duree = (Number(cfg.courseDureeSec) || 45) * 1000;
         const tours = Number(cfg.courseTours) || 3;
@@ -1616,7 +1624,36 @@
             tour: Math.min(tours, Math.floor(avance * tours) + 1)
           };
         });
-        const classement = [...positions].sort((a, b) => b.brut - a.brut);
+        /*
+         * Deux chevaux au coude à coude échangent leur rang plusieurs fois par
+         * seconde — mesuré : jusqu'à 67 ms entre deux bascules. La ligne, elle,
+         * met 450 ms à glisser : elle repartait donc en arrière avant d'être
+         * arrivée, et le classement tressautait dès qu'un cheval prenait la
+         * tête.
+         *
+         * On ne touche pas à l'ordre, seulement à sa cadence : l'ordre affiché
+         * tient le temps qu'une ligne finisse de glisser, puis on prend le vrai.
+         * Et toujours le vrai au poteau, pour que le classement colle à
+         * l'arrivée. Les pions sur la piste ne sont pas concernés : eux
+         * bougent à chaque image.
+         */
+        const ordreVrai = [...positions]
+          .sort((a, b) => b.brut - a.brut)
+          .map((p) => p.index);
+        const instant = Date.now();
+        if (
+          ordreAffiche.current === null ||
+          ordreAffiche.current.length !== ordreVrai.length ||
+          t >= 1 ||
+          instant - derniereBascule.current >= GLISSE_CLASSEMENT_MS
+        ) {
+          ordreAffiche.current = ordreVrai;
+          derniereBascule.current = instant;
+        }
+        const parIndex = new Map(positions.map((p) => [p.index, p]));
+        const classement = ordreAffiche.current
+          .map((i) => parIndex.get(i))
+          .filter(Boolean);
 
         // Dépassement : la ligne qui gagne une place passe au vert, celle qui
         // en perd une au rouge, une seconde durant.
@@ -2005,7 +2042,8 @@
                             ? "#7f1d1d"
                             : "#1a1a1a",
                       transition:
-                        "transform 450ms cubic-bezier(.4,0,.2,1), background 300ms",
+                        `transform ${GLISSE_CLASSEMENT_MS}ms cubic-bezier(.4,0,.2,1), ` +
+                        "background 300ms",
                       borderLeft: `6px solid ${p.cheval.couleur}`,
                       fontWeight: rang === 0 ? "bold" : "normal"
                     }}
@@ -2443,6 +2481,9 @@
         const [cibleFiscaleSelectionnee, setCibleFiscaleSelectionnee] =
           React.useState("");
         const [deFiscalSelectionne, setDeFiscalSelectionne] = React.useState(1);
+        // La carte Pickpocket qu'on est en train de jouer, le temps de
+        // choisir sa victime sur l'écran dédié.
+        const [carteVol, setCarteVol] = React.useState(null);
 
         // États Bookmaker
         // La vitrine est partagée : c'est ce que le second écran, retourné
@@ -3712,39 +3753,54 @@
         // change de mains, et le voleur ne le découvre qu'après coup. Les deux
         // cartes arrivent avec leur temps de garde à purger, comme si on
         // venait de les ramasser.
-        const detrousser = (carte) => {
-          if (bloqueParJetons(joueurActuel)) {
-            alert(MESSAGE_JETONS_EN_JEU);
-            return;
-          }
-          // On ne détrousse pas quelqu'un qui s'est isolé au paradis fiscal :
-          // il n'est plus dans la salle. Même règle que le contrôle fiscal.
-          // Un joueur protégé reste dans la liste : le voleur ne sait pas
-          // qui a un garde du corps, et c'est tout l'intérêt — il perd son
-          // coup en le découvrant.
-          const cibles = joueursActifs.filter(
+        // Ceux qu'on peut détrousser : encore dans la salle, et quelque
+        // chose en poche. On ne détrousse pas quelqu'un parti au paradis
+        // fiscal — il n'est plus là, même règle que le contrôle fiscal. Un
+        // joueur protégé par un garde du corps reste dans la liste : le
+        // voleur ne doit pas savoir qui est gardé, c'est tout l'intérêt — il
+        // perd son coup en le découvrant.
+        const ciblesPickpocket = () =>
+          joueursActifs.filter(
             (j) =>
+              joueurActuel &&
               j.id !== joueurActuel.id &&
               !j.paradisActif &&
               (j.deck || []).length > 0
           );
-          if (!cibles.length) {
+
+        // On ouvre l'écran de choix plutôt qu'une boîte du navigateur : la
+        // liste tenait dans un prompt système, hors du thème, et ne disait
+        // pas combien de cartes chacun avait en poche.
+        const ouvrirLesPoches = (carte) => {
+          if (bloqueParJetons(joueurActuel)) {
+            alert(MESSAGE_JETONS_EN_JEU);
+            return;
+          }
+          if (!ciblesPickpocket().length) {
             alert(
               "Personne n'a de carte en main pour l'instant.\n\n" +
                 "Gardez la vôtre : elle ne se consomme pas."
             );
             return;
           }
-          const nom = window.prompt(
-            "Qui allez-vous détrousser ?\n\n" +
-              cibles.map((j, i) => `${i + 1}. ${j.nom}`).join("\n") +
-              "\n\nTapez le numéro.",
-            "1"
-          );
-          if (nom === null) return;
-          const choix = cibles[Math.round(nombreSur(nom, 0)) - 1];
+          setCarteVol(carte);
+          setSousMenuBanque("pickpocket");
+        };
+
+        const detrousser = (carte, cibleId) => {
+          if (bloqueParJetons(joueurActuel)) {
+            alert(MESSAGE_JETONS_EN_JEU);
+            return;
+          }
+          // La liste a pu bouger pendant qu'on choisissait : quelqu'un s'est
+          // mis à l'abri, ou s'est fait vider les poches avant nous.
+          const choix = ciblesPickpocket().find((j) => j.id === cibleId);
           if (!choix) {
-            alert("Numéro invalide.");
+            alert(
+              "Cette poche n'est plus à portée.\n\n" +
+                "Votre carte vous reste."
+            );
+            setSousMenuBanque("accueil");
             return;
           }
           // Le tirage se fait ici, une fois, et le résultat sert aux deux
@@ -8490,7 +8546,7 @@
                               </button>
                             ) : c.id === "pickpocket" ? (
                               <button
-                                onClick={() => detrousser(c)}
+                                onClick={() => ouvrirLesPoches(c)}
                                 style={{
                                   padding: "8px",
                                   background: "#5D4037",
@@ -9169,6 +9225,87 @@
                           Menu
                         </button>
                       </div>
+                    </div>
+                  )}
+
+                  {sousMenuBanque === "pickpocket" && (
+                    <div
+                      style={{
+                        background: "#222",
+                        padding: "20px",
+                        borderRadius: "10px"
+                      }}
+                    >
+                      <h3 style={{ color: "#A1887F", marginTop: 0 }}>
+                        🕵️ Qui allez-vous détrousser ?
+                      </h3>
+                      <p
+                        style={{
+                          color: "#999",
+                          fontSize: "0.85rem",
+                          marginTop: 0,
+                          lineHeight: 1.4
+                        }}
+                      >
+                        Vous désignez une poche, pas une carte : le tirage
+                        décide de ce qui change de mains, et vous le
+                        découvrirez une fois le coup fait. Votre Pickpocket,
+                        lui, passe dans la sienne.
+                      </p>
+                      {ciblesPickpocket().length === 0 ? (
+                        <p style={{ color: "#EF5350" }}>
+                          Plus personne n'a de carte en main. Votre carte vous
+                          reste.
+                        </p>
+                      ) : (
+                        ciblesPickpocket().map((j) => {
+                          const n = (j.deck || []).length;
+                          return (
+                            <button
+                              key={j.id}
+                              onClick={() => detrousser(carteVol, j.id)}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "12px",
+                                width: "100%",
+                                textAlign: "left",
+                                padding: "14px 16px",
+                                marginBottom: "8px",
+                                background: "#333",
+                                borderLeft: "6px solid #5D4037",
+                                border: "none",
+                                borderRadius: "8px",
+                                color: "#fff",
+                                fontSize: "1rem",
+                                cursor: "pointer"
+                              }}
+                            >
+                              <span style={{ flex: 1, fontWeight: "bold" }}>
+                                {j.nom}
+                              </span>
+                              <span
+                                style={{
+                                  background: "#5D4037",
+                                  borderRadius: "12px",
+                                  padding: "4px 12px",
+                                  fontSize: "0.85rem",
+                                  whiteSpace: "nowrap"
+                                }}
+                              >
+                                🃏 {n} carte{n > 1 ? "s" : ""}
+                              </span>
+                            </button>
+                          );
+                        })
+                      )}
+                      <button
+                        onClick={() => setSousMenuBanque("accueil")}
+                        className="checkbox-btn"
+                        style={{ marginTop: "15px" }}
+                      >
+                        Retour
+                      </button>
                     </div>
                   )}
 
