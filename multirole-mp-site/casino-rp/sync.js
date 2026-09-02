@@ -20,6 +20,19 @@
   // planter l'affichage du classement.
   const nonVide = (x) => x !== null && x !== undefined;
 
+  /*
+   * « Pas de ligne en base » et « une ligne dont la valeur est null » sont
+   * deux choses différentes, et les confondre coûtait cher : remettre une
+   * clé à null — reprendre après une pause, rendre le poste du bookmaker,
+   * repartir à la course n°1 — n'arrivait jamais aux autres appareils, qui
+   * prenaient le null pour une base encore vierge et gardaient leur vieille
+   * copie. Un écran de salle restait donc en pause pendant que la soirée
+   * repartait.
+   *
+   * D'où ce marqueur, qui ne désigne QUE l'absence de ligne.
+   */
+  const ABSENT = Symbol("absent");
+
   const versTableau = (v) => {
     if (Array.isArray(v)) return v.filter(nonVide);
     if (v && typeof v === "object") return Object.values(v).filter(nonVide);
@@ -238,7 +251,7 @@
       .eq("cle", cle)
       .maybeSingle();
     if (error) return console.error("Lecture de " + cle + " :", error);
-    dernieres[cle] = data ? data.valeur : null;
+    dernieres[cle] = data ? data.valeur : ABSENT;
     prevenir(cle);
   };
 
@@ -252,7 +265,9 @@
         (msg) => {
           const ligne = msg.eventType === "DELETE" ? msg.old : msg.new;
           if (!ligne || !ligne.cle) return;
-          const valeur = msg.eventType === "DELETE" ? null : msg.new.valeur;
+          // Une ligne supprimée, c'est une absence ; une ligne dont la
+          // valeur est null, c'est bien un null qu'il faut appliquer.
+          const valeur = msg.eventType === "DELETE" ? ABSENT : msg.new.valeur;
           dernieres[ligne.cle] = valeur;
           if (echoDeNous("etat:" + ligne.cle, valeur)) return;
           prevenir(ligne.cle);
@@ -438,6 +453,9 @@
     // concurrentes sur un même joueur.
     fusionner,
 
+    // Le marqueur d'absence, pour que le hook sache faire la différence.
+    ABSENT,
+
     normaliser(cle, brut) {
       const f = normalisateurs[cle];
       return f ? f(brut) : brut;
@@ -465,7 +483,7 @@
         // l'effacement ne se propageait pas — chaque appareil gardait sa
         // vieille copie, et les données réapparaissaient. Seule une clé
         // absente signale une base encore vierge.
-        const absent = brut === null || brut === undefined;
+        const absent = brut === Sync.ABSENT || brut === undefined;
         if (absent) {
           // Base vide : le premier appareil connecté y dépose l'état initial.
           if (!dejaSeme.current) {

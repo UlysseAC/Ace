@@ -795,6 +795,31 @@
       // sert à faire glisser les lignes plutôt qu'à les réordonner d'un coup.
       const PAS_CLASSEMENT = 66;
       const PAS_CLASSEMENT_COURSE = 44;
+
+      /*
+       * L'IDENTITÉ DE CET APPAREIL, ET LE VERROU DU POSTE
+       *
+       * Le poste du bookmaker n'est pas un écran comme les autres : c'est lui
+       * qui solde les courses et paie les gains. Ouvert sur deux appareils, il
+       * payait deux fois — chacun voyait les mêmes paris « ouverts » et
+       * créditait de son côté.
+       *
+       * On le réserve donc, comme on réserve une caisse. L'appareil qui tient
+       * le poste signe un jeton partagé et le rafraîchit régulièrement ; un
+       * second appareil voit le jeton et refuse d'ouvrir. Si le premier
+       * disparaît — onglet fermé, téléphone à plat —, le jeton se périme tout
+       * seul et le poste redevient libre.
+       *
+       * L'identité tient à la page : recharger, c'est devenir un autre
+       * appareil, ce qui n'a aucune importance puisque le jeton se reprend.
+       */
+      const ID_APPAREIL =
+        Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+      // Toutes les combien on signe, et au bout de combien un jeton non
+      // rafraîchi est considéré abandonné. Large, pour qu'un réseau qui
+      // hoquette ne libère pas le poste sous les pieds du bookmaker.
+      const BATTEMENT_POSTE_MS = 8000;
+      const PEREMPTION_POSTE_MS = 30000;
       // Le temps que met une ligne du classement à glisser d'un rang. Il sert
       // deux fois : à l'animation, et à la cadence de rafraîchissement de
       // l'ordre — les deux doivent rester d'accord, sans quoi une ligne
@@ -2443,6 +2468,15 @@
         // Celle qu'un joueur a déjà en attente : il n'en verse qu'une à la fois.
         const fioleDe = (joueurId) =>
           (fioles || []).find((f) => f.joueurId === joueurId) || null;
+
+        // --- TABLE 16 : QUI TIENT LE POSTE DU BOOKMAKER ---
+        // { id, vuLe } : l'appareil qui arbitre, et l'instant de sa dernière
+        // signature. Partagé, sinon chaque appareil se croirait seul.
+        const [posteTenu, setPosteTenu] = useEtatPartage("posteTenu", null);
+        // Le battement tourne dans un intervalle : sans ce miroir, il lirait
+        // indéfiniment le jeton tel qu'il était au moment où il a démarré.
+        const posteTenuRef = React.useRef(posteTenu);
+        posteTenuRef.current = posteTenu;
 
         // --- TABLE 14 : LE DERNIER BLOC DÉJÀ IMPOSÉ ---
         // Partagé, pour qu'un prélèvement ne tombe qu'une fois même si
@@ -4634,6 +4668,7 @@
         // d'assommer la table de trois prélèvements d'un coup.
         React.useEffect(() => {
           if (interfaceActive !== "bookmaker") return;
+          if (posteAUnAutre) return;
           // L'impôt tombe aussi en simulation : c'est le seul moyen de le
           // répéter avant la soirée, en raccourcissant la durée d'un bloc.
           if (!soireeDebut) return;
@@ -4651,16 +4686,54 @@
           prelever(suivant);
         }, [
           interfaceActive,
+          posteAUnAutre,
           blocInvest,
           soireeDebut,
           dernierBlocImpose
         ]);
+
+        // Le jeton est-il pris par quelqu'un d'autre, et encore frais ?
+        // On lit l'horloge du système et non celle de la partie : une pause
+        // ne doit ni geler ni libérer le poste.
+        const posteAUnAutre =
+          !!posteTenu &&
+          posteTenu.id !== ID_APPAREIL &&
+          Date.now() - nombreSur(posteTenu.vuLe, 0) < PEREMPTION_POSTE_MS;
+
+        // Tant qu'on est sur le poste, on signe le jeton à intervalle
+        // régulier. On ne le prend pas s'il appartient à un autre appareil
+        // encore vivant : c'est la reprise de main, à la demande, qui sert
+        // dans ce cas.
+        React.useEffect(() => {
+          if (interfaceActive !== "bookmaker" || !bookmakerOuvert) return;
+          const signer = () => {
+            const t = posteTenuRef.current;
+            const prisAilleurs =
+              !!t &&
+              t.id !== ID_APPAREIL &&
+              Date.now() - nombreSur(t.vuLe, 0) < PEREMPTION_POSTE_MS;
+            if (prisAilleurs) return;
+            setPosteTenu({ id: ID_APPAREIL, vuLe: Date.now() });
+          };
+          signer();
+          const bat = setInterval(signer, BATTEMENT_POSTE_MS);
+          return () => {
+            clearInterval(bat);
+            // En quittant le poste, on rend la place tout de suite plutôt que
+            // de laisser le suivant attendre la péremption.
+            const t = posteTenuRef.current;
+            if (t && t.id === ID_APPAREIL) setPosteTenu(null);
+          };
+        }, [interfaceActive, bookmakerOuvert]);
 
         // Le poste du bookmaker fait office d'arbitre : c'est lui, et lui
         // seul, qui solde les courses terminées et les projets échus. Si
         // chaque écran le faisait, le même gain serait payé plusieurs fois.
         React.useEffect(() => {
           if (interfaceActive !== "bookmaker") return;
+          // Deuxième verrou, par sécurité : même affiché, un poste qui n'a
+          // pas la main n'arbitre pas.
+          if (posteAUnAutre) return;
           // On solde toutes les courses terminées, pas seulement la dernière :
           // si ce poste était fermé pendant une course, ses paris seraient
           // restés en suspens sans jamais être payés.
@@ -10686,6 +10759,80 @@
                   style={{ marginTop: "10px" }}
                 >
                   Retour
+                </button>
+              </div>
+            );
+          }
+
+          // Le poste est déjà tenu ailleurs : on n'ouvre pas un second
+          // guichet. Deux postes, c'est le même gain payé deux fois.
+          if (posteAUnAutre) {
+            const depuis = Math.round(
+              (Date.now() - nombreSur(posteTenu.vuLe, 0)) / 1000
+            );
+            return (
+              <div style={{ padding: "40px", maxWidth: "520px", margin: "0 auto" }}>
+                <h1 style={{ color: "#FFC107" }}>🎩 Poste déjà ouvert</h1>
+                <div
+                  style={{
+                    background: "#332b00",
+                    border: "1px solid #FFC107",
+                    borderRadius: "10px",
+                    padding: "18px",
+                    lineHeight: 1.5
+                  }}
+                >
+                  <p style={{ marginTop: 0 }}>
+                    Le poste du bookmaker est ouvert sur un autre appareil
+                    {depuis < 60
+                      ? ` (signe de vie il y a ${depuis} s)`
+                      : ""}
+                    .
+                  </p>
+                  <p style={{ marginBottom: 0, color: "#ddd" }}>
+                    C'est ce poste-là qui solde les courses et paie les gains.
+                    En ouvrir un second ferait payer chaque course deux fois —
+                    d'où ce refus. La vitrine, elle, s'ouvre autant de fois
+                    qu'on veut.
+                  </p>
+                </div>
+                <p style={{ color: "#999", fontSize: "0.88rem" }}>
+                  Si l'autre appareil est éteint ou hors ligne, le poste se
+                  libère tout seul au bout de{" "}
+                  {Math.round(PEREMPTION_POSTE_MS / 1000)} secondes sans
+                  nouvelle. Vous pouvez aussi reprendre la main tout de suite —
+                  l'autre écran passera alors en lecture seule.
+                </p>
+                <button
+                  onClick={() => {
+                    if (
+                      !window.confirm(
+                        "Reprendre le poste sur CET appareil ?\n\n" +
+                          "L'autre écran cessera d'arbitrer. Ne le faites que " +
+                          "si vous êtes sûr que personne ne s'en sert."
+                      )
+                    )
+                      return;
+                    setPosteTenu({ id: ID_APPAREIL, vuLe: Date.now() });
+                  }}
+                  className="checkbox-btn"
+                  style={{ marginTop: "6px", background: "#00838F" }}
+                >
+                  🎩 Reprendre la main ici
+                </button>
+                <button
+                  onClick={() => setInterfaceActive("bookmakerVitrine")}
+                  className="checkbox-btn"
+                  style={{ marginTop: "10px" }}
+                >
+                  📺 Ouvrir la vitrine à la place
+                </button>
+                <button
+                  onClick={() => setInterfaceActive("menu")}
+                  className="checkbox-btn"
+                  style={{ marginTop: "10px" }}
+                >
+                  Retour au menu
                 </button>
               </div>
             );
