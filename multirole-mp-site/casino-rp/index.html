@@ -4381,24 +4381,31 @@
         // ================= LOGIQUE SCANNER & DEFAUSSE =================
         const scannerCodeSimule = (type, objetDonnee) => {
           if (!joueurActuel) return;
-          if (configGlobale.modeScanneur === "disabled") {
-            alert(
-              "La distribution des cartes à la borne est masquée.\n\n" +
-                "L'organisateur la remet dans l'Admin, « Distribution des " +
-                "cartes à la borne » — ce réglage n'a rien à voir avec le " +
-                "mode simulation du bookmaker."
-            );
-            return;
-          }
-          if (configGlobale.modeLocal && type === "carte") {
-            alert(
-              "Mode Local activé : Le scan des cartes physiques est temporairement bloqué !"
-            );
-            return;
-          }
-          if (type === "carte" && bloqueParJetons(joueurActuel)) {
-            alert(MESSAGE_JETONS_EN_JEU);
-            return;
+          // Le mode simulation existe pour tout essayer : il lève les
+          // verrous qui protègent la vraie soirée. Un bouton cliqué doit
+          // poser la carte dans le deck, point.
+          if (!configBookmaker.modeSimulation) {
+            if (configGlobale.modeScanneur === "disabled") {
+              alert(
+                "La distribution des cartes à la borne est masquée.\n\n" +
+                  "L'organisateur la remet dans l'Admin, « Distribution des " +
+                  "cartes à la borne ». En mode simulation, elle est de toute " +
+                  "façon toujours ouverte."
+              );
+              return;
+            }
+            if (configGlobale.modeLocal && type === "carte") {
+              alert(
+                "Mode Local activé : le scan des cartes est bloqué.\n\n" +
+                  "L'organisateur le décoche dans l'Admin. En mode simulation, " +
+                  "les cartes se distribuent quand même."
+              );
+              return;
+            }
+            if (type === "carte" && bloqueParJetons(joueurActuel)) {
+              alert(MESSAGE_JETONS_EN_JEU);
+              return;
+            }
           }
 
           const hashSimule =
@@ -5799,7 +5806,8 @@
                         }
                         style={{ width: "20px", height: "20px" }}
                       />
-                      MODE LOCAL (Bloque le scan des cartes physiques / Secours)
+                      MODE LOCAL (Bloque le scan des cartes / Secours) — sans
+                      effet en mode simulation
                     </label>
                   </div>
                   <div style={{ marginTop: "15px" }}>
@@ -8737,7 +8745,8 @@
                       {/* Une partie enregistrée avant la suppression du scanner
                           caméra peut encore porter l'ancienne valeur "real" :
                           tout ce qui n'est pas "disabled" affiche les boutons. */}
-                      {configGlobale.modeScanneur === "disabled" && (
+                      {configGlobale.modeScanneur === "disabled" &&
+                        !configBookmaker.modeSimulation && (
                         <div
                           style={{
                             background: "#3E2723",
@@ -8756,19 +8765,42 @@
                           « Distribution des cartes à la borne ».
                         </div>
                       )}
-                      {configGlobale.modeScanneur !== "disabled" && (
+                      {(configGlobale.modeScanneur !== "disabled" ||
+                        configBookmaker.modeSimulation) && (
                         <div
                           style={{
                             background: "#1a1a1a",
                             padding: "15px",
                             borderRadius: "8px",
                             marginBottom: "20px",
-                            border: "2px solid #4CAF50"
+                            border: `2px solid ${
+                              configBookmaker.modeSimulation ? "#AB47BC" : "#4CAF50"
+                            }`
                           }}
                         >
-                          <h4 style={{ marginTop: 0, color: "#4CAF50" }}>
+                          <h4
+                            style={{
+                              marginTop: 0,
+                              color: configBookmaker.modeSimulation
+                                ? "#CE93D8"
+                                : "#4CAF50"
+                            }}
+                          >
                             🃏 Option 2 : Missions et cartes
                           </h4>
+                          {configBookmaker.modeSimulation && (
+                            <p
+                              style={{
+                                margin: "0 0 10px",
+                                fontSize: "0.82rem",
+                                color: "#CE93D8"
+                              }}
+                            >
+                              🧪 Mode simulation : tout se distribue d'un clic,
+                              sans tenir compte du mode local ni des jetons en
+                              jeu.
+                            </p>
+                          )}
                           <div
                             style={{
                               display: "flex",
