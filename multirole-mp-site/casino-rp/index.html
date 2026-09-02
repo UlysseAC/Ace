@@ -800,8 +800,57 @@
 
       // Avancement d'un cheval à l'instant t (0 à 1) de la course, entre 0 et
       // sa position d'arrivée. Toujours croissant.
-      const avancementCheval = (profil, t) => {
-        const u = Math.max(0, Math.min(1, t));
+      /*
+       * LE MODE BLAGUE
+       *
+       * Un cheval tiré au sort s'arrête boire au bord de la piste, se fait
+       * doubler, puis repart ventre à terre et rattrape tout son retard.
+       *
+       * C'est un gag, pas un handicap. La pause est intégralement rendue
+       * avant la ligne, et surtout l'ordre d'arrivée ne passe pas par ici :
+       * ordreArrivee lit `profil.arrivee`, que la gorgée ne touche pas. Les
+       * gains, le tuyau du délit d'initié et les herbes ne peuvent donc pas
+       * en être affectés — seul le dessin change.
+       *
+       * Le cheval et l'instant sont tirés du numéro de la course : tous les
+       * écrans de la soirée voient la même bête boire au même moment, sans
+       * rien s'échanger.
+       */
+      // Part de la course passée le nez dans l'abreuvoir, puis part passée à
+      // rattraper. À durées égales, le rattrapage se fait à double vitesse.
+      const BOISSON_DUREE = 0.16;
+      const BOISSON_RATTRAPAGE = 0.16;
+
+      const blagueDeCourse = (numero, n, actif) => {
+        if (!actif || !numero || n < 2) return null;
+        const alea = semer(numero * 104729 + 71);
+        const cheval = Math.floor(alea() * n);
+        // Ni au départ ni dans les derniers mètres : la salle doit avoir le
+        // temps de le voir s'arrêter, et lui celui de revenir.
+        const debut = 0.20 + alea() * 0.32;
+        const fin = debut + BOISSON_DUREE;
+        return { cheval, debut, fin, retour: fin + BOISSON_RATTRAPAGE };
+      };
+
+      // Le temps que voit le cheval qui boit. Il se fige le temps de la
+      // gorgée, puis file deux fois plus vite jusqu'à rattraper la pendule.
+      //
+      // C'est le TEMPS qu'on déforme, jamais la position : le cheval ne peut
+      // donc pas reculer d'un pouce — reculer, ce serait un bug, pas un gag —
+      // et passé le rattrapage il est exactement là où il aurait été sans
+      // s'arrêter. Rien à corriger ensuite, rien à atténuer près du poteau.
+      const tempsBoisson = (boisson, t) => {
+        if (!boisson || t <= boisson.debut || t >= boisson.retour) return t;
+        if (t < boisson.fin) return boisson.debut;
+        return (
+          boisson.debut +
+          ((t - boisson.fin) * (boisson.retour - boisson.debut)) /
+            (boisson.retour - boisson.fin)
+        );
+      };
+
+      const avancementCheval = (profil, t, boisson) => {
+        const u = Math.max(0, Math.min(1, tempsBoisson(boisson, t)));
         const x = u * PAS_COURSE;
         const k = Math.min(PAS_COURSE - 1, Math.floor(x));
         const f = x - k;
@@ -1540,11 +1589,19 @@
           return () => cancelAnimationFrame(brut);
         }, [depart, duree]);
 
+        // Tiré du seul numéro de la course : tous les écrans voient la même
+        // bête boire au même moment.
+        const blague = React.useMemo(
+          () => blagueDeCourse(numero, chevaux.length, cfg.modeBlague),
+          [numero, chevaux.length, cfg.modeBlague]
+        );
+
         const positions = trame.profils.map((pr, i) => {
+          const boisson = blague && blague.cheval === i ? blague : null;
           // Le brut sert au classement — il continue de croître après la
           // ligne, ce qui garde l'ordre d'arrivée. Le dessin, lui, s'arrête
           // au poteau : le cheval rentré ne repart pas pour un tour.
-          const brut = avancementCheval(pr, t);
+          const brut = avancementCheval(pr, t, boisson);
           const avance = Math.min(1, brut);
           return {
             index: i,
@@ -1552,6 +1609,8 @@
             brut,
             avance,
             arrive: brut >= 1,
+            boit: !!boisson && t > boisson.debut && t < boisson.fin,
+            galope: !!boisson && t >= boisson.fin && t < boisson.retour,
             // Au dernier mètre on est encore dans le dernier tour, pas dans
             // un tour de plus : d'où le plafond.
             tour: Math.min(tours, Math.floor(avance * tours) + 1)
@@ -1851,6 +1910,18 @@
                       >
                         🏇
                       </text>
+                      {/* L'abreuvoir, le temps de la gorgée. */}
+                      {p.boit && (
+                        <text
+                          x={pt.x}
+                          y={pt.y - rayonPion * 1.5}
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          style={{ fontSize: `${(rayonPion * 1.5).toFixed(0)}px` }}
+                        >
+                          🪣
+                        </text>
+                      )}
                     </g>
                   );
                 })}
@@ -1873,6 +1944,8 @@
                     (x) => x.index === p.index
                   );
                   const etat = changements[p.index];
+                  const boit = p.boit;
+                  const galope = p.galope;
                   return (
                   <div
                     key={`rang-${p.cheval.id}`}
@@ -1902,7 +1975,15 @@
                     }}
                   >
                     <span style={{ width: "22px" }}>{rang + 1}.</span>
-                    <span style={{ flex: 1 }}>{p.cheval.nom}</span>
+                    <span style={{ flex: 1 }}>
+                      {p.cheval.nom}
+                      {boit && (
+                        <span style={{ color: "#4FC3F7" }}> 🪣 il boit</span>
+                      )}
+                      {galope && (
+                        <span style={{ color: "#FFC107" }}> 💨 il rattrape</span>
+                      )}
+                    </span>
                     <span style={{ color: "#888", fontSize: "0.78rem" }}>
                       tour {p.tour}
                     </span>
@@ -2158,6 +2239,7 @@
             courseAnnonceMin: 10,
             courseTopDepartSec: 15,
             courseDureeSec: 45,
+            modeBlague: false,
             courseTours: 3,
             courseCote: 3,
             courseResultatSec: 20,
@@ -2252,13 +2334,20 @@
         // pour que les huit écrans se figent au même instant.
         const [pauseSoiree, setPauseSoiree] = useEtatPartage("pauseSoiree", null);
 
-        // --- TABLE 15 : LA FIOLE D'HERBES DE LA COURSE ---
-        // Une seule par course, et tous les appareils doivent tirer la même
-        // course : l'information est donc partagée, pas locale.
-        const [herbesEnCours, setHerbesEnCours] = useEtatPartage(
-          "herbesEnCours",
-          null
-        );
+        // --- TABLE 15 : LES FIOLES D'HERBES VERSÉES ---
+        // Une par course — pas une pour toute la soirée. Deux joueurs peuvent
+        // donc servir deux courses différentes ; sur une même course, le
+        // second est averti et empêché. Tous les appareils doivent tirer la
+        // même course : la liste est partagée, pas locale.
+        const [fioles, setFioles] = useEtatPartage("herbesEnCours", []);
+
+        // La fiole qui vise cette course-là, quel qu'en soit le porteur.
+        const fioleDeCourse = (numero) =>
+          (fioles || []).find((f) => Number(f.numero) === Number(numero)) || null;
+
+        // Celle qu'un joueur a déjà en attente : il n'en verse qu'une à la fois.
+        const fioleDe = (joueurId) =>
+          (fioles || []).find((f) => f.joueurId === joueurId) || null;
 
         // --- TABLE 14 : LE DERNIER BLOC DÉJÀ IMPOSÉ ---
         // Partagé, pour qu'un prélèvement ne tombe qu'une fois même si
@@ -2747,7 +2836,7 @@
           setInvestissements([]);
           setDernierBlocImpose(0);
           setPauseSoiree(null);
-          setHerbesEnCours(null);
+          setFioles([]);
           setSoireeDebut(0);
           // Sans ça, la course lancée à la main pendant la partie précédente
           // survivrait à la remise à zéro, avec son numéro.
@@ -3311,10 +3400,10 @@
         // La fiole de cette course-là, traduite en indice de cheval : c'est
         // ce que le tirage attend.
         const herbesDe = (numero) => {
-          if (!herbesEnCours || !herbesEnCours.chevalId) return null;
-          if (Number(herbesEnCours.numero) !== Number(numero)) return null;
+          const fiole = fioleDeCourse(numero);
+          if (!fiole || !fiole.chevalId) return null;
           const index = chevauxCourse.findIndex(
-            (c) => String(c.id) === String(herbesEnCours.chevalId)
+            (c) => String(c.id) === String(fiole.chevalId)
           );
           if (index < 0) return null;
           return {
@@ -3381,16 +3470,10 @@
         // c'est celle sur laquelle le joueur pourra miser. Elle attend son
         // cheval — le bookmaker l'y rattachera au moment du pari.
         const verserLesHerbes = (carte) => {
-          if (herbesEnCours && herbesEnCours.joueurId !== joueurActuel.id) {
+          const mienne = fioleDe(joueurActuel.id);
+          if (mienne) {
             alert(
-              "Une fiole a déjà été versée pour cette course.\n\n" +
-                "Gardez la vôtre : elle ne se consomme pas."
-            );
-            return;
-          }
-          if (herbesEnCours) {
-            alert(
-              `Votre fiole est déjà versée pour la course n°${herbesEnCours.numero}.\n\n` +
+              `Votre fiole est déjà versée pour la course n°${mienne.numero}.\n\n` +
                 "Allez miser chez le bookmaker : elle s'appliquera au cheval " +
                 "que vous choisirez."
             );
@@ -3408,6 +3491,18 @@
             );
             return;
           }
+          // Deux fioles sur la même course, ce serait deux dopages sur un
+          // seul tirage : le second est refusé, et il sait pourquoi. Sa carte
+          // lui reste — c'est la course suivante qu'elle servira.
+          const dejaServie = fioleDeCourse(cible.numero);
+          if (dejaServie) {
+            alert(
+              `Une fiole a déjà été versée sur la course n°${cible.numero}.\n\n` +
+                "Une seule par course. Gardez la vôtre : elle ne se consomme " +
+                "pas, et vous pourrez la verser sur la prochaine."
+            );
+            return;
+          }
           // Un délit d'initié a déjà nommé le vainqueur de cette course :
           // verser les herbes dessus ferait mentir un tuyau déjà lu, et son
           // porteur n'y pourrait rien. La fiole part donc sur la première
@@ -3422,14 +3517,16 @@
                 Number(j.tuyau.numero) === Number(n)
             );
           let numeroFiole = Number(cible.numero);
-          // Bornée : au-delà de quelques courses d'avance, on s'arrête là.
-          for (let saut = 0; saut < 8 && tuyauPose(numeroFiole); saut++)
+          // Bornée : au-delà de quelques courses d'avance, on s'arrête là. On
+          // saute aussi les courses déjà servies, pour ne pas en doubler une
+          // en cherchant à en épargner une autre.
+          const occupee = (n) => tuyauPose(n) || !!fioleDeCourse(n);
+          for (let saut = 0; saut < 8 && occupee(numeroFiole); saut++)
             numeroFiole += 1;
-          setHerbesEnCours({
-            joueurId: joueurActuel.id,
-            numero: numeroFiole,
-            chevalId: null
-          });
+          setFioles((prev) => [
+            ...(prev || []),
+            { joueurId: joueurActuel.id, numero: numeroFiole, chevalId: null }
+          ]);
           annoncerSalle([carte.phraseAnim]);
           alert(
             `Fiole versée pour la course n°${numeroFiole}.\n\n` +
@@ -3437,6 +3534,55 @@
               "vous choisirez. La carte partira une fois la course courue."
           );
           setSousMenuBanque("accueil");
+        };
+
+        // Le bouton de la fiole a trois choses à dire : elle est versée, la
+        // course est déjà servie par quelqu'un d'autre, ou elle est libre. Le
+        // deuxième cas grise le bouton et dit pourquoi — le joueur ne se
+        // demande pas si sa carte est cassée.
+        const boutonDeLaFiole = (carte) => {
+          const mienne = fioleDe(joueurActuel && joueurActuel.id);
+          const cible = mienne ? null : courseAParier();
+          const prise = cible ? fioleDeCourse(cible.numero) : null;
+          const bloquee = !!prise;
+          const libelle = mienne
+            ? `🌿 Versée — course n°${mienne.numero}`
+            : prise
+              ? `🌿 Course n°${cible.numero} déjà servie`
+              : "🌿 Verser la fiole";
+          return (
+            <div>
+              <button
+                onClick={() => verserLesHerbes(carte)}
+                disabled={bloquee}
+                style={{
+                  padding: "8px",
+                  background: bloquee ? "#555" : "#558B2F",
+                  color: bloquee ? "#999" : "#fff",
+                  border: "none",
+                  borderRadius: "4px",
+                  cursor: bloquee ? "not-allowed" : "pointer",
+                  fontWeight: "bold",
+                  width: "100%"
+                }}
+              >
+                {libelle}
+              </button>
+              {bloquee && (
+                <div
+                  style={{
+                    marginTop: "6px",
+                    fontSize: "0.8rem",
+                    color: "#AED581",
+                    lineHeight: 1.35
+                  }}
+                >
+                  Une seule fiole par course. Gardez la vôtre : elle ne se
+                  consomme pas, et vous pourrez la verser sur la prochaine.
+                </div>
+              )}
+            </div>
+          );
         };
 
         // Qui paie quoi. Le fonds d'investissement se dépense en premier,
@@ -3731,7 +3877,7 @@
           )
             return;
           setCourseManuelle(null);
-          setHerbesEnCours(null);
+          setFioles([]);
           // Les tuyaux désignent des courses qui n'existeront plus : gardés,
           // ils réapparaîtraient au joueur dès que la numérotation les
           // rattraperait.
@@ -3852,13 +3998,22 @@
           ]);
           // La fiole d'herbes attendait un cheval : c'est celui-ci. Elle ne
           // s'attache qu'au premier pari de son porteur sur cette course.
-          const saFiole =
-            herbesEnCours &&
-            herbesEnCours.joueurId === joueurId &&
-            !herbesEnCours.chevalId &&
-            Number(herbesEnCours.numero) === Number(course.numero);
+          const saFiole = (fioles || []).some(
+            (f) =>
+              f.joueurId === joueurId &&
+              !f.chevalId &&
+              Number(f.numero) === Number(course.numero)
+          );
           if (saFiole) {
-            setHerbesEnCours({ ...herbesEnCours, chevalId: cheval.id });
+            setFioles((prev) =>
+              (prev || []).map((f) =>
+                f.joueurId === joueurId &&
+                !f.chevalId &&
+                Number(f.numero) === Number(course.numero)
+                  ? { ...f, chevalId: cheval.id }
+                  : f
+              )
+            );
             rendreLesTuyauxSouffles(course.numero, cheval.id, joueurId);
           }
 
@@ -4399,17 +4554,21 @@
           // La fiole d'herbes ne vaut que pour sa course. On attend qu'une
           // course ultérieure existe : la retirer plus tôt rejouerait le
           // tirage sans elle, podium compris, sous les yeux de la salle.
-          if (
-            herbesEnCours &&
-            course.numero !== undefined &&
-            course.numero !== null &&
-            Number(course.numero) > Number(herbesEnCours.numero)
-          ) {
-            const porteur = herbesEnCours.joueurId;
-            setHerbesEnCours(null);
+          const perimees =
+            course.numero === undefined || course.numero === null
+              ? []
+              : (fioles || []).filter(
+                  (f) => Number(course.numero) > Number(f.numero)
+                );
+          if (perimees.length) {
+            const porteurs = new Set(perimees.map((f) => f.joueurId));
+            const passees = new Set(perimees.map((f) => Number(f.numero)));
+            setFioles((prev) =>
+              (prev || []).filter((f) => !passees.has(Number(f.numero)))
+            );
             setJoueurs((prev) =>
               prev.map((j) =>
-                j.id === porteur
+                porteurs.has(j.id)
                   ? {
                       ...j,
                       deck: j.deck.filter((c) => c.id !== "herbes_medicinales"),
@@ -8232,42 +8391,7 @@
                                 </button>
                               )
                             ) : c.id === "herbes_medicinales" ? (
-                              <button
-                                onClick={() => verserLesHerbes(c)}
-                                disabled={
-                                  !!herbesEnCours &&
-                                  herbesEnCours.joueurId !== joueurActuel.id
-                                }
-                                style={{
-                                  padding: "8px",
-                                  background:
-                                    herbesEnCours &&
-                                    herbesEnCours.joueurId !== joueurActuel.id
-                                      ? "#555"
-                                      : "#558B2F",
-                                  color:
-                                    herbesEnCours &&
-                                    herbesEnCours.joueurId !== joueurActuel.id
-                                      ? "#999"
-                                      : "#fff",
-                                  border: "none",
-                                  borderRadius: "4px",
-                                  cursor:
-                                    herbesEnCours &&
-                                    herbesEnCours.joueurId !== joueurActuel.id
-                                      ? "not-allowed"
-                                      : "pointer",
-                                  fontWeight: "bold",
-                                  width: "100%"
-                                }}
-                              >
-                                {herbesEnCours &&
-                                herbesEnCours.joueurId === joueurActuel.id
-                                  ? `🌿 Versée — course n°${herbesEnCours.numero}`
-                                  : herbesEnCours
-                                    ? "🌿 Une fiole a déjà été versée"
-                                    : "🌿 Verser la fiole"}
-                              </button>
+                              boutonDeLaFiole(c)
                             ) : c.id === "heritage" || c.id === "argent_poche" ? (
                               <button
                                 onClick={() => {
@@ -9780,6 +9904,41 @@
                   {champNombre("Contrôle fiscal bloqué avant (min)", "courseBlocageAvantMin")}
                   {champNombre("Contrôle fiscal bloqué après (min)", "courseBlocageApresMin")}
                 </div>
+
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "10px",
+                    background: configBookmaker.modeBlague ? "#33291a" : "#1a1a1a",
+                    border: `1px solid ${configBookmaker.modeBlague ? "#FFC107" : "#333"}`,
+                    borderRadius: "8px",
+                    padding: "12px",
+                    marginTop: "12px",
+                    cursor: "pointer"
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!configBookmaker.modeBlague}
+                    onChange={(e) => majCfg("modeBlague", e.target.checked)}
+                    style={{ marginTop: "3px" }}
+                  />
+                  <span style={{ fontSize: "0.9rem" }}>
+                    <strong style={{ color: "#FFC107" }}>
+                      🪣 Mode blague — un cheval s'arrête boire
+                    </strong>
+                    <br />
+                    <span style={{ color: "#999", fontSize: "0.82rem" }}>
+                      À chaque course, un cheval tiré au sort pile net au bord
+                      de la piste, se fait doubler, puis repart ventre à terre.
+                      Tous les écrans voient la même bête boire au même moment.
+                      L'ordre d'arrivée, lui, ne change pas d'un cheveu : les
+                      gains, le tuyau du délit d'initié et les herbes ne
+                      s'aperçoivent de rien.
+                    </span>
+                  </span>
+                </label>
 
                 <div
                   style={{
