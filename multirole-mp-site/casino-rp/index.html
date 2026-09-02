@@ -794,6 +794,11 @@
       // sert à faire glisser les lignes plutôt qu'à les réordonner d'un coup.
       const PAS_CLASSEMENT = 66;
       const PAS_CLASSEMENT_COURSE = 44;
+      // Le temps que met une ligne du classement à glisser d'un rang. Il sert
+      // deux fois : à l'animation, et à la cadence de rafraîchissement de
+      // l'ordre — les deux doivent rester d'accord, sans quoi une ligne
+      // repart avant d'être arrivée.
+      const GLISSE_CLASSEMENT_MS = 450;
 
       const AVANTAGE_CORDE = 0.014;
       const FIN_SANS_CORDE = 0.14;
@@ -1562,6 +1567,9 @@
         const [t, setT] = React.useState(0);
         const [changements, setChangements] = React.useState({});
         const ordrePrecedent = React.useRef(null);
+        // L'ordre effectivement affiché, et l'instant où on l'a adopté.
+        const ordreAffiche = React.useRef(null);
+        const derniereBascule = React.useRef(0);
 
         const duree = (Number(cfg.courseDureeSec) || 45) * 1000;
         const tours = Number(cfg.courseTours) || 3;
@@ -1616,7 +1624,36 @@
             tour: Math.min(tours, Math.floor(avance * tours) + 1)
           };
         });
-        const classement = [...positions].sort((a, b) => b.brut - a.brut);
+        /*
+         * Deux chevaux au coude à coude échangent leur rang plusieurs fois par
+         * seconde — mesuré : jusqu'à 67 ms entre deux bascules. La ligne, elle,
+         * met 450 ms à glisser : elle repartait donc en arrière avant d'être
+         * arrivée, et le classement tressautait dès qu'un cheval prenait la
+         * tête.
+         *
+         * On ne touche pas à l'ordre, seulement à sa cadence : l'ordre affiché
+         * tient le temps qu'une ligne finisse de glisser, puis on prend le vrai.
+         * Et toujours le vrai au poteau, pour que le classement colle à
+         * l'arrivée. Les pions sur la piste ne sont pas concernés : eux
+         * bougent à chaque image.
+         */
+        const ordreVrai = [...positions]
+          .sort((a, b) => b.brut - a.brut)
+          .map((p) => p.index);
+        const instant = Date.now();
+        if (
+          ordreAffiche.current === null ||
+          ordreAffiche.current.length !== ordreVrai.length ||
+          t >= 1 ||
+          instant - derniereBascule.current >= GLISSE_CLASSEMENT_MS
+        ) {
+          ordreAffiche.current = ordreVrai;
+          derniereBascule.current = instant;
+        }
+        const parIndex = new Map(positions.map((p) => [p.index, p]));
+        const classement = ordreAffiche.current
+          .map((i) => parIndex.get(i))
+          .filter(Boolean);
 
         // Dépassement : la ligne qui gagne une place passe au vert, celle qui
         // en perd une au rouge, une seconde durant.
@@ -2005,7 +2042,8 @@
                             ? "#7f1d1d"
                             : "#1a1a1a",
                       transition:
-                        "transform 450ms cubic-bezier(.4,0,.2,1), background 300ms",
+                        `transform ${GLISSE_CLASSEMENT_MS}ms cubic-bezier(.4,0,.2,1), ` +
+                        "background 300ms",
                       borderLeft: `6px solid ${p.cheval.couleur}`,
                       fontWeight: rang === 0 ? "bold" : "normal"
                     }}
