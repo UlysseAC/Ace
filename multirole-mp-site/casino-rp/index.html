@@ -4468,20 +4468,50 @@
             return;
           }
 
-          // Vérifier que le code n'a pas déjà été utilisé
-          if (joueurActuel.codesUtilises.includes(codeValide.hash)) {
-            alert("Ce code a déjà été utilisé !");
+          // Un chèque s'encaisse une fois, et une seule, pour toute la
+          // table. La liste des codes du joueur ne suffisait pas : elle
+          // laissait chacun encaisser le même papier, et une photo du chèque
+          // valait autant de fois qu'il y a de joueurs.
+          if (codeValide.statut === "Encaissé") {
+            alert(
+              "Ce chèque a déjà été encaissé" +
+                (codeValide.parNom ? ` par ${codeValide.parNom}` : "") +
+                (codeValide.leQuand ? `, à ${codeValide.leQuand}` : "") +
+                "."
+            );
+            return;
+          }
+          // Une partie enregistrée avant ce changement n'a que les listes des
+          // joueurs : on les respecte encore, pour ne pas rendre d'un coup
+          // deux fois encaissables des chèques déjà passés.
+          if (
+            joueurs.some((j) => (j.codesUtilises || []).includes(codeValide.hash))
+          ) {
+            alert("Ce chèque a déjà été encaissé.");
             return;
           }
 
           // Appliquer le code selon son type
           if (codeValide.type === "Mission") {
             const mission = missions.find((m) => m.id === codeValide.missionId);
-            if (mission) {
-              scannerCodeSimule("mission", mission);
-            } else {
+            if (!mission) {
               alert("Mission introuvable");
+              return;
             }
+            scannerCodeSimule("mission", mission);
+            // Le registre garde la trace : qui, et quand.
+            setCodesRegistre((prev) =>
+              prev.map((q) =>
+                q.hash === codeValide.hash
+                  ? {
+                      ...q,
+                      statut: "Encaissé",
+                      parNom: joueurActuel.nom,
+                      leQuand: new Date().toLocaleTimeString()
+                    }
+                  : q
+              )
+            );
           }
 
           setCodeManuel("");
@@ -7063,14 +7093,22 @@
                   Table 3 — Codes ({codesRegistre.length})
                 </h3>
                 <Table
-                  colonnes={["Hash", "Type", "Statut"]}
+                  colonnes={["Code", "Type", "Statut"]}
                   vide="Aucun code généré. Ils apparaissent après une impression de chèques."
                   lignes={codesRegistre.map((q) => [
-                    q.hash,
+                    q.code || q.hash,
                     q.type,
-                    q.statut
+                    q.statut === "Encaissé"
+                      ? `Encaissé${q.parNom ? " — " + q.parNom : ""}${
+                          q.leQuand ? " à " + q.leQuand : ""
+                        }`
+                      : "Valide"
                   ])}
                 />
+                <p style={{ color: "#777", fontSize: "0.8rem", margin: "8px 0 0" }}>
+                  Un chèque s'encaisse une fois pour toute la table : imprimez-en
+                  autant que de joueurs censés faire la mission.
+                </p>
               </div>
 
               <div style={cadre}>
