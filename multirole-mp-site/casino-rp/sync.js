@@ -107,6 +107,52 @@
     return chaine;
   };
 
+  /*
+   * Les écritures déjà en file, une par cible (« etat:configGlobale »,
+   * « joueur:12 »…).
+   *
+   * Taper douze lettres dans un champ, c'était douze allers-retours mis
+   * bout à bout, chacun portant l'objet entier : la file prenait plus d'une
+   * seconde de retard sur les doigts. Une deuxième demande sur la même cible
+   * ne s'ajoute donc plus à la file — elle remplace la valeur que la tâche
+   * déjà en attente ira chercher au moment de partir. Un mot tapé d'un trait
+   * ne fait plus qu'un aller-retour au début et un à la fin, et une action
+   * isolée, elle, n'attend rien de plus qu'avant.
+   *
+   * La base de fusion, pour les joueurs, reste celle de la PREMIÈRE demande :
+   * c'est d'elle que part le calcul de ce qui a changé.
+   */
+  const enAttenteParCible = {};
+
+  const enfilerPourCible = (cible, valeur, base, executer) => {
+    const dejaLa = enAttenteParCible[cible];
+    if (dejaLa) {
+      dejaLa.valeur = valeur;
+      return;
+    }
+    const attente = { valeur, base };
+    enAttenteParCible[cible] = attente;
+    return enfiler(async () => {
+      // Libérée au départ, pas à l'arrivée : ce qui change pendant que
+      // l'écriture est en vol mérite son propre aller-retour.
+      delete enAttenteParCible[cible];
+      await executer(attente.valeur, attente.base);
+    });
+  };
+
+  // Ce que nous venons d'envoyer, pour reconnaître notre propre écho.
+  const envoyees = {};
+
+  // Faut-il prévenir l'application de ce qui arrive par le canal ? Non si
+  // c'est notre propre écriture qui nous revient — la reposer telle quelle
+  // ferait sauter le curseur du champ en cours de saisie — et non si une
+  // écriture à nous attend son tour sur la même cible : notre valeur est
+  // alors la plus récente des deux.
+  const echoDeNous = (cible, valeur) => {
+    if (enAttenteParCible[cible]) return true;
+    return envoyees[cible] === JSON.stringify(valeur);
+  };
+
   // Applique sur la valeur de la base la modification faite localement,
   // plutôt que d'écraser avec notre copie. Deux appareils qui touchent le
   // même joueur en même temps voient ainsi leurs deux effets conservés.
@@ -198,8 +244,9 @@
         (msg) => {
           const ligne = msg.eventType === "DELETE" ? msg.old : msg.new;
           if (!ligne || !ligne.cle) return;
-          dernieres[ligne.cle] =
-            msg.eventType === "DELETE" ? null : msg.new.valeur;
+          const valeur = msg.eventType === "DELETE" ? null : msg.new.valeur;
+          dernieres[ligne.cle] = valeur;
+          if (echoDeNous("etat:" + ligne.cle, valeur)) return;
           prevenir(ligne.cle);
         }
       )
@@ -207,15 +254,21 @@
         "postgres_changes",
         { event: "*", schema: "public", table: "joueurs" },
         (msg) => {
+          let cible = null;
           if (msg.eventType === "DELETE") {
             if (msg.old && msg.old.id) delete joueursParId[msg.old.id];
           } else {
+            cible = "joueur:" + msg.new.id;
             joueursParId[msg.new.id] = {
               donnees: msg.new.donnees,
               version: msg.new.version
             };
           }
           dernieres.joueurs = listeJoueurs();
+          // La version, elle, est toujours retenue — c'est elle qui permet
+          // à l'écriture suivante de se poser au bon endroit. Seul le
+          // rafraîchissement de l'écran est sauté.
+          if (cible && echoDeNous(cible, msg.new.donnees)) return;
           prevenir("joueurs");
         }
       )
@@ -296,11 +349,12 @@
     ecrire(cle, valeur) {
       if (!disponible) return;
       if (cle === "joueurs") return Sync.ecrireJoueurs([], valeur);
-      enfiler(async () => {
+      enfilerPourCible("etat:" + cle, valeur, null, async (v) => {
+        envoyees["etat:" + cle] = JSON.stringify(v);
         const { error } = await client
           .from("etat")
           .upsert(
-            { cle, valeur, modifie_le: new Date().toISOString() },
+            { cle, valeur: v, modifie_le: new Date().toISOString() },
             { onConflict: "cle" }
           );
         if (error) throw error;
@@ -321,7 +375,10 @@
         const valeur = { ...j, ordre: i };
         const base = baseParId[j.id];
         if (base && JSON.stringify(base) === JSON.stringify(valeur)) return;
-        enfiler(() => ecrireJoueur(j.id, base, valeur));
+        enfilerPourCible("joueur:" + j.id, valeur, base, (v, b) => {
+          envoyees["joueur:" + j.id] = JSON.stringify(v);
+          return ecrireJoueur(j.id, b, v);
+        });
       });
 
       // Un joueur retiré de la liste doit aussi disparaître de la base.
@@ -411,6 +468,8 @@
         }
         dejaSeme.current = true;
         const propre = Sync.normaliser(cle, brut);
+        // Rien de neuf : un rendu de plus ne ferait que clignoter.
+        if (JSON.stringify(propre) === JSON.stringify(ref.current)) return;
         ref.current = propre;
         poser(propre);
       });
