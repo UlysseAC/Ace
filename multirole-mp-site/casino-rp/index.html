@@ -209,7 +209,8 @@
           definition:
             "Volez une carte à un joueur qui en possède — sans savoir laquelle. En échange, il reçoit le Pickpocket.",
           modeEmploi:
-            "Activez-la depuis votre deck et désignez votre victime, parmi ceux qui ont au moins une carte en main. Une de ses cartes passe dans votre deck, tirée au hasard : vous ne choisissez pas, et vous découvrez ce que vous avez pris une fois le coup fait.\n\n" +
+            "Activez-la depuis votre deck et désignez votre victime, parmi ceux qui ont au moins une carte prenable en main. Une de ses cartes passe dans votre deck, tirée au hasard : vous ne choisissez pas, et vous découvrez ce que vous avez pris une fois le coup fait.\n\n" +
+            "Une carte déjà activée ne se vole pas : son effet est en route, il n'y a plus rien à prendre. Le compte affiché en face de chaque nom ne tient donc que les cartes encore prenables.\n\n" +
             "Le Pickpocket, lui, passe dans la poche de votre victime : à elle de trouver quelqu'un à détrousser à son tour.\n\n" +
             "La carte volée arrive avec son temps de garde à purger, comme si vous veniez de la ramasser. Personne d'autre que vous et votre victime ne sait ce qui a changé de mains.\n\n" +
             "Attention : si votre victime a un garde du corps en poste, vous vous faites repousser. La carte vous reste, mais son temps de garde repart à zéro — il faudra patienter avant de retenter le coup.",
@@ -3753,8 +3754,39 @@
         // change de mains, et le voleur ne le découvre qu'après coup. Les deux
         // cartes arrivent avec leur temps de garde à purger, comme si on
         // venait de les ramasser.
+        /*
+         * Une carte activée ne se vole pas : son effet est déjà en route, et
+         * le voleur n'a plus rien à prendre. Cinq cartes restent en main une
+         * fois jouées, et sont donc à l'abri :
+         *
+         *   Le Veinard, la Fontaine et l'Assurance une fois armés ;
+         *   les herbes une fois la fiole versée.
+         *
+         * Les autres se consomment à l'activation — le paradis fiscal, le
+         * contrôle fiscal, le délit d'initié, le fonds, les versements — donc
+         * elles ne sont plus là pour être prises.
+         *
+         * Le garde du corps en poste est l'exception volontaire : il n'est
+         * pas écarté ici, alors qu'il est bel et bien intouchable. C'est
+         * qu'il se défend tout seul — il repousse le voleur et lui coûte son
+         * coup. L'écarter ferait disparaître de la liste un joueur qui n'a
+         * que lui en main, et trahirait justement ce qu'on veut cacher : qui
+         * est gardé.
+         */
+        const carteActivee = (joueur, carte) => {
+          const id = (carte || {}).id;
+          if (id === "veinard") return !!joueur.veinardActif;
+          if (id === "fontaine_jouvence") return !!joueur.fontaineActive;
+          if (id === "assurance") return !!joueur.assuranceActive;
+          if (id === "herbes_medicinales") return !!fioleDe(joueur.id);
+          return false;
+        };
+
+        const cartesVolables = (joueur) =>
+          ((joueur || {}).deck || []).filter((c) => !carteActivee(joueur, c));
+
         // Ceux qu'on peut détrousser : encore dans la salle, et quelque
-        // chose en poche. On ne détrousse pas quelqu'un parti au paradis
+        // chose de prenable en poche. On ne détrousse pas quelqu'un parti au paradis
         // fiscal — il n'est plus là, même règle que le contrôle fiscal. Un
         // joueur protégé par un garde du corps reste dans la liste : le
         // voleur ne doit pas savoir qui est gardé, c'est tout l'intérêt — il
@@ -3765,7 +3797,7 @@
               joueurActuel &&
               j.id !== joueurActuel.id &&
               !j.paradisActif &&
-              (j.deck || []).length > 0
+              cartesVolables(j).length > 0
           );
 
         // On ouvre l'écran de choix plutôt qu'une boîte du navigateur : la
@@ -3804,11 +3836,16 @@
             return;
           }
           // Le tirage se fait ici, une fois, et le résultat sert aux deux
-          // decks : impossible qu'ils divergent.
-          const deckCible = choix.deck || [];
-          const volee = deckCible[Math.floor(Math.random() * deckCible.length)];
+          // decks : impossible qu'ils divergent. Il ne porte que sur les
+          // cartes prenables : celles qui sont déjà en train d'agir restent
+          // à leur propriétaire.
+          const prenables = cartesVolables(choix);
+          const volee = prenables[Math.floor(Math.random() * prenables.length)];
           if (!volee) {
-            alert(`${choix.nom} n'a plus rien en poche.`);
+            alert(
+              `${choix.nom} n'a plus rien de prenable en poche.\n\n` +
+                "Votre carte vous reste."
+            );
             return;
           }
           const maintenantLa = Date.now();
@@ -3885,15 +3922,9 @@
                   avisBookmaker: [
                     `${ligne} — le Pickpocket est passé dans votre main.`,
                     ...(j.avisBookmaker || [])
-                  ],
-                  // Une carte volée pendant qu'elle était armée ne doit pas
-                  // laisser son effet derrière elle.
-                  veinardActif:
-                    volee.id === "veinard" ? false : j.veinardActif,
-                  fontaineActive:
-                    volee.id === "fontaine_jouvence" ? false : j.fontaineActive,
-                  assuranceActive:
-                    volee.id === "assurance" ? false : j.assuranceActive
+                  ]
+                  // Rien à désarmer ici : une carte en train d'agir n'est
+                  // jamais tirée, cartesVolables l'a écartée en amont.
                 };
               }
               return j;
@@ -9259,7 +9290,9 @@
                         </p>
                       ) : (
                         ciblesPickpocket().map((j) => {
-                          const n = (j.deck || []).length;
+                          // On annonce ce qui est réellement prenable : une
+                          // carte déjà en train d'agir ne compte pas.
+                          const n = cartesVolables(j).length;
                           return (
                             <button
                               key={j.id}
