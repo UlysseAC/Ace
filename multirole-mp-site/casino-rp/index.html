@@ -1932,13 +1932,47 @@
                 dans la page et c'est leur position qui glisse. */}
             <div
               style={{
-                // De quoi loger un nom de cheval un peu long sans que le
-                // gras du premier le fasse déborder.
                 minWidth: compact ? "200px" : "260px",
+                // Bornée quand même : un nom à rallonge ne doit pas manger
+                // la piste. Au-delà, l'ellipse de la ligne prend le relais.
+                maxWidth: compact ? "60vw" : "34vw",
                 position: "relative",
                 height: `${classement.length * PAS_CLASSEMENT_COURSE}px`
               }}
             >
+              {/* Un gabarit invisible, en flux normal. Les lignes du
+                  classement sont en position absolue : elles ne donnent
+                  aucune largeur au panneau, qui resterait donc à son minimum
+                  et rognerait le nom le plus long. On mesure ici la pire
+                  ligne possible — le nom le plus long, en gras comme l'est
+                  le premier, mention du mode blague comprise — et le
+                  panneau s'y ajuste. */}
+              <div
+                aria-hidden="true"
+                style={{
+                  visibility: "hidden",
+                  height: 0,
+                  overflow: "hidden",
+                  display: "flex",
+                  gap: "8px",
+                  padding: "0 10px",
+                  fontWeight: "bold",
+                  whiteSpace: "nowrap"
+                }}
+              >
+                <span style={{ width: "22px" }}>0.</span>
+                <span>
+                  {chevaux.reduce(
+                    (long, c) =>
+                      String((c || {}).nom || "").length > long.length
+                        ? String(c.nom)
+                        : long,
+                    ""
+                  )}
+                  {blague ? " 💨 il rattrape" : ""}
+                </span>
+                <span style={{ fontSize: "0.78rem" }}>tour {tours}</span>
+              </div>
               {[...classement]
                 .sort((a, b) => a.index - b.index)
                 .map((p) => {
