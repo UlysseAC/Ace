@@ -798,6 +798,63 @@
       const PAS_CLASSEMENT_COURSE = 44;
 
       /*
+       * LE FOND DES CHÈQUES
+       *
+       * L'organisateur insère l'image de son chèque, et le jeu ne pose
+       * dessus que ce qui change d'un papier à l'autre : le montant, le nom
+       * de la mission et le code. Les trois se placent en pourcentage de la
+       * surface du chèque, ce qui les rend indépendants de la taille du
+       * papier et de la résolution de l'image.
+       *
+       * L'image est ramenée à 1600 px de large avant d'être rangée : à
+       * 106 mm de large, cela fait près de quatre cents points par pouce,
+       * bien au-delà de ce qu'une imprimante de bureau restitue, et cela
+       * évite de faire transiter plusieurs mégaoctets par la base à chaque
+       * appareil qui se connecte.
+       */
+      const LARGEUR_FOND_MAX = 1600;
+      const CHAMPS_CHEQUE_DEFAUT = {
+        montant: { x: 70, y: 42, taille: 1.2 },
+        mission: { x: 24, y: 62, taille: 0.9 },
+        code: { x: 76, y: 84, taille: 1 }
+      };
+      const LIBELLE_CHAMP_CHEQUE = {
+        montant: "Montant",
+        mission: "Mission",
+        code: "Code"
+      };
+
+      // Réduit et compresse l'image choisie, puis la rend en texte rangeable.
+      const preparerLeFond = (fichier) =>
+        new Promise((resoudre, rejeter) => {
+          const lecteur = new FileReader();
+          lecteur.onerror = () => rejeter(new Error("lecture impossible"));
+          lecteur.onload = () => {
+            const img = new Image();
+            img.onerror = () => rejeter(new Error("image illisible"));
+            img.onload = () => {
+              const echelle = Math.min(1, LARGEUR_FOND_MAX / img.width);
+              const toile = document.createElement("canvas");
+              toile.width = Math.max(1, Math.round(img.width * echelle));
+              toile.height = Math.max(1, Math.round(img.height * echelle));
+              const ctx = toile.getContext("2d");
+              // Le papier est blanc : sans ce fond, une image transparente
+              // ressortirait noire une fois passée en JPEG.
+              ctx.fillStyle = "#fff";
+              ctx.fillRect(0, 0, toile.width, toile.height);
+              ctx.drawImage(img, 0, 0, toile.width, toile.height);
+              resoudre({
+                donnee: toile.toDataURL("image/jpeg", 0.92),
+                largeur: img.width,
+                hauteur: img.height
+              });
+            };
+            img.src = lecteur.result;
+          };
+          lecteur.readAsDataURL(fichier);
+        });
+
+      /*
        * L'IDENTITÉ DE CET APPAREIL, ET LE VERROU DU POSTE
        *
        * Le poste du bookmaker n'est pas un écran comme les autres : c'est lui
@@ -2614,7 +2671,10 @@
 
         // États Imprimerie (PDF)
         const [imprMissionId, setImprMissionId] = React.useState(1);
-        const [imprImgFond, setImprImgFond] = React.useState("");
+        // Le fond a sa propre clé : rangé avec le reste de la configuration,
+        // il repartirait vers la base à chaque frappe dans un champ voisin.
+        const [fondCheque, setFondCheque] = useEtatPartage("fondCheque", null);
+        const [glisseChamp, setGlisseChamp] = React.useState(null);
         const [qteImpr, setQteImpr] = React.useState(5);
         const [chequesImprimerie, setChequesImprimerie] = React.useState([]);
 
@@ -4766,6 +4826,99 @@
           return Math.floor(100000 + Math.random() * 900000).toString();
         };
 
+        // Où se pose l'une des trois valeurs, réglage de l'organisateur ou
+        // valeur livrée.
+        const champCheque = (cle) => {
+          const pose = (configGlobale.champsCheque || {})[cle] || {};
+          const parDefaut = CHAMPS_CHEQUE_DEFAUT[cle];
+          return {
+            x: Math.max(0, Math.min(100, nombreSur(pose.x, parDefaut.x))),
+            y: Math.max(0, Math.min(100, nombreSur(pose.y, parDefaut.y))),
+            taille: Math.max(0.4, nombreSur(pose.taille, parDefaut.taille))
+          };
+        };
+
+        const poserChampCheque = (cle, maj) => {
+          const nouveau = { ...champCheque(cle), ...maj };
+          setConfigGlobale((prev) => ({
+            ...prev,
+            champsCheque: { ...(prev.champsCheque || {}), [cle]: nouveau }
+          }));
+        };
+
+        // L'organisateur choisit son image : on la réduit, on la range, et
+        // tous les appareils l'ont.
+        const insererLeFond = async (fichier) => {
+          if (!fichier) return;
+          if (/pdf$/i.test(fichier.name || "")) {
+            alert(
+              "Le navigateur ne sait pas lire un PDF comme image de fond.\n\n" +
+                "Exportez votre chèque en PNG ou en JPEG depuis votre logiciel " +
+                "de PDF, puis reprenez ici."
+            );
+            return;
+          }
+          try {
+            const { donnee, largeur, hauteur } = await preparerLeFond(fichier);
+            setFondCheque(donnee);
+            const proportion = hauteur > 0 ? largeur / hauteur : 0;
+            alert(
+              `Fond inséré : ${largeur} × ${hauteur} px.\n\n` +
+                (Math.abs(proportion - 106 / 56) > 0.25
+                  ? `Votre image est en ${proportion.toFixed(2)}:1, alors que le ` +
+                    "chèque imprimé fait 106 × 56 mm, soit 1,89:1. Elle sera " +
+                    "étirée pour remplir le cadre — pensez à la recadrer si le " +
+                    "résultat vous déplaît."
+                  : "Sa proportion correspond au chèque imprimé.")
+            );
+          } catch (e) {
+            alert("Cette image n'a pas pu être lue.");
+          }
+        };
+
+        // Le glissement se suit sur la fenêtre entière : le curseur quitte
+        // le petit texte dès le premier pixel, et l'écouteur posé dessus
+        // n'entendrait plus rien.
+        const glisseRef = React.useRef(null);
+        glisseRef.current = glisseChamp;
+        React.useEffect(() => {
+          if (!glisseChamp) return undefined;
+          const cadre = glisseChamp.cadre;
+          const bouge = (e) => {
+            if (!cadre || !cadre.width || !cadre.height) return;
+            setGlisseChamp((g) =>
+              g
+                ? {
+                    ...g,
+                    x: Math.max(0, Math.min(100,
+                      ((e.clientX - cadre.left) / cadre.width) * 100)),
+                    y: Math.max(0, Math.min(100,
+                      ((e.clientY - cadre.top) / cadre.height) * 100))
+                  }
+                : g
+            );
+          };
+          const lache = () => {
+            const g = glisseRef.current;
+            // On n'écrit qu'au relâchement : pendant le glissement, tout
+            // reste local, et la base n'entend rien.
+            if (g)
+              poserChampCheque(g.cle, {
+                x: Math.round(g.x * 10) / 10,
+                y: Math.round(g.y * 10) / 10
+              });
+            setGlisseChamp(null);
+          };
+          window.addEventListener("pointermove", bouge);
+          window.addEventListener("pointerup", lache);
+          window.addEventListener("pointercancel", lache);
+          return () => {
+            window.removeEventListener("pointermove", bouge);
+            window.removeEventListener("pointerup", lache);
+            window.removeEventListener("pointercancel", lache);
+          };
+        }, [glisseChamp && glisseChamp.cle]);
+
         const genererChequesPdf = () => {
           const mObj =
             missions.find((m) => m.id === Number(imprMissionId)) || missions[0];
@@ -4781,8 +4934,7 @@
               hash: hashUnique,
               code: codeUnique,
               nom: mObj.nom,
-              montant: mObj.montant,
-              img: imprImgFond
+              montant: mObj.montant
             });
             nouveauRegistre.push({
               hash: hashUnique,
@@ -7222,14 +7374,21 @@
                       </select>
                     </div>
                     <div style={{ flex: 2 }}>
-                      <label>URL Image de fond (Optionnel) :</label>
+                      <label>Fond des chèques (optionnel) :</label>
                       <input
-                        type="text"
-                        value={imprImgFond}
-                        onChange={(e) => setImprImgFond(e.target.value)}
-                        placeholder="https://..."
-                        style={{ width: "100%", padding: "8px" }}
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          insererLeFond(e.target.files && e.target.files[0]);
+                          e.target.value = "";
+                        }}
+                        style={{ width: "100%", padding: "6px" }}
                       />
+                      <div style={{ color: "#777", fontSize: "0.75rem" }}>
+                        {fondCheque
+                          ? "Fond en place — les trois valeurs se posent dessus."
+                          : "Une image PNG ou JPEG. Sans elle, le chèque livré."}
+                      </div>
                     </div>
                     <div style={{ flex: 1 }}>
                       <label>Qté :</label>
@@ -7281,16 +7440,90 @@
                           position: "relative",
                           background: "#fff",
                           color: "#000",
-                          padding: "12px",
+                          // Avec un fond, l'image porte le dessin : ni marge
+                          // intérieure ni disposition en colonne, seul le
+                          // trait de découpe reste.
+                          padding: fondCheque ? 0 : "12px",
                           border: "2px solid #000",
                           height: "160px",
-                          display: "flex",
+                          overflow: "hidden",
+                          display: fondCheque ? "block" : "flex",
                           flexDirection: "column",
                           justifyContent: "space-between",
                           fontFamily: "Arial, sans-serif",
                           fontSize: "0.75rem"
                         }}
                       >
+                        {fondCheque ? (
+                          <React.Fragment>
+                            {/* Le fond occupe tout le chèque ; les trois
+                                valeurs se posent dessus, chacune à la place
+                                réglée. */}
+                            <img
+                              src={fondCheque}
+                              alt=""
+                              style={{
+                                position: "absolute",
+                                inset: 0,
+                                width: "100%",
+                                height: "100%",
+                                objectFit: "fill"
+                              }}
+                            />
+                            {[
+                              ["montant", `${ch.montant}$`],
+                              ["mission", ch.nom],
+                              ["code", ch.code]
+                            ].map(([cle, valeur]) => {
+                              const pose =
+                                glisseChamp && glisseChamp.cle === cle
+                                  ? glisseChamp
+                                  : champCheque(cle);
+                              return (
+                                <div
+                                  key={cle}
+                                  className="champ-cheque"
+                                  onPointerDown={(e) => {
+                                    // Placement à la souris, sur n'importe
+                                    // quel chèque de la planche : ils portent
+                                    // tous les mêmes réglages. On retient le
+                                    // cadre du chèque, seul repère utile pour
+                                    // convertir la position en pourcentage.
+                                    e.preventDefault();
+                                    const r =
+                                      e.currentTarget.parentElement.getBoundingClientRect();
+                                    setGlisseChamp({
+                                      cle,
+                                      ...champCheque(cle),
+                                      cadre: {
+                                        left: r.left,
+                                        top: r.top,
+                                        width: r.width,
+                                        height: r.height
+                                      }
+                                    });
+                                  }}
+                                  style={{
+                                    position: "absolute",
+                                    left: `${pose.x}%`,
+                                    top: `${pose.y}%`,
+                                    transform: "translate(-50%, -50%)",
+                                    fontSize: `${pose.taille}rem`,
+                                    fontWeight: "bold",
+                                    color: "#000",
+                                    whiteSpace: "nowrap",
+                                    cursor: "move",
+                                    touchAction: "none",
+                                    padding: "1px 3px"
+                                  }}
+                                >
+                                  {valeur}
+                                </div>
+                              );
+                            })}
+                          </React.Fragment>
+                        ) : (
+                          <React.Fragment>
                         {/* HAUT : Logo, Texte, Code */}
                         <div
                           style={{
@@ -7382,9 +7615,102 @@
                             {ch.code}
                           </span>
                         </div>
+                          </React.Fragment>
+                        )}
                       </div>
                     ))}
                   </div>
+                  {fondCheque && chequesImprimerie.length > 0 && (
+                    <div
+                      className="no-print"
+                      style={{
+                        background: "#1a1a1a",
+                        border: "1px solid #444",
+                        borderRadius: "8px",
+                        padding: "12px 14px",
+                        marginTop: "14px"
+                      }}
+                    >
+                      <div style={{ fontWeight: "bold", marginBottom: "4px" }}>
+                        📍 Placer les trois valeurs
+                      </div>
+                      <div
+                        style={{
+                          color: "#999",
+                          fontSize: "0.8rem",
+                          marginBottom: "10px"
+                        }}
+                      >
+                        Faites-les glisser directement sur un chèque ci-dessus,
+                        ou réglez les chiffres ici. Tous les chèques suivent.
+                      </div>
+                      {["montant", "mission", "code"].map((cle) => {
+                        const c = champCheque(cle);
+                        const champ = (libelle, val, pas, sur) => (
+                          <label
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              fontSize: "0.8rem"
+                            }}
+                          >
+                            {libelle}
+                            <input
+                              type="number"
+                              step={pas}
+                              value={val}
+                              onChange={(e) => sur(e.target.value)}
+                              style={{ width: "72px", padding: "4px" }}
+                            />
+                          </label>
+                        );
+                        return (
+                          <div
+                            key={cle}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "12px",
+                              flexWrap: "wrap",
+                              marginBottom: "6px"
+                            }}
+                          >
+                            <strong style={{ width: "80px" }}>
+                              {LIBELLE_CHAMP_CHEQUE[cle]}
+                            </strong>
+                            {champ("gauche %", c.x, 0.5, (v) =>
+                              poserChampCheque(cle, { x: nombreSur(v, c.x) })
+                            )}
+                            {champ("haut %", c.y, 0.5, (v) =>
+                              poserChampCheque(cle, { y: nombreSur(v, c.y) })
+                            )}
+                            {champ("taille", c.taille, 0.05, (v) =>
+                              poserChampCheque(cle, { taille: nombreSur(v, c.taille) })
+                            )}
+                          </div>
+                        );
+                      })}
+                      <button
+                        onClick={() => {
+                          if (!window.confirm("Retirer le fond des chèques ?"))
+                            return;
+                          setFondCheque(null);
+                        }}
+                        style={{
+                          marginTop: "6px",
+                          padding: "6px 12px",
+                          background: "#7f1d1d",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "5px",
+                          cursor: "pointer"
+                        }}
+                      >
+                        Retirer le fond
+                      </button>
+                    </div>
+                  )}
                   {chequesImprimerie.length > 0 && (
                     <button
                       className="no-print"
