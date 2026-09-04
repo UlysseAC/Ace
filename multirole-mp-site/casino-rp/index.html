@@ -184,12 +184,12 @@
           id: "delit_initie",
           nom: "Délit d'initié",
           definition:
-            "Usage unique : vous révèle le vainqueur de la prochaine course dont les paris sont encore ouverts, et l'heure de son départ. À vous d'aller miser chez le bookmaker.",
+            "Usage unique : vous dit lesquels des projets d'investissement risqués du bloc en cours aboutiront, et lesquels échoueront. Il ne se trompe jamais.",
           modeEmploi:
-            "Activez-la depuis votre deck. Elle vous donne le vainqueur de la prochaine course encore ouverte aux paris, et dans combien de temps elle part. Si les paris de la course en cours sont déjà clos, elle vous donne la suivante.\n\n" +
-            "Le tuyau reste affiché sur cette borne jusqu'au top départ : vous pouvez le relire autant que vous voulez d'ici là. Personne d'autre ne le voit — la salle apprend seulement qu'une enveloppe a changé de mains.\n\n" +
-            "Votre informateur est bon, mais la piste est vivante : s'il arrive que le tuyau se révèle faux avant le départ, la carte vous est rendue.\n\n" +
-            "À vous de filer chez le bookmaker avant le top départ.",
+            "Activez-la depuis votre deck. Elle vous donne le sort de chaque projet RISQUÉ du bloc où vous êtes : celui qui aboutira, celui qui échouera. Les projets garantis n'y figurent pas — leur succès est déjà écrit sur l'écran de la salle.\n\n" +
+            "Votre informateur ne se trompe jamais : le sort de ces projets est scellé dès le début du bloc, et la carte ne fait que le lire.\n\n" +
+            "Le tuyau reste affiché sur cette borne jusqu'à la fin du bloc : vous pouvez le relire autant que vous voulez d'ici là. Personne d'autre ne le voit — la salle apprend seulement qu'une enveloppe a changé de mains.\n\n" +
+            "Filez prendre votre place chez le bookmaker pendant qu'il en reste : le tuyau ne vaut rien si le projet se remplit sans vous. Et si le bloc n'a aucun projet risqué, la carte ne se consomme pas.",
           delaiAvantUsage: true,
           phraseAnim: "Une enveloppe change de mains..."
         },
@@ -1181,6 +1181,40 @@
       };
 
       // ---- Horloge des blocs d'investissement ----
+      /*
+       * LE SORT D'UN PROJET RISQUÉ
+       *
+       * Il se tirait au moment où le projet se soldait, à partir de
+       * l'identifiant de l'instance — un horodatage doublé d'un tirage au
+       * sort, fabriqué au premier investissement. Personne ne pouvait donc
+       * le connaître d'avance, pas même un délit d'initié.
+       *
+       * Le tirage ne dépend plus que du projet et de son bloc. Comme pour les
+       * courses, tous les appareils y lisent la même chose, sans rien
+       * s'échanger, et on peut le lire avant que le premier dollar soit
+       * misé. C'est ce qui rend le tuyau fiable à cent pour cent.
+       *
+       * Un projet garanti réussit toujours : il n'y a rien à tirer.
+       */
+      const grainDe = (texte) => {
+        let h = 2166136261;
+        const t = String(texte);
+        for (let i = 0; i < t.length; i++) {
+          h ^= t.charCodeAt(i);
+          h = Math.imul(h, 16777619);
+        }
+        return h >>> 0;
+      };
+
+      const projetRisque = (projet) => (projet || {}).type === "aleatoire";
+
+      const projetReussira = (projet, bloc) => {
+        if (!projet) return false;
+        if (!projetRisque(projet)) return true;
+        const alea = semer(grainDe(`${projet.id}@${nombreSur(bloc, 0)}`));
+        return alea() * 100 < nombreSur(projet.probabilite, 100);
+      };
+
       const blocActuel = (maintenant, debutSoiree, cfg) => {
         if (!debutSoiree) return 0;
         const duree = nombreSur(cfg.blocDureeMin, 45) * 60000;
@@ -3006,13 +3040,11 @@
               prev.map((j) => ({
                 ...j,
                 finParadis: j.finParadis ? j.finParadis + ecart : j.finParadis,
+                // Le tuyau n'a plus d'horaire à décaler : il vaut pour un
+                // bloc, et les blocs se décalent avec la soirée.
                 deck: (j.deck || []).map((c) =>
                   c.recuLe ? { ...c, recuLe: c.recuLe + ecart } : c
-                ),
-                tuyau:
-                  j.tuyau && j.tuyau.depart
-                    ? { ...j.tuyau, depart: j.tuyau.depart + ecart }
-                    : j.tuyau
+                )
               }))
             );
           }
@@ -3556,9 +3588,25 @@
           return chevauxCourse[gagnant] || null;
         };
 
-        // Le délit d'initié révèle le vainqueur d'une course sur laquelle on
-        // peut encore parier — sinon le tuyau ne vaut rien. Si les paris de la
-        // course en cours sont clos, on donne celui de la suivante.
+        /*
+         * Le délit d'initié renseigne sur les projets d'investissement du
+         * bloc en cours — ceux dont l'issue est incertaine, les « risqués ».
+         * Il dit lesquels aboutiront et lesquels non, et il ne se trompe
+         * jamais : le sort de chaque projet ne dépend que du projet et de son
+         * bloc, et il est déjà scellé quand la carte se joue.
+         *
+         * Les projets garantis n'y figurent pas : leur succès est écrit sur
+         * l'écran de la salle, un initié n'apprend rien à personne en le
+         * répétant.
+         */
+        const projetsRisquesDuBloc = () =>
+          (projetsDuBloc || []).filter(projetRisque);
+
+        const tuyauDuBloc = () =>
+          projetsRisquesDuBloc().map((pr) => ({
+            titre: pr.titre,
+            reussira: projetReussira(pr, blocInvest)
+          }));
         // Les chiffres d'une carte, tels qu'ils sont réglés à l'instant. Ils
         // ne sont pas écrits dans les textes : l'organisateur peut changer un
         // pourcentage en pleine soirée, et la carte doit dire vrai.
@@ -3636,25 +3684,12 @@
             );
             return;
           }
-          // Un délit d'initié a déjà nommé le vainqueur de cette course :
-          // verser les herbes dessus ferait mentir un tuyau déjà lu, et son
-          // porteur n'y pourrait rien. La fiole part donc sur la première
-          // course encore vierge de tuyau. Rien ne le dit à personne : le
-          // joueur lit juste un autre numéro, et le porteur du tuyau ignore
-          // qu'on a failli le souffler.
-          const tuyauPose = (n) =>
-            joueurs.some(
-              (j) =>
-                j.id !== joueurActuel.id &&
-                j.tuyau &&
-                Number(j.tuyau.numero) === Number(n)
-            );
+          // Le délit d'initié ne parle plus des courses : il n'y a donc
+          // plus de tuyau à ménager ici. Seule une fiole déjà versée écarte
+          // une course, et on saute alors à la suivante.
           let numeroFiole = Number(cible.numero);
-          // Bornée : au-delà de quelques courses d'avance, on s'arrête là. On
-          // saute aussi les courses déjà servies, pour ne pas en doubler une
-          // en cherchant à en épargner une autre.
-          const occupee = (n) => tuyauPose(n) || !!fioleDeCourse(n);
-          for (let saut = 0; saut < 8 && occupee(numeroFiole); saut++)
+          // Bornée : au-delà de quelques courses d'avance, on s'arrête là.
+          for (let saut = 0; saut < 8 && fioleDeCourse(numeroFiole); saut++)
             numeroFiole += 1;
           setFioles((prev) => [
             ...(prev || []),
@@ -4006,8 +4041,6 @@
           return { numero, cheval: gagnant, depart };
         };
 
-        const majuscule = (t) => t.charAt(0).toUpperCase() + t.slice(1);
-
         // « dans 12 min », « dans 45 s », ou l'aveu qu'on n'en sait rien.
         const delaiAvantDepart = (depart) => {
           if (!depart) return "le bookmaker donne le top quand il veut";
@@ -4048,77 +4081,15 @@
           if (
             !window.confirm(
               "Repartir à la course n°1 ?\n\n" +
-                "La course en cours ou préparée est annulée, et les tuyaux " +
-                "des délits d'initié avec elle. Les paris déjà réglés et le " +
-                "reste de la partie ne bougent pas."
+                "La course en cours ou préparée est annulée. Les paris déjà " +
+                "réglés et le reste de la partie ne bougent pas."
             )
           )
             return;
           setCourseManuelle(null);
           setFioles([]);
-          // Les tuyaux désignent des courses qui n'existeront plus : gardés,
-          // ils réapparaîtraient au joueur dès que la numérotation les
-          // rattraperait.
-          setJoueurs((prev) =>
-            prev.map((j) => (j.tuyau ? { ...j, tuyau: null } : j))
-          );
-        };
-
-        // L'autre ordre : une fiole versée AVANT qu'un délit d'initié ne
-        // soit lu. Le tuyau est alors calculé sans les herbes — elles n'ont
-        // pas encore de cheval — et la fiole ne se rattache qu'au moment où
-        // son porteur mise. Le tuyau, lui, est déjà figé sur un nom.
-        // Plutôt que de le laisser mentir, on lui rend sa carte : il ne saura
-        // jamais ni pourquoi, ni qui.
-        const rendreLesTuyauxSouffles = (numero, chevalHerbes, porteurFiole) => {
-          const index = chevauxCourse.findIndex(
-            (c) => String(c.id) === String(chevalHerbes)
-          );
-          if (index < 0) return;
-          const gagnantDe = (herbes) =>
-            (chevauxCourse[
-              trameCourse(numero, chevauxCourse, configBookmaker, herbes).gagnant
-            ] || {}).nom;
-          const avant = gagnantDe(null);
-          const apres = gagnantDe({
-            index,
-            pct: Math.max(0, nombreSur(configGlobale.herbesPctPremier, 20))
-          });
-          // Les herbes n'ont rien changé au vainqueur : tous les tuyaux
-          // tiennent encore.
-          if (!apres || avant === apres) return;
-          const modele = cartesJeu.find((c) => c.id === "delit_initie");
-          const rendue = Date.now();
-          setJoueurs((prev) =>
-            prev.map((j) => {
-              const souffle =
-                j.id !== porteurFiole &&
-                j.tuyau &&
-                Number(j.tuyau.numero) === Number(numero) &&
-                j.tuyau.cheval !== apres;
-              if (!souffle) return j;
-              const ligne =
-                `Tuyau soufflé sur la course n°${numero} : votre informateur ` +
-                "s'est trompé";
-              return {
-                ...j,
-                tuyau: null,
-                deck: modele
-                  ? [...(j.deck || []), { ...modele, recuLe: rendue }]
-                  : j.deck,
-                historique: [
-                  `${ligne} — carte [${modele ? modele.nom : "Délit d'initié"}] rendue`,
-                  ...j.historique
-                ],
-                // Il n'est pas devant sa borne : l'avis l'y attend.
-                avisBookmaker: [
-                  `${ligne}.\n\nVotre carte vous est rendue : elle repart avec ` +
-                    "son temps de garde à purger.",
-                  ...(j.avisBookmaker || [])
-                ]
-              };
-            })
-          );
+          // Les tuyaux ne parlent plus des courses : remettre le compteur à
+          // zéro ne les concerne pas, ils suivent les blocs.
         };
 
         const placerPariCourse = (joueurId, chevalId, mise, surLeFonds) => {
@@ -4192,7 +4163,6 @@
                   : f
               )
             );
-            rendreLesTuyauxSouffles(course.numero, cheval.id, joueurId);
           }
 
           setJoueurs((prev) =>
@@ -4591,16 +4561,9 @@
                 nombreSur(projet.delaiMin, 30) * 60000;
 
               if (total >= requis) {
-                // Conditions réunies : garanti passe, aléatoire tire au sort.
-                const reussi =
-                  projet.type === "aleatoire"
-                    ? semer(
-                        Number(String(inst.id).replace(/\D/g, "").slice(-9)) || 1
-                      )() *
-                        100 <
-                      nombreSur(projet.probabilite, 100)
-                    : true;
-                reglerProjet(inst, projet, reussi);
+                // Conditions réunies : le sort était scellé depuis le début
+                // du bloc, on ne fait que le lire.
+                reglerProjet(inst, projet, projetReussira(projet, inst.bloc));
                 return;
               }
               // Plus de place et objectif non atteint : c'est perdu d'avance.
@@ -4751,23 +4714,12 @@
           );
           aSolder.forEach(reglerCourse);
           reglerInvestissementsSiBesoin();
-          // Un délit d'initié ne vaut que pour SA course : dès qu'elle est
-          // lancée, le tuyau a servi et s'efface. Sinon le joueur garde sous
-          // les yeux le nom d'un cheval qui a déjà couru — et le retrouve
-          // même après une remise à zéro du compteur.
-          const tuyauPerime = (t) => {
-            if (!t) return false;
-            if (course.numero === undefined || course.numero === null)
-              return false;
-            const sien = Number(t.numero);
-            const encours = Number(course.numero);
-            if (encours > sien) return true;
-            return (
-              encours === sien &&
-              (course.phase === PHASES.COURSE ||
-                course.phase === PHASES.RESULTAT)
-            );
-          };
+          // Un délit d'initié ne vaut que pour SON bloc : les projets qu'il
+          // annonce se soldent dedans. Passé le bloc, il ne dit plus rien
+          // d'utile et s'efface, sans quoi le joueur garderait sous les yeux
+          // le sort de projets déjà clos.
+          const tuyauPerime = (t) =>
+            !!t && Number(blocInvest) > Number(t.bloc);
           // La fiole d'herbes ne vaut que pour sa course. On attend qu'une
           // course ultérieure existe : la retirer plus tôt rejouerait le
           // tirage sans elle, podium compris, sous les yeux de la salle.
@@ -8224,46 +8176,51 @@
                       }}
                     >
                       <h3>🎒 Mon Deck</h3>
-                      {/* Le tuyau du délit d'initié reste affiché tant que la
-                          course n'a pas eu lieu : on l'a payé assez cher pour
-                          pouvoir le relire. Il ne quitte jamais cette borne. */}
-                      {/* Le tuyau tient jusqu'au départ de sa course, pas
-                          au-delà : c'est le poste du bookmaker qui l'efface,
-                          et cette condition sert de garde-fou si ce poste est
-                          fermé. */}
+                      {/* Le tuyau du délit d'initié reste affiché tant que
+                          son bloc dure : on l'a payé assez cher pour pouvoir
+                          le relire. Il ne quitte jamais cette borne, et c'est
+                          le poste du bookmaker qui l'efface au changement de
+                          bloc — cette condition sert de garde-fou si ce poste
+                          est fermé. */}
                       {joueurActuel.tuyau &&
-                        !(
-                          course.numero !== undefined &&
-                          course.numero !== null &&
-                          Number(course.numero) > Number(joueurActuel.tuyau.numero)
-                        ) && (
+                        (joueurActuel.tuyau.lignes || []).length > 0 &&
+                        Number(blocInvest) <= Number(joueurActuel.tuyau.bloc) && (
                           <div
                             style={{
                               background: "#3E2723",
-                              border: `2px solid ${joueurActuel.tuyau.couleur || "#8D6E63"}`,
+                              border: "2px solid #8D6E63",
                               borderRadius: "8px",
                               padding: "12px 14px",
                               marginBottom: "14px"
                             }}
                           >
                             <div style={{ color: "#D7CCC8", fontSize: "0.8rem" }}>
-                              🔎 Délit d'initié — pour vous seul
+                              🔎 Délit d'initié — pour vous seul · bloc{" "}
+                              {joueurActuel.tuyau.bloc}
                             </div>
+                            {joueurActuel.tuyau.lignes.map((l, k) => (
+                              <div
+                                key={k}
+                                style={{
+                                  fontWeight: "bold",
+                                  fontSize: "1.05rem",
+                                  marginTop: "4px",
+                                  color: l.reussira ? COULEUR_GAIN : COULEUR_PERTE
+                                }}
+                              >
+                                {l.reussira ? "✅" : "❌"} {l.titre} —{" "}
+                                {l.reussira ? "aboutira" : "échouera"}
+                              </div>
+                            ))}
                             <div
                               style={{
-                                fontWeight: "bold",
-                                fontSize: "1.1rem",
-                                color: joueurActuel.tuyau.couleur || "#fff"
+                                color: "#aaa",
+                                fontSize: "0.8rem",
+                                marginTop: "6px"
                               }}
                             >
-                              Course n°{joueurActuel.tuyau.numero} :{" "}
-                              {joueurActuel.tuyau.cheval}
-                            </div>
-                            <div style={{ color: "#FFCC80", fontSize: "0.9rem", marginTop: "2px" }}>
-                              ⏱ {delaiAvantDepart(joueurActuel.tuyau.depart)}
-                            </div>
-                            <div style={{ color: "#aaa", fontSize: "0.8rem" }}>
-                              Misez chez le bookmaker avant le top départ.
+                              Valable pour ce bloc. Prenez votre place chez le
+                              bookmaker pendant qu'il en reste.
                             </div>
                           </div>
                         )}
@@ -8440,15 +8397,21 @@
                                     alert(MESSAGE_JETONS_EN_JEU);
                                     return;
                                   }
-                                  const tuyau = courseAParier();
-                                  if (!tuyau) {
+                                  if (!soireeDebut && !configBookmaker.modeSimulation) {
                                     alert(
-                                      "Aucune course n'est ouverte aux paris pour l'instant.\n\n" +
-                                        (soireeDebut
-                                          ? ""
-                                          : "La soirée n'a pas démarré : l'organisateur doit " +
-                                            "appuyer sur « Démarrer la soirée ».\n\n") +
+                                      "La soirée n'a pas démarré : il n'y a pas " +
+                                        "encore de bloc d'investissement.\n\n" +
                                         "Gardez votre carte : elle ne se consomme pas."
+                                    );
+                                    return;
+                                  }
+                                  const lignes = tuyauDuBloc();
+                                  if (!lignes.length) {
+                                    alert(
+                                      "Aucun projet risqué dans ce bloc : votre " +
+                                        "informateur n'a rien à vous apprendre.\n\n" +
+                                        "Gardez votre carte : elle ne se consomme " +
+                                        "pas, et le prochain bloc en aura peut-être."
                                     );
                                     return;
                                   }
@@ -8457,12 +8420,7 @@
                                       j.id === joueurActuel.id
                                         ? {
                                             ...j,
-                                            tuyau: {
-                                              numero: tuyau.numero,
-                                              cheval: tuyau.cheval.nom,
-                                              couleur: tuyau.cheval.couleur,
-                                              depart: tuyau.depart
-                                            },
+                                            tuyau: { bloc: blocInvest, lignes },
                                             deck: j.deck.filter(
                                               (card) => card.id !== c.id
                                             )
@@ -8471,15 +8429,27 @@
                                     )
                                   );
                                   // La salle voit passer la phrase, mais pas
-                                  // le nom du cheval : le tuyau reste secret.
+                                  // ce qu'elle a appris : le tuyau reste secret.
                                   setHistoriqueAffichage((prev) => [
                                     c.phraseAnim,
                                     prev[0]
                                   ]);
+                                  const gagnants = lignes.filter((l) => l.reussira);
                                   alert(
-                                    `Course n°${tuyau.numero} : ${tuyau.cheval.nom} l'emportera.\n` +
-                                      `${majuscule(delaiAvantDepart(tuyau.depart))}.\n\n` +
-                                      "Filez chez le bookmaker avant le top départ."
+                                    `Bloc ${blocInvest} — projets risqués :\n\n` +
+                                      lignes
+                                        .map(
+                                          (l) =>
+                                            `${l.reussira ? "✅" : "❌"} ${l.titre} — ` +
+                                            `${l.reussira ? "aboutira" : "échouera"}`
+                                        )
+                                        .join("\n") +
+                                      "\n\n" +
+                                      (gagnants.length
+                                        ? "Allez voir le bookmaker pendant que les " +
+                                          "places sont libres."
+                                        : "Aucun ne tiendra : gardez votre argent " +
+                                          "pour les projets garantis.")
                                   );
                                   setSousMenuBanque("accueil");
                                 }}
