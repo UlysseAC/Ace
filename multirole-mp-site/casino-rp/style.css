@@ -85,6 +85,17 @@ body {
 
 /* Impression des chèques de mission : seule la planche sort sur le papier */
 @media print {
+  /* Dix chèques par feuille A4, deux colonnes de cinq — ni douze ni
+     quatorze selon l'humeur du navigateur. Sans format ni marges déclarés,
+     c'est lui qui décidait, et le compte changeait avec la quantité
+     demandée : quarante chèques tenaient sur trois pages, vingt-cinq sur
+     deux. Une planche régulière se découpe, une planche à géométrie
+     variable non. */
+  @page {
+    size: A4;
+    margin: 8mm;
+  }
+
   /* La planche doit rester dans le flux normal du document : un élément
      en position absolue n'est pas découpé proprement en pages, et le
      navigateur ignore alors la consigne de ne pas trancher les chèques.
@@ -121,10 +132,24 @@ body {
   }
 
   /* Un chèque coupé en deux par un saut de page ruinerait la découpe :
-     la planche doit rester une grille régulière sur chaque feuille. */
+     la planche doit rester une grille régulière sur chaque feuille.
+
+     La hauteur est donnée en millimètres, pas en pixels : c'est elle qui
+     fait les cinq rangées. La zone imprimable fait 297 − 2 × 8 = 281 mm de
+     haut ; cinq chèques de 56 mm en occupent 280, chevauchements de découpe
+     déduits. */
   .cheque-a-decouper {
+    height: 56mm !important;
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  /* Ceinture et bretelles : même si un arrondi venait à décaler la grille,
+     on force la coupure après le dixième. Jamais après le dernier, sinon
+     l'imprimante sort une page blanche. */
+  .cheque-a-decouper:nth-child(10n):not(:last-child) {
+    break-after: page;
+    page-break-after: always;
   }
 
   /* Les bordures sont les lignes de découpe : sans ça, certains
