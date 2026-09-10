@@ -2671,6 +2671,7 @@
 
         // États Imprimerie (PDF)
         const [imprMissionId, setImprMissionId] = React.useState(1);
+        const [imprCarteId, setImprCarteId] = React.useState("");
         // Le fond a sa propre clé : rangé avec le reste de la configuration,
         // il repartirait vers la base à chaque frappe dans un champ voisin.
         const [fondCheque, setFondCheque] = useEtatPartage("fondCheque", null);
@@ -4931,6 +4932,7 @@
             const hashUnique =
               "CODE_" + Math.random().toString(36).substring(2, 12).toUpperCase();
             nouveaux.push({
+              genre: "mission",
               hash: hashUnique,
               code: codeUnique,
               nom: mObj.nom,
@@ -4949,33 +4951,82 @@
           setCodesRegistre(nouveauRegistre);
         };
 
+        /*
+         * Les codes de carte.
+         *
+         * Une carte se donnait en cliquant un bouton à la borne. C'est
+         * commode pour essayer, mais le jour de la soirée on veut du papier :
+         * un code par carte, à distribuer, à cacher, à faire gagner. Chaque
+         * code n'ouvre qu'une carte et ne sert qu'une fois, comme un chèque.
+         */
+        const genererCodesCartes = () => {
+          const carte =
+            (cartesJeu || []).find((c) => String(c.id) === String(imprCarteId)) ||
+            (cartesJeu || [])[0];
+          if (!carte) {
+            alert("Aucune carte dans le jeu.");
+            return;
+          }
+          const combien = Math.max(1, Math.round(nombreSur(qteImpr, 1)));
+          const nouveaux = [];
+          const nouveauRegistre = [...codesRegistre];
+          for (let i = 0; i < combien; i++) {
+            const codeUnique = genererNumeroUnique();
+            const hashUnique =
+              "CARTE_" + Math.random().toString(36).substring(2, 12).toUpperCase();
+            nouveaux.push({
+              genre: "carte",
+              hash: hashUnique,
+              code: codeUnique,
+              nom: carte.nom,
+              carteId: carte.id
+            });
+            nouveauRegistre.push({
+              hash: hashUnique,
+              code: codeUnique,
+              statut: "Valide",
+              type: "Carte",
+              carteId: carte.id,
+              nomCarte: carte.nom
+            });
+          }
+          setChequesImprimerie(nouveaux);
+          setCodesRegistre(nouveauRegistre);
+        };
+
         // ================= LOGIQUE SCANNER & DEFAUSSE =================
-        const scannerCodeSimule = (type, objetDonnee) => {
-          if (!joueurActuel) return;
+        // `parCode` distingue un code tapé d'un bouton cliqué. Masquer les
+        // boutons de distribution ne doit pas condamner les codes : c'est
+        // même tout l'inverse, ce réglage existe pour ne plus donner que du
+        // papier. Le mode local, lui, reste une vraie coupure et vaut pour
+        // les deux. Rend vrai si la carte ou la mission a bien été portée au
+        // compte, faux si l'on a refusé.
+        const scannerCodeSimule = (type, objetDonnee, parCode) => {
+          if (!joueurActuel) return false;
           // Le mode simulation existe pour tout essayer : il lève les
           // verrous qui protègent la vraie soirée. Un bouton cliqué doit
           // poser la carte dans le deck, point.
           if (!configBookmaker.modeSimulation) {
-            if (configGlobale.modeScanneur === "disabled") {
+            if (configGlobale.modeScanneur === "disabled" && !parCode) {
               alert(
                 "La distribution des cartes à la borne est masquée.\n\n" +
                   "L'organisateur la remet dans l'Admin, « Distribution des " +
-                  "cartes à la borne ». En mode simulation, elle est de toute " +
-                  "façon toujours ouverte."
+                  "cartes à la borne ». En attendant, seuls les codes " +
+                  "imprimés fonctionnent."
               );
-              return;
+              return false;
             }
             if (configGlobale.modeLocal && type === "carte") {
               alert(
-                "Mode Local activé : le scan des cartes est bloqué.\n\n" +
+                "Mode Local activé : les cartes ne se distribuent pas.\n\n" +
                   "L'organisateur le décoche dans l'Admin. En mode simulation, " +
                   "les cartes se distribuent quand même."
               );
-              return;
+              return false;
             }
             if (type === "carte" && bloqueParJetons(joueurActuel)) {
               alert(MESSAGE_JETONS_EN_JEU);
-              return;
+              return false;
             }
           }
 
@@ -5046,7 +5097,11 @@
               ? `Mission validée ! +${objetDonnee.montant}$`
               : `Carte "${objetDonnee.nom}" ajoutée dans votre deck !`
           );
-          setSousMenuBanque("scanner_choix");
+          // Après un code tapé, on revient à l'accueil : renvoyer vers les
+          // boutons de distribution n'aurait pas de sens, ils sont peut-être
+          // masqués.
+          setSousMenuBanque(parCode ? "accueil" : "scanner_choix");
+          return true;
         };
 
         // ================= VALIDATION DU CODE =================
@@ -5067,13 +5122,15 @@
             return;
           }
 
-          // Un chèque s'encaisse une fois, et une seule, pour toute la
-          // table. La liste des codes du joueur ne suffisait pas : elle
-          // laissait chacun encaisser le même papier, et une photo du chèque
-          // valait autant de fois qu'il y a de joueurs.
+          // Un code servi une fois est mort, pour toute la table. La liste
+          // des codes du joueur ne suffisait pas : elle laissait chacun
+          // encaisser le même papier, et une photo valait autant de fois
+          // qu'il y a de joueurs.
+          const quoi = codeValide.type === "Carte" ? "Cette carte" : "Ce chèque";
           if (codeValide.statut === "Encaissé") {
             alert(
-              "Ce chèque a déjà été encaissé" +
+              `${quoi} a déjà été ` +
+                (codeValide.type === "Carte" ? "récupérée" : "encaissé") +
                 (codeValide.parNom ? ` par ${codeValide.parNom}` : "") +
                 (codeValide.leQuand ? `, à ${codeValide.leQuand}` : "") +
                 "."
@@ -5086,11 +5143,42 @@
           if (
             joueurs.some((j) => (j.codesUtilises || []).includes(codeValide.hash))
           ) {
-            alert("Ce chèque a déjà été encaissé.");
+            alert(`${quoi} a déjà servi.`);
             return;
           }
 
           // Appliquer le code selon son type
+          if (codeValide.type === "Carte") {
+            const modele = (cartesJeu || []).find(
+              (c) => String(c.id) === String(codeValide.carteId)
+            );
+            if (!modele) {
+              alert(
+                "Cette carte n'existe plus dans le jeu.\n\n" +
+                  "L'organisateur l'a peut-être retirée des Réglages Cartes."
+              );
+              return;
+            }
+            // La carte n'arrive dans le deck que si le scan aboutit : sans
+            // cette vérification, un joueur assis à une table verrait son
+            // code consommé pour rien.
+            if (!scannerCodeSimule("carte", modele, true)) return;
+            setCodesRegistre((prev) =>
+              prev.map((q) =>
+                q.hash === codeValide.hash
+                  ? {
+                      ...q,
+                      statut: "Encaissé",
+                      parNom: joueurActuel.nom,
+                      leQuand: new Date().toLocaleTimeString()
+                    }
+                  : q
+              )
+            );
+            setCodeManuel("");
+            return;
+          }
+
           if (codeValide.type === "Mission") {
             const mission = missions.find((m) => m.id === codeValide.missionId);
             if (!mission) {
@@ -6445,9 +6533,9 @@
                         }}
                       >
                         Rien à voir avec le mode simulation du bookmaker.
-                        Masqués, les cartes deviennent impossibles à donner :
-                        la saisie de code ne reconnaît que les chèques de
-                        mission.
+                        Masqués, les cartes ne se donnent plus d'un bouton :
+                        il faut les codes imprimés, chèques de mission comme
+                        cartes. C'est le réglage de la vraie soirée.
                       </span>
                     </label>
                   </div>
@@ -7416,6 +7504,65 @@
                     </button>
                   </div>
 
+                  {/* Les cartes ont leurs propres codes : un par carte, à
+                      distribuer sur papier plutôt qu'à donner d'un bouton. */}
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "10px",
+                      alignItems: "flex-end",
+                      marginTop: "14px",
+                      paddingTop: "14px",
+                      borderTop: "1px solid #444"
+                    }}
+                  >
+                    <div style={{ flex: 2 }}>
+                      <label>Carte :</label>
+                      <select
+                        value={
+                          imprCarteId ||
+                          String(((cartesJeu || [])[0] || {}).id || "")
+                        }
+                        onChange={(e) => setImprCarteId(e.target.value)}
+                        style={{ width: "100%", padding: "8px" }}
+                      >
+                        {(cartesJeu || []).map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.nom}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div style={{ flex: 2, color: "#777", fontSize: "0.78rem" }}>
+                      Un code par carte, à usage unique. Le joueur le saisit à
+                      la borne et la carte entre dans son deck.
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label>Qté :</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={qteImpr}
+                        onChange={(e) => setQteImpr(e.target.value)}
+                        style={{ width: "100%", padding: "8px" }}
+                      />
+                    </div>
+                    <button
+                      onClick={genererCodesCartes}
+                      style={{
+                        padding: "8px 15px",
+                        background: "#8D6E63",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "6px",
+                        fontWeight: "bold",
+                        cursor: "pointer"
+                      }}
+                    >
+                      Générer les cartes
+                    </button>
+                  </div>
+
                   <div
                     id="printable-area"
                     style={{
@@ -7454,7 +7601,57 @@
                           fontSize: "0.75rem"
                         }}
                       >
-                        {fondCheque ? (
+                        {ch.genre === "carte" ? (
+                          // Une étiquette de carte : le nom, le code, et de
+                          // quoi le saisir. Pas de fond de chèque ici, il n'a
+                          // rien à y faire.
+                          <div
+                            style={{
+                              height: "100%",
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: "6px",
+                              padding: "10px",
+                              textAlign: "center"
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontSize: "0.7rem",
+                                letterSpacing: "1px",
+                                color: "#666"
+                              }}
+                            >
+                              CARTE À RÉCUPÉRER
+                            </div>
+                            <div
+                              style={{
+                                fontSize: "1.05rem",
+                                fontWeight: "bold",
+                                lineHeight: 1.2
+                              }}
+                            >
+                              🃏 {ch.nom}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: "1.5rem",
+                                fontWeight: "bold",
+                                letterSpacing: "3px",
+                                border: "2px solid #000",
+                                borderRadius: "4px",
+                                padding: "4px 12px"
+                              }}
+                            >
+                              {ch.code}
+                            </div>
+                            <div style={{ fontSize: "0.68rem", color: "#666" }}>
+                              À saisir à la borne · valable une seule fois
+                            </div>
+                          </div>
+                        ) : fondCheque ? (
                           <React.Fragment>
                             {/* Le fond occupe tout le chèque ; les trois
                                 valeurs se posent dessus, chacune à la place
@@ -7620,7 +7817,8 @@
                       </div>
                     ))}
                   </div>
-                  {fondCheque && chequesImprimerie.length > 0 && (
+                  {fondCheque &&
+                    chequesImprimerie.some((ch) => ch.genre !== "carte") && (
                     <div
                       className="no-print"
                       style={{
@@ -9518,10 +9716,10 @@
                             textAlign: "left"
                           }}
                         >
-                          🚫 Les boutons de distribution sont masqués. Seuls les
-                          codes de chèque fonctionnent ; aucune carte ne peut
-                          être donnée. L'organisateur les remet dans l'Admin,
-                          « Distribution des cartes à la borne ».
+                          🚫 Les boutons de distribution sont masqués. Tout
+                          passe par les codes imprimés — chèques de mission
+                          comme cartes. L'organisateur remet les boutons dans
+                          l'Admin, « Distribution des cartes à la borne ».
                         </div>
                       )}
                       {(configGlobale.modeScanneur !== "disabled" ||
