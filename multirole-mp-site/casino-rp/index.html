@@ -2686,74 +2686,6 @@
           paradisActif: j.paradisFiscal && j.finParadis > timeNow
         }));
         const joueursVisibles = joueursActifs.filter((j) => !j.paradisActif);
-        // Les rangs se comptent sur TOUS les joueurs, y compris ceux qui se
-        // cachent au paradis fiscal. Leur ligne, elle, ne s'affiche pas : le
-        // numéro manquant dit à la salle qu'il y a quelqu'un à cette place,
-        // sans dire qui. Et personne d'autre ne change de numéro.
-        const classementActuel = [...joueursActifs].sort(
-          (a, b) => b.solde - a.solde
-        );
-        const classementAffiche = classementActuel
-          .filter((j) => !j.paradisActif)
-          .slice(0, configGlobale.limitTop);
-        const nbParadisActifs = joueursActifs.filter(
-          (j) => j.paradisActif
-        ).length;
-
-        // Les places gagnées ou perdues au classement. On compte les rangs sur
-        // TOUS les joueurs, pas seulement ceux qu'on affiche : sinon un joueur
-        // qui file au paradis fiscal ferait monter tout le monde d'un cran
-        // pour rien.
-        const DUREE_BOUGE = 25000;
-        const DUREE_SURLIGNE = 2000;
-        const [bougesClassement, setBougesClassement] = React.useState({});
-        const [surlignesClassement, setSurlignesClassement] = React.useState({});
-        const rangsPrecedents = React.useRef(null);
-        const rangsReels = {};
-        [...joueursActifs]
-          .sort((a, b) => b.solde - a.solde)
-          .forEach((j, i) => (rangsReels[j.id] = i));
-        const empreinteRangs = Object.keys(rangsReels)
-          .map((id) => id + ":" + rangsReels[id])
-          .join(",");
-        React.useEffect(() => {
-          const avant = rangsPrecedents.current;
-          rangsPrecedents.current = rangsReels;
-          if (!avant) return;
-          const bouges = {};
-          Object.keys(rangsReels).forEach((id) => {
-            // Un joueur qui vient d'être créé n'a pas « gagné » de places.
-            if (avant[id] === undefined) return;
-            const places = avant[id] - rangsReels[id];
-            if (places !== 0)
-              bouges[id] = { places, jusqua: Date.now() + DUREE_BOUGE };
-          });
-          if (!Object.keys(bouges).length) return;
-          // Le surlignage, lui, ne dure que deux secondes : le temps que
-          // l'œil accroche la ligne qui vient de bouger.
-          const surlignes = {};
-          Object.keys(bouges).forEach(
-            (id) => (surlignes[id] = bouges[id].places > 0 ? "monte" : "descend")
-          );
-          setSurlignesClassement((prec) => ({ ...prec, ...surlignes }));
-          setTimeout(() => {
-            setSurlignesClassement((prec) => {
-              const suite = { ...prec };
-              Object.keys(surlignes).forEach((id) => delete suite[id]);
-              return suite;
-            });
-          }, DUREE_SURLIGNE);
-          setBougesClassement((prec) => {
-            const maintenant = Date.now();
-            const suite = {};
-            // On jette au passage les mouvements périmés, sinon la liste
-            // enflerait toute la soirée.
-            Object.keys(prec).forEach((id) => {
-              if (prec[id].jusqua > maintenant) suite[id] = prec[id];
-            });
-            return { ...suite, ...bouges };
-          });
-        }, [empreinteRangs]);
         const joueurActuel = joueursActifs.find(
           (j) => j.id === joueurConnecteId
         );
@@ -3435,6 +3367,113 @@
           courseManuelle
         );
         const blocInvest = blocActuel(maintenant, soireeDebut, configBookmaker);
+
+        /*
+         * Le classement général attend la fin de la course.
+         *
+         * Pendant une course, l'écran de la salle passe en plein écran sur la
+         * piste. Derrière, le classement continuait de vivre : les gains
+         * tombaient, les lignes glissaient, les flèches s'allumaient et
+         * s'éteignaient — sans témoin. La piste effacée, tout était déjà rangé
+         * et la course n'avait rien changé, en apparence.
+         *
+         * On retient donc les soldes d'avant le top départ et on ne les relâche
+         * qu'au retour à l'écran ordinaire : le classement bascule alors devant
+         * la salle, avec ses glissements et ses ▲▼. Rien n'est perdu — c'est
+         * seulement l'affichage qui patiente, les comptes, eux, sont à jour
+         * partout ailleurs, bornes comprises.
+         */
+        const surLaPiste =
+          interfaceActive === "affichage" &&
+          course.active &&
+          (course.phase === PHASES.TOP ||
+            course.phase === PHASES.COURSE ||
+            course.phase === PHASES.RESULTAT);
+        const soldesGeles = React.useRef(null);
+        if (!surLaPiste) soldesGeles.current = null;
+        else if (!soldesGeles.current) {
+          const pris = {};
+          joueursActifs.forEach((j) => (pris[j.id] = j.solde));
+          soldesGeles.current = pris;
+        }
+        // Un joueur créé pendant la course n'a pas de solde retenu : on prend
+        // le sien, il n'a de toute façon aucun mouvement à montrer.
+        const joueursClassement = soldesGeles.current
+          ? joueursActifs.map((j) =>
+              soldesGeles.current[j.id] === undefined
+                ? j
+                : { ...j, solde: soldesGeles.current[j.id] }
+            )
+          : joueursActifs;
+
+        // Les rangs se comptent sur TOUS les joueurs, y compris ceux qui se
+        // cachent au paradis fiscal. Leur ligne, elle, ne s'affiche pas : le
+        // numéro manquant dit à la salle qu'il y a quelqu'un à cette place,
+        // sans dire qui. Et personne d'autre ne change de numéro.
+        const classementActuel = [...joueursClassement].sort(
+          (a, b) => b.solde - a.solde
+        );
+        const classementAffiche = classementActuel
+          .filter((j) => !j.paradisActif)
+          .slice(0, configGlobale.limitTop);
+        const nbParadisActifs = joueursActifs.filter(
+          (j) => j.paradisActif
+        ).length;
+
+        // Les places gagnées ou perdues au classement. On compte les rangs sur
+        // TOUS les joueurs, pas seulement ceux qu'on affiche : sinon un joueur
+        // qui file au paradis fiscal ferait monter tout le monde d'un cran
+        // pour rien.
+        const DUREE_BOUGE = 25000;
+        const DUREE_SURLIGNE = 2000;
+        const [bougesClassement, setBougesClassement] = React.useState({});
+        const [surlignesClassement, setSurlignesClassement] = React.useState({});
+        const rangsPrecedents = React.useRef(null);
+        const rangsReels = {};
+        [...joueursClassement]
+          .sort((a, b) => b.solde - a.solde)
+          .forEach((j, i) => (rangsReels[j.id] = i));
+        const empreinteRangs = Object.keys(rangsReels)
+          .map((id) => id + ":" + rangsReels[id])
+          .join(",");
+        React.useEffect(() => {
+          const avant = rangsPrecedents.current;
+          rangsPrecedents.current = rangsReels;
+          if (!avant) return;
+          const bouges = {};
+          Object.keys(rangsReels).forEach((id) => {
+            // Un joueur qui vient d'être créé n'a pas « gagné » de places.
+            if (avant[id] === undefined) return;
+            const places = avant[id] - rangsReels[id];
+            if (places !== 0)
+              bouges[id] = { places, jusqua: Date.now() + DUREE_BOUGE };
+          });
+          if (!Object.keys(bouges).length) return;
+          // Le surlignage, lui, ne dure que deux secondes : le temps que
+          // l'œil accroche la ligne qui vient de bouger.
+          const surlignes = {};
+          Object.keys(bouges).forEach(
+            (id) => (surlignes[id] = bouges[id].places > 0 ? "monte" : "descend")
+          );
+          setSurlignesClassement((prec) => ({ ...prec, ...surlignes }));
+          setTimeout(() => {
+            setSurlignesClassement((prec) => {
+              const suite = { ...prec };
+              Object.keys(surlignes).forEach((id) => delete suite[id]);
+              return suite;
+            });
+          }, DUREE_SURLIGNE);
+          setBougesClassement((prec) => {
+            const maintenant = Date.now();
+            const suite = {};
+            // On jette au passage les mouvements périmés, sinon la liste
+            // enflerait toute la soirée.
+            Object.keys(prec).forEach((id) => {
+              if (prec[id].jusqua > maintenant) suite[id] = prec[id];
+            });
+            return { ...suite, ...bouges };
+          });
+        }, [empreinteRangs]);
 
         // Le contrôle fiscal est interdit autour de la course : on veut la
         // salle devant l'hippodrome, pas devant deux animations qui se
@@ -13117,11 +13156,7 @@
 
         // 5. ÉCRAN D'AFFICHAGE
         if (interfaceActive === "affichage") {
-          const courseAuTableau =
-            course.active &&
-            (course.phase === PHASES.TOP ||
-              course.phase === PHASES.COURSE ||
-              course.phase === PHASES.RESULTAT);
+          const courseAuTableau = surLaPiste;
           const vainqueur =
             course.phase === PHASES.RESULTAT ? chevalGagnant(course.numero) : null;
 
