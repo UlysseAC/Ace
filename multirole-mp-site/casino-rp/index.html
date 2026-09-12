@@ -4218,8 +4218,21 @@
             return;
           }
           const plafond = nombreSur(configBookmaker.courseMisePlafond, 100);
-          if (m > plafond) {
-            alert(`La mise ne peut pas dépasser ${plafond} par pari.`);
+          const dejaMise = (parisCourse || [])
+            .filter(
+              (pa) =>
+                pa.joueurId === joueurId &&
+                Number(pa.numero) === Number(course.numero)
+            )
+            .reduce((t, pa) => t + nombreSur(pa.mise, 0), 0);
+          if (dejaMise + m > plafond) {
+            alert(
+              dejaMise > 0
+                ? `Plafond de ${plafond}$ sur la course n°${course.numero} : ` +
+                    `${joueur.nom} a déjà misé ${dejaMise}$, il lui reste ` +
+                    `${Math.max(0, plafond - dejaMise)}$.`
+                : `La mise ne peut pas dépasser ${plafond}$ sur une course.`
+            );
             return;
           }
           const part = partageDuPaiement(joueur, m, surLeFonds);
@@ -5219,12 +5232,22 @@
           }
 
           if (codeValide.type === "Mission") {
-            const mission = missions.find((m) => m.id === codeValide.missionId);
+            // Les identifiants viennent parfois du tableur, parfois de la
+            // base : un « 3 » texte et un 3 nombre désignent la même mission.
+            const mission = missions.find(
+              (m) => String(m.id) === String(codeValide.missionId)
+            );
             if (!mission) {
-              alert("Mission introuvable");
+              alert(
+                "Cette mission n'existe plus dans le jeu.\n\n" +
+                  "L'organisateur l'a peut-être retirée des Réglages Missions."
+              );
               return;
             }
-            scannerCodeSimule("mission", mission);
+            // Comme pour les cartes : le chèque ne se consomme que si la
+            // mission a bien été portée au compte. Sans ce garde-fou, un
+            // refus brûlait le papier pour rien.
+            if (!scannerCodeSimule("mission", mission, true)) return;
             // Le registre garde la trace : qui, et quand.
             setCodesRegistre((prev) =>
               prev.map((q) =>
@@ -10764,7 +10787,10 @@
                       1er, 2e, 3e, 4e… Le 1er sert de cote affichée.
                     </span>
                   </label>
-                  {champNombre("Mise max par pari", "courseMisePlafond")}
+                  {champNombre(
+                    "Mise max par joueur et par course",
+                    "courseMisePlafond"
+                  )}
                   {champNombre("Contrôle fiscal bloqué avant (min)", "courseBlocageAvantMin")}
                   {champNombre("Contrôle fiscal bloqué après (min)", "courseBlocageApresMin")}
                 </div>
@@ -11798,7 +11824,25 @@
                   </select>
 
                   <label>
-                    Mise (max {nombreSur(configBookmaker.courseMisePlafond, 100)})
+                    Mise —{" "}
+                    {(() => {
+                      // Ce qui reste à ce joueur-ci sur cette course-ci :
+                      // le bookmaker l'annonce sans avoir à compter.
+                      const plaf = nombreSur(
+                        configBookmaker.courseMisePlafond,
+                        100
+                      );
+                      const deja = (parisCourse || [])
+                        .filter(
+                          (pa) =>
+                            String(pa.joueurId) === String(bkCourseJoueurId) &&
+                            Number(pa.numero) === Number(course.numero)
+                        )
+                        .reduce((t, pa) => t + nombreSur(pa.mise, 0), 0);
+                      return deja > 0
+                        ? `${deja}$ déjà misés, reste ${Math.max(0, plaf - deja)}$`
+                        : `max ${plaf}$ sur la course`;
+                    })()}
                   </label>
                   <input
                     type="number"
@@ -12282,55 +12326,28 @@
               {/* La course prend le dessus dès le top départ : c'est le moment
                   fort, tout le monde doit avoir les yeux dessus. */}
               {enCourse ? (
-                <div style={carte}>
-                  {course.phase === PHASES.TOP &&
-                  course.avantDepart > DECOMPTE_SUR_PISTE ? (
-                    <div style={{ textAlign: "center" }}>
-                      <h2 style={{ color: "#FFC107" }}>🏇 Course n°{course.numero}</h2>
+                // La piste ne court que sur l'écran de la salle. Deux
+                // animations lancées en même temps ne tombent jamais tout à
+                // fait d'accord, et personne ne sait plus où regarder : la
+                // vitrine se contente donc de renvoyer les yeux au bon
+                // endroit.
+                <div style={{ ...carte, textAlign: "center" }}>
+                  <h2 style={{ color: "#FFC107", margin: "0 0 10px" }}>
+                    🏇 Course n°{course.numero}
+                  </h2>
+                  {course.phase === PHASES.TOP ? (
+                    <React.Fragment>
                       <div style={{ fontSize: "5rem", fontWeight: "bold" }}>
                         {Math.max(0, Math.ceil(course.avantDepart / 1000))}
                       </div>
-                      <p style={{ color: "#aaa" }}>Les paris sont clos !</p>
-                    </div>
+                      <p style={{ color: "#aaa", margin: 0 }}>
+                        Les paris sont clos !
+                      </p>
+                    </React.Fragment>
                   ) : (
-                    <>
-                      <h2 style={{ color: "#FFC107", textAlign: "center" }}>
-                        🏇 Course n°{course.numero}
-                      </h2>
-                      <div style={{ position: "relative" }}>
-                        <PisteCourse
-                          numero={course.numero}
-                          chevaux={chevauxCourse}
-                          cfg={configBookmaker}
-                          herbes={herbesDe(course.numero)}
-                          depart={course.depart}
-                        />
-                        {course.phase === PHASES.TOP && (
-                          <div
-                            style={{
-                              position: "absolute",
-                              inset: 0,
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              pointerEvents: "none"
-                            }}
-                          >
-                            <div
-                              style={{
-                                fontSize: "11rem",
-                                fontWeight: "bold",
-                                color: "#fff",
-                                lineHeight: 1,
-                                textShadow: "0 0 24px rgba(0,0,0,0.85)"
-                              }}
-                            >
-                              {Math.max(0, Math.ceil(course.avantDepart / 1000))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </>
+                    <p style={{ color: "#aaa", fontSize: "1.4rem", margin: 0 }}>
+                      Elle est en piste — sur l'écran de la salle.
+                    </p>
                   )}
                 </div>
               ) : vitrine.mode === "projet" && projetPresente ? (
@@ -12626,7 +12643,8 @@
                     ))}
                   </div>
                   <p style={{ color: "#888", marginTop: "18px" }}>
-                    Mise maximale : {nombreSur(configBookmaker.courseMisePlafond, 100)} par pari.
+                    Mise maximale : {nombreSur(configBookmaker.courseMisePlafond, 100)}$ par
+                    joueur et par course, tous paris confondus.
                   </p>
                 </div>
               ) : (
