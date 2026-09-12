@@ -244,11 +244,12 @@
           id: "garde_du_corps",
           nom: "Garde du corps",
           definition:
-            "Tant qu'il est en poste, personne ne peut vous faire les poches. Il ne se consomme jamais.",
+            "En poste, il repousse les trois premiers pickpockets qui s'approchent. Au troisième, il s'en va.",
           modeEmploi:
-            "Activez-le depuis votre deck : il prend son poste et y reste. Aucun pickpocket ne peut plus vous atteindre, et le garde ne s'use pas — il tient jusqu'au bout de la soirée.\n\n" +
+            "Activez-le depuis votre deck : il prend son poste. Les trois premières mains qui se tendent vers vos poches repartent vides — votre deck indique ce qu'il lui reste à chaque fois.\n\n" +
+            "Au dernier coup encaissé, il a fait son travail et quitte son poste : la carte s'en va avec lui, et vous voilà de nouveau à découvert. Personne d'autre ne le sait.\n\n" +
             "Il ne peut rien contre le fisc : le contrôle fiscal et l'impôt de fin de bloc passent outre. Ce sont des lois, pas des voleurs.\n\n" +
-            "Mettez-le en poste sans traîner : tant qu'il ne l'est pas, un pickpocket peut vous voler la carte elle-même. Une fois en poste, plus rien ne passe — pas même le vol de son propre contrat.",
+            "Mettez-le en poste sans traîner : tant qu'il ne l'est pas, un pickpocket peut vous voler la carte elle-même.",
           delaiAvantUsage: true,
           phraseAnim: "Une carrure imposante prend position."
         },
@@ -2239,6 +2240,7 @@
           // Ce que rapporte la Fontaine de Jouvence, et ce que verse l'Argent
           // de poche.
           bonusFontainePct: 20,
+          tentativesGardeDuCorps: 3,
           // Les montants sont en francs comme le reste de la table.
           montantArgentPoche: 50,
           montantHeritage: 100,
@@ -2964,6 +2966,7 @@
           veinardActif: false,
           fontaineActive: false,
           gardeDuCorpsActif: false,
+          gardeRestant: 0,
           assuranceActive: false,
           fondsDispo: 0,
           achatsBoutique: 0,
@@ -3069,6 +3072,7 @@
             veinardActif: false,
             fontaineActive: false,
             gardeDuCorpsActif: false,
+            gardeRestant: 0,
             assuranceActive: false,
             fondsDispo: 0,
             achatsBoutique: 0,
@@ -3733,8 +3737,29 @@
             );
           if (id === "paradis_fiscal")
             return `Durée : ${n("dureeParadisFiscalMin", 15)} minutes.`;
+          if (id === "garde_du_corps") {
+            const t = Math.max(1, n("tentativesGardeDuCorps", 3));
+            return `Il repousse ${t} tentative${t > 1 ? "s" : ""}, puis il s'en va.`;
+          }
           return null;
         };
+
+        const tentativesGarde = () =>
+          Math.max(
+            1,
+            Math.round(nombreSur(configGlobale.tentativesGardeDuCorps, 3))
+          );
+
+        // Ce qu'il reste à un garde en poste. Celui d'une partie commencée
+        // avant ce compteur n'en a pas : on le lui donne plein plutôt que de
+        // le renvoyer sans prévenir.
+        const gardeRestantDe = (joueur) =>
+          !joueur || !joueur.gardeDuCorpsActif
+            ? 0
+            : Math.max(
+                0,
+                Math.round(nombreSur(joueur.gardeRestant, tentativesGarde()))
+              );
 
         // Ce que verse une carte à versement simple.
         const versementDe = (id) =>
@@ -4028,9 +4053,17 @@
             // Un garde du corps en poste renvoie le voleur d'où il vient. La
             // carte lui reste en main, mais son temps de garde repart à zéro :
             // il faudra patienter avant de retenter le coup.
-            if (cible.gardeDuCorpsActif) {
+            //
+            // Le garde n'est pas inusable : chaque coup encaissé l'entame, et
+            // au dernier il quitte son poste — la carte est finie, son porteur
+            // se retrouve à découvert sans que personne d'autre ne le sache.
+            const restant = gardeRestantDe(cible);
+            if (restant > 0) {
+              const apres = restant - 1;
               issue = { quoi: "garde", nom: cible.nom };
-              const ligne = "Votre garde du corps a repoussé un pickpocket";
+              const ligne = apres
+                ? `Votre garde du corps a repoussé un pickpocket — encore ${apres} tentative${apres > 1 ? "s" : ""}`
+                : "Votre garde du corps a repoussé un dernier pickpocket, puis il a quitté son poste";
               return prev.map((j) => {
                 if (j.id === moi.id)
                   return {
@@ -4046,6 +4079,13 @@
                 if (j.id === cible.id)
                   return {
                     ...j,
+                    gardeDuCorpsActif: apres > 0,
+                    gardeRestant: apres,
+                    // Le garde qui s'en va emporte son contrat : la carte
+                    // quitte le deck, elle a fait ce qu'elle avait à faire.
+                    deck: apres
+                      ? j.deck
+                      : (j.deck || []).filter((x) => x.id !== "garde_du_corps"),
                     historique: [ligne, ...j.historique],
                     avisBookmaker: [ligne, ...(j.avisBookmaker || [])]
                   };
@@ -9097,23 +9137,31 @@
                                     textAlign: "center"
                                   }}
                                 >
-                                  🛡️ En poste — aucun pickpocket ne passe
+                                  🛡️ En poste — encore{" "}
+                                  {gardeRestantDe(joueurActuel)} tentative
+                                  {gardeRestantDe(joueurActuel) > 1 ? "s" : ""}
                                 </div>
                               ) : (
                                 <button
                                   onClick={() => {
+                                    const combien = tentativesGarde();
                                     setJoueurs((prev) =>
                                       prev.map((j) =>
                                         j.id === joueurActuel.id
-                                          ? { ...j, gardeDuCorpsActif: true }
+                                          ? {
+                                              ...j,
+                                              gardeDuCorpsActif: true,
+                                              gardeRestant: combien
+                                            }
                                           : j
                                       )
                                     );
                                     annoncerSalle([c.phraseAnim]);
                                     alert(
                                       "Votre garde du corps prend son poste.\n\n" +
-                                        "Il ne s'usera pas, mais il ne peut rien " +
-                                        "contre le fisc."
+                                        `Il repousse ${combien} tentative` +
+                                        `${combien > 1 ? "s" : ""}, puis il s'en ` +
+                                        "va. Il ne peut rien contre le fisc."
                                     );
                                   }}
                                   style={{
@@ -10232,6 +10280,12 @@
                     "Fontaine de Jouvence — bonus mission (%)",
                     "bonusFontainePct",
                     20
+                  )}
+                  {champCarte(
+                    "Garde du corps — tentatives repoussées",
+                    "tentativesGardeDuCorps",
+                    3,
+                    "après quoi il quitte son poste et la carte est finie"
                   )}
                   {champCarte("Argent de poche ($)", "montantArgentPoche", 50)}
                   {champCarte("Héritage ($)", "montantHeritage", 100)}
