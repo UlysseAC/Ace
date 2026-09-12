@@ -3989,91 +3989,97 @@
           setSousMenuBanque("pickpocket");
         };
 
+        /*
+         * Faire les poches.
+         *
+         * Tout se décide dans la mise à jour elle-même, sur l'état le plus
+         * frais dont l'appareil dispose — et non sur la liste affichée.
+         * Entre le moment où le voleur a vu les poches et celui où il en
+         * choisit une, sa victime a pu, depuis son propre téléphone, mettre
+         * un garde du corps en poste, filer au paradis fiscal ou se faire
+         * vider par quelqu'un d'autre. Relire au dernier moment est la seule
+         * façon de ne pas voler quelqu'un qui venait de se protéger.
+         */
         const detrousser = (carte, cibleId) => {
           if (bloqueParJetons(joueurActuel)) {
             alert(MESSAGE_JETONS_EN_JEU);
             return;
           }
-          // La liste a pu bouger pendant qu'on choisissait : quelqu'un s'est
-          // mis à l'abri, ou s'est fait vider les poches avant nous.
-          const choix = ciblesPickpocket().find((j) => j.id === cibleId);
-          if (!choix) {
-            alert(
-              "Cette poche n'est plus à portée.\n\n" +
-                "Votre carte vous reste."
-            );
-            setSousMenuBanque("accueil");
-            return;
-          }
-          // Le tirage se fait ici, une fois, et le résultat sert aux deux
-          // decks : impossible qu'ils divergent. Il ne porte que sur les
-          // cartes prenables : celles qui sont déjà en train d'agir restent
-          // à leur propriétaire.
-          const prenables = cartesVolables(choix);
-          const volee = prenables[Math.floor(Math.random() * prenables.length)];
-          if (!volee) {
-            alert(
-              `${choix.nom} n'a plus rien de prenable en poche.\n\n` +
-                "Votre carte vous reste."
-            );
-            return;
-          }
           const maintenantLa = Date.now();
+          // Ce qui s'est passé, décidé là où l'état est frais et annoncé
+          // juste après.
+          let issue = null;
+          setJoueurs((prev) => {
+            const cible = prev.find((j) => j.id === cibleId);
+            const moi = joueurActuel
+              ? prev.find((j) => j.id === joueurActuel.id)
+              : null;
+            if (
+              !cible ||
+              !moi ||
+              cible.id === moi.id ||
+              (cible.paradisFiscal &&
+                nombreSur(cible.finParadis, 0) > maintenantLa)
+            ) {
+              issue = { quoi: "hors_de_portee" };
+              return prev;
+            }
 
-          // Un garde du corps en poste renvoie le voleur d'où il vient. La
-          // carte lui reste en main, mais son temps de garde repart à zéro :
-          // il faudra patienter avant de retenter le coup.
-          if (choix.gardeDuCorpsActif) {
-            setJoueurs((prev) =>
-              prev.map((j) => {
-                if (j.id === joueurActuel.id)
+            // Un garde du corps en poste renvoie le voleur d'où il vient. La
+            // carte lui reste en main, mais son temps de garde repart à zéro :
+            // il faudra patienter avant de retenter le coup.
+            if (cible.gardeDuCorpsActif) {
+              issue = { quoi: "garde", nom: cible.nom };
+              const ligne = "Votre garde du corps a repoussé un pickpocket";
+              return prev.map((j) => {
+                if (j.id === moi.id)
                   return {
                     ...j,
-                    deck: j.deck.map((x) =>
+                    deck: (j.deck || []).map((x) =>
                       x.id === carte.id ? { ...x, recuLe: maintenantLa } : x
                     ),
                     historique: [
-                      `Pickpocket sur ${choix.nom} : un garde du corps vous a repoussé`,
+                      `Pickpocket sur ${cible.nom} : un garde du corps vous a repoussé`,
                       ...j.historique
                     ]
                   };
-                if (j.id === choix.id) {
-                  const ligne =
-                    "Votre garde du corps a repoussé un pickpocket";
+                if (j.id === cible.id)
                   return {
                     ...j,
                     historique: [ligne, ...j.historique],
                     avisBookmaker: [ligne, ...(j.avisBookmaker || [])]
                   };
-                }
                 return j;
-              })
-            );
-            alert(
-              `${choix.nom} a un garde du corps : vous vous êtes fait ` +
-                "repousser.\n\n" +
-                "Votre carte vous reste, mais il va falloir laisser passer le " +
-                "temps de garde avant de retenter votre chance."
-            );
-            setSousMenuBanque("accueil");
-            return;
-          }
-          setJoueurs((prev) =>
-            prev.map((j) => {
-              if (j.id === joueurActuel.id) {
+              });
+            }
+
+            // Le tirage se fait ici, une fois, et le résultat sert aux deux
+            // decks : impossible qu'ils divergent. Il ne porte que sur les
+            // cartes prenables : celles qui sont déjà en train d'agir restent
+            // à leur propriétaire.
+            const prenables = cartesVolables(cible);
+            const volee =
+              prenables[Math.floor(Math.random() * prenables.length)];
+            if (!volee) {
+              issue = { quoi: "poches_vides", nom: cible.nom };
+              return prev;
+            }
+            issue = { quoi: "vol", nom: cible.nom, volee };
+            return prev.map((j) => {
+              if (j.id === moi.id) {
                 return {
                   ...j,
                   deck: [
-                    ...j.deck.filter((x) => x.id !== carte.id),
+                    ...(j.deck || []).filter((x) => x.id !== carte.id),
                     { ...volee, recuLe: maintenantLa }
                   ],
                   historique: [
-                    `Pickpocket sur ${choix.nom} : carte [${volee.nom}] dérobée`,
+                    `Pickpocket sur ${cible.nom} : carte [${volee.nom}] dérobée`,
                     ...j.historique
                   ]
                 };
               }
-              if (j.id === choix.id) {
+              if (j.id === cible.id) {
                 // Une seule copie part, même si la victime en avait deux.
                 let retiree = false;
                 const restant = (j.deck || []).filter((x) => {
@@ -4098,16 +4104,41 @@
                 };
               }
               return j;
-            })
-          );
-          // La salle apprend qu'une poche a été vidée, sans savoir laquelle.
-          annoncerSalle([carte.phraseAnim]);
-          alert(
-            `Vous avez dérobé [${volee.nom}] à ${choix.nom}.\n\n` +
-              "Elle arrive dans votre deck avec son temps de garde à purger.\n" +
-              "Le Pickpocket, lui, est passé dans sa poche."
-          );
-          setSousMenuBanque("accueil");
+            });
+          });
+
+          // React peut ne dérouler la fonction ci-dessus qu'après la sortie du
+          // gestionnaire : on annonce le résultat au tour suivant, quand elle
+          // a tourné et que `issue` est renseignée.
+          setTimeout(() => {
+            if (!issue || issue.quoi === "hors_de_portee") {
+              alert(
+                "Cette poche n'est plus à portée.\n\n" +
+                  "Votre carte vous reste."
+              );
+            } else if (issue.quoi === "poches_vides") {
+              alert(
+                `${issue.nom} n'a plus rien de prenable en poche.\n\n` +
+                  "Votre carte vous reste."
+              );
+            } else if (issue.quoi === "garde") {
+              alert(
+                `${issue.nom} a un garde du corps : vous vous êtes fait ` +
+                  "repousser.\n\n" +
+                  "Votre carte vous reste, mais il va falloir laisser passer le " +
+                  "temps de garde avant de retenter votre chance."
+              );
+            } else {
+              // La salle apprend qu'une poche a été vidée, sans savoir laquelle.
+              annoncerSalle([carte.phraseAnim]);
+              alert(
+                `Vous avez dérobé [${issue.volee.nom}] à ${issue.nom}.\n\n` +
+                  "Elle arrive dans votre deck avec son temps de garde à purger.\n" +
+                  "Le Pickpocket, lui, est passé dans sa poche."
+              );
+            }
+            setSousMenuBanque("accueil");
+          }, 0);
         };
 
         const courseAParier = () => {
