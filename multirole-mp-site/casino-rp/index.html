@@ -85,6 +85,68 @@
         return Math.max(0, recu + attente - maintenant);
       };
 
+      /*
+       * Un champ de saisie qui ne parle qu'au relâchement.
+       *
+       * Dans l'admin, chaque lettre tapée partait jusqu'à la base. La frappe
+       * traînait derrière le doigt ; l'écho du serveur, revenu entre deux
+       * lettres, écrasait les dernières tapées ; un solde se renormalisait
+       * sous les doigts dès qu'on effaçait un chiffre ; et un identifiant
+       * tapé caractère par caractère créait autant de fiches de joueur qu'il
+       * a de lettres — d'où ces joueurs apparus sans que personne ne les
+       * demande.
+       *
+       * Le champ garde donc sa saisie pour lui tant qu'on écrit dedans, et ne
+       * la transmet qu'en le quittant — ou sur Entrée. Échap annule. Tant que
+       * la saisie n'est pas relâchée, un liseré ambre le dit.
+       *
+       * Il s'utilise exactement comme un <input> : mêmes `value` et
+       * `onChange`, à ceci près qu'`onChange` n'est appelé qu'une fois, à la
+       * fin. Les gestionnaires existants reçoivent le même `e.target.value`
+       * qu'avant et n'ont rien à changer.
+       */
+      function ChampSaisie({ value, onChange, multiligne, style, ...reste }) {
+        const [brouillon, setBrouillon] = React.useState(null);
+        // Échap efface le brouillon puis sort du champ — et sortir du champ,
+        // justement, vaut validation. Ce drapeau dit à la validation de
+        // laisser passer : sans lui, Échap enregistrerait ce qu'il annule.
+        const annule = React.useRef(false);
+        const enCours = brouillon !== null;
+        const propre = value === undefined || value === null ? "" : value;
+        const affiche = enCours ? brouillon : propre;
+        const valider = () => {
+          if (annule.current) {
+            annule.current = false;
+            return;
+          }
+          if (!enCours) return;
+          const saisi = brouillon;
+          setBrouillon(null);
+          // Rien n'a bougé : inutile de réveiller toute la table.
+          if (String(saisi) === String(propre)) return;
+          onChange({ target: { value: saisi } });
+        };
+        const props = {
+          ...reste,
+          value: affiche,
+          onChange: (e) => setBrouillon(e.target.value),
+          onBlur: valider,
+          onKeyDown: (e) => {
+            if (e.key === "Escape") {
+              annule.current = true;
+              setBrouillon(null);
+              e.currentTarget.blur();
+            } else if (e.key === "Enter" && !multiligne) {
+              // Entrée valide. Dans un champ à plusieurs lignes elle passe à
+              // la ligne : c'est son rôle, on la laisse tranquille.
+              e.currentTarget.blur();
+            }
+          },
+          style: enCours ? { ...style, borderColor: "#FFC107" } : style
+        };
+        return multiligne ? <textarea {...props} /> : <input {...props} />;
+      }
+
       const compteARebours = (ms) => {
         const s = Math.ceil(Math.max(0, ms) / 1000);
         if (s < 60) return `${s} s`;
@@ -6435,7 +6497,7 @@
                   >
                     <label>
                       Code Admin :{" "}
-                      <input
+                      <ChampSaisie
                         type="text"
                         value={configGlobale.codeAdmin}
                         onChange={(e) =>
@@ -6449,7 +6511,7 @@
                     </label>
                     <label>
                       Taille du Top :{" "}
-                      <input
+                      <ChampSaisie
                         type="number"
                         value={configGlobale.limitTop}
                         onChange={(e) =>
@@ -6479,7 +6541,7 @@
                     </label>
                     <label>
                       Durée Paradis Fiscal (Min) :{" "}
-                      <input
+                      <ChampSaisie
                         type="number"
                         value={configGlobale.dureeParadisFiscalMin}
                         onChange={(e) =>
@@ -6493,7 +6555,7 @@
                     </label>
                     <label>
                       Limite Retrait Croupier :{" "}
-                      <input
+                      <ChampSaisie
                         type="number"
                         value={configGlobale.limiteRetraitCroupier}
                         onChange={(e) =>
@@ -6509,7 +6571,7 @@
                     {/* AJOUT DES RÉGLAGES DE TEMPS POUR LE DÉ */}
                     <label>
                       Durée roulement dé (s) :{" "}
-                      <input
+                      <ChampSaisie
                         type="number"
                         value={configGlobale.dureeRoulement}
                         onChange={(e) =>
@@ -6523,7 +6585,7 @@
                     </label>
                     <label>
                       Durée arrêt image (s) :{" "}
-                      <input
+                      <ChampSaisie
                         type="number"
                         value={configGlobale.dureeArret}
                         onChange={(e) =>
@@ -6542,7 +6604,7 @@
                     <label style={{ gridColumn: "span 2" }}>
                       Boutons tactiles du croupier ($), séparés par des
                       virgules :{" "}
-                      <input
+                      <ChampSaisie
                         type="text"
                         value={(configGlobale.raccourcisTactiles || []).join(
                           ", "
@@ -6570,7 +6632,7 @@
 
                     <label>
                       Déconnexion borne après (s) :{" "}
-                      <input
+                      <ChampSaisie
                         type="number"
                         value={configGlobale.dureeInactiviteSec}
                         onChange={(e) =>
@@ -6585,7 +6647,7 @@
 
                     <label style={{ gridColumn: "span 2" }}>
                       Phrase Limite Croupier :{" "}
-                      <input
+                      <ChampSaisie
                         type="text"
                         value={configGlobale.phraseLimiteCroupier}
                         onChange={(e) =>
@@ -6675,7 +6737,7 @@
                   <div style={{ marginTop: "15px" }}>
                     <label>
                       Phrase Affichage Contrôle :{" "}
-                      <input
+                      <ChampSaisie
                         type="text"
                         value={configGlobale.phraseAttaqueCible}
                         onChange={(e) =>
@@ -6691,7 +6753,7 @@
                   <div style={{ marginTop: "15px" }}>
                     <label>
                       Texte de l'Espace Texte (sur les chèques) :{" "}
-                      <input
+                      <ChampSaisie
                         type="text"
                         value={configGlobale.espaceTexte}
                         onChange={(e) =>
@@ -6727,7 +6789,7 @@
                         borderRadius: "8px"
                       }}
                     >
-                      <input
+                      <ChampSaisie
                         type="text"
                         value={de.nom}
                         onChange={(e) => {
@@ -6786,7 +6848,7 @@
                               <option value="Vert">Vert (- Cib)</option>
                               <option value="Don">Don (Solidarité)</option>
                             </select>
-                            <input
+                            <ChampSaisie
                               type="number"
                               value={face.pct}
                               onChange={(e) => {
@@ -6809,7 +6871,7 @@
                             {/* Ce que fait cette face, en clair. Le joueur le
                                 lit à la borne avant de lancer, et le revoit
                                 quand le dé s'arrête dessus. */}
-                            <input
+                            <ChampSaisie
                               type="text"
                               placeholder={texteFace({
                                 type: face.type,
@@ -6871,7 +6933,7 @@
                         marginBottom: "5px"
                       }}
                     >
-                      <input
+                      <ChampSaisie
                         type="text"
                         value={m.nom}
                         onChange={(e) => {
@@ -6881,7 +6943,7 @@
                         }}
                         style={{ flex: 2, padding: "5px" }}
                       />
-                      <input
+                      <ChampSaisie
                         type="number"
                         value={m.montant}
                         onChange={(e) => {
@@ -6943,7 +7005,7 @@
                         marginBottom: "5px"
                       }}
                     >
-                      <input
+                      <ChampSaisie
                         type="text"
                         value={p.nom}
                         onChange={(e) => {
@@ -6953,7 +7015,7 @@
                         }}
                         style={{ flex: 2, padding: "5px" }}
                       />
-                      <input
+                      <ChampSaisie
                         type="number"
                         value={p.montant}
                         onChange={(e) => {
@@ -7015,7 +7077,7 @@
                         marginBottom: "5px"
                       }}
                     >
-                      <input
+                      <ChampSaisie
                         type="text"
                         value={p.nom}
                         onChange={(e) => {
@@ -7025,7 +7087,7 @@
                         }}
                         style={{ flex: 2, padding: "5px" }}
                       />
-                      <input
+                      <ChampSaisie
                         type="number"
                         value={p.montant}
                         onChange={(e) => {
@@ -7189,14 +7251,14 @@
                             alignItems: "center"
                           }}
                         >
-                          <input
+                          <ChampSaisie
                             type="text"
                             value={j.nom}
                             onChange={(e) => majJoueur("nom", e.target.value)}
                             aria-label={"Nom du joueur " + (idx + 1)}
                             style={champ}
                           />
-                          <input
+                          <ChampSaisie
                             type="text"
                             value={j.id}
                             onChange={(e) =>
@@ -7209,7 +7271,7 @@
                             }}
                             title={idDouble ? "Cet ID est déjà utilisé" : ""}
                           />
-                          <input
+                          <ChampSaisie
                             type="text"
                             value={j.code}
                             onChange={(e) =>
@@ -7218,7 +7280,7 @@
                             aria-label={"Code du joueur " + (idx + 1)}
                             style={champ}
                           />
-                          <input
+                          <ChampSaisie
                             type="number"
                             value={j.solde}
                             onChange={(e) =>
@@ -10201,7 +10263,7 @@
           const champCarte = (libelle, cle, secours, aide) => (
             <label style={{ fontSize: "0.85rem" }}>
               {libelle}
-              <input
+              <ChampSaisie
                 type="number"
                 value={nombreSur(configGlobale[cle], secours)}
                 onChange={(e) =>
@@ -10350,7 +10412,7 @@
                       }}
                     >
                       <div style={{ display: "flex", gap: "10px" }}>
-                        <input
+                        <ChampSaisie
                           type="text"
                           value={c.nom}
                           onChange={(e) => {
@@ -10380,7 +10442,7 @@
                       <label style={{ fontSize: "0.75rem", color: "#aaa" }}>
                         Résumé — une ligne, en tête de la carte dans le deck
                       </label>
-                      <input
+                      <ChampSaisie
                         type="text"
                         placeholder="Définition"
                         value={c.definition}
@@ -10395,7 +10457,7 @@
                         Mode d'emploi — le texte que le joueur lit dans son
                         deck. Sautez des lignes, elles sont conservées.
                       </label>
-                      <textarea
+                      <ChampSaisie multiligne
                         rows="5"
                         placeholder="Comment s'en sert-on, et à quoi sert-elle ?"
                         value={c.modeEmploi || ""}
@@ -10450,7 +10512,7 @@
                       <label style={{ fontSize: "0.75rem", color: "#aaa" }}>
                         Phrase pour l'écran de la salle, à l'activation
                       </label>
-                      <input
+                      <ChampSaisie
                         type="text"
                         placeholder="Phrase pour l'écran d'affichage"
                         value={c.phraseAnim}
@@ -10611,7 +10673,7 @@
           const champNombre = (libelle, cle, aide) => (
             <label key={cle} style={{ display: "block", fontSize: "0.85rem" }}>
               {libelle}
-              <input
+              <ChampSaisie
                 type="number"
                 value={configBookmaker[cle]}
                 onChange={(e) => majCfg(cle, e.target.value)}
@@ -10654,7 +10716,7 @@
                 <h3 style={{ marginTop: 0, color: "#4DD0E1" }}>Accès</h3>
                 <label style={{ display: "block", fontSize: "0.85rem" }}>
                   Code de l'interface bookmaker
-                  <input
+                  <ChampSaisie
                     value={configBookmaker.codeBookmaker}
                     onChange={(e) => majCfg("codeBookmaker", e.target.value)}
                     style={champ}
@@ -10751,7 +10813,7 @@
                   {[0, 1, 2].map((i) => (
                     <label key={`pp${i}`} style={{ fontSize: "0.85rem" }}>
                       Pertes réduites — pari {i + 1} (%)
-                      <input
+                      <ChampSaisie
                         type="number"
                         value={(configBookmaker.protectionPertes || [])[i]}
                         onChange={(e) => {
@@ -10766,7 +10828,7 @@
                   {[0, 1, 2].map((i) => (
                     <label key={`pg${i}`} style={{ fontSize: "0.85rem" }}>
                       Gains majorés — pari {i + 1} (%)
-                      <input
+                      <ChampSaisie
                         type="number"
                         value={(configBookmaker.protectionGains || [])[i]}
                         onChange={(e) => {
@@ -10798,7 +10860,7 @@
                       <option value="gain">Bénéfice de</option>
                       <option value="perte">Perte de</option>
                     </select>
-                    <input
+                    <ChampSaisie
                       type="number"
                       value={x.pct}
                       onChange={(e) => {
@@ -10858,7 +10920,7 @@
                   {champNombre("Nombre de tours", "courseTours")}
                   <label style={{ fontSize: "0.85rem" }}>
                     Rapports par place (× la mise), séparés par des virgules
-                    <input
+                    <ChampSaisie
                       value={(configBookmaker.courseRapports || RAPPORTS_DEFAUT).join(", ")}
                       onChange={(e) =>
                         majCfg(
@@ -11012,7 +11074,7 @@
                     key={i}
                     style={{ display: "flex", gap: "8px", marginBottom: "6px" }}
                   >
-                    <input
+                    <ChampSaisie
                       value={c.numero}
                       onChange={(e) => {
                         const t = [...croupiers];
@@ -11021,7 +11083,7 @@
                       }}
                       style={{ padding: "8px", width: "80px" }}
                     />
-                    <input
+                    <ChampSaisie
                       value={c.nom}
                       onChange={(e) => {
                         const t = [...croupiers];
@@ -11069,7 +11131,7 @@
                       flexWrap: "wrap"
                     }}
                   >
-                    <input
+                    <ChampSaisie
                       value={x.nom}
                       onChange={(e) =>
                         setJeuxCroupier(
@@ -11178,7 +11240,7 @@
                       }}
                     >
                       <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
-                        <input
+                        <ChampSaisie
                           value={pr.titre}
                           onChange={(e) => maj("titre", e.target.value)}
                           style={{ padding: "8px", flex: 1, fontWeight: "bold" }}
@@ -11200,7 +11262,7 @@
                           Bloc n° (de{" "}
                           {Math.max(0, Math.round(nombreSur(configBookmaker.blocDureeMin, 45)))}{" "}
                           min)
-                          <input
+                          <ChampSaisie
                             type="number"
                             value={pr.bloc}
                             onChange={(e) => maj("bloc", e.target.value)}
@@ -11220,7 +11282,7 @@
                         </label>
                         <label style={{ fontSize: "0.85rem" }}>
                           Probabilité (%)
-                          <input
+                          <ChampSaisie
                             type="number"
                             value={pr.probabilite}
                             onChange={(e) => maj("probabilite", e.target.value)}
@@ -11230,7 +11292,7 @@
                         </label>
                         <label style={{ fontSize: "0.85rem" }}>
                           Montant requis
-                          <input
+                          <ChampSaisie
                             type="number"
                             value={pr.montantRequis}
                             onChange={(e) => maj("montantRequis", e.target.value)}
@@ -11239,7 +11301,7 @@
                         </label>
                         <label style={{ fontSize: "0.85rem" }}>
                           Investisseurs max
-                          <input
+                          <ChampSaisie
                             type="number"
                             value={pr.investisseursMax}
                             onChange={(e) => maj("investisseursMax", e.target.value)}
@@ -11248,7 +11310,7 @@
                         </label>
                         <label style={{ fontSize: "0.85rem" }}>
                           Délai après le 1er (min)
-                          <input
+                          <ChampSaisie
                             type="number"
                             value={pr.delaiMin}
                             onChange={(e) => maj("delaiMin", e.target.value)}
@@ -11257,7 +11319,7 @@
                         </label>
                         <label style={{ fontSize: "0.85rem" }}>
                           Remboursement si échec (%)
-                          <input
+                          <ChampSaisie
                             type="number"
                             value={pr.remboursement}
                             onChange={(e) => maj("remboursement", e.target.value)}
@@ -11266,7 +11328,7 @@
                         </label>
                         <label style={{ fontSize: "0.85rem", gridColumn: "span 2" }}>
                           Mise de chaque place ($), séparées par des virgules
-                          <input
+                          <ChampSaisie
                             value={(pr.mises || []).join(", ")}
                             onChange={(e) =>
                               maj(
@@ -11287,7 +11349,7 @@
                         </label>
                         <label style={{ fontSize: "0.85rem", gridColumn: "span 2" }}>
                           Bénéfices par rang (%), séparés par des virgules
-                          <input
+                          <ChampSaisie
                             value={(pr.gains || []).join(", ")}
                             onChange={(e) =>
                               maj(
