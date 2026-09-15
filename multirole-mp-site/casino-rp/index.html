@@ -4,6 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Casino RP - Système Intégral Stable</title>
+    <!-- Le site n'a rien à faire dans les résultats de recherche : il n'est
+         là que pour les joueurs d'un soir, qui en ont l'adresse. Les moteurs
+         sérieux respectent cette ligne ; elle ne remplace pas une serrure,
+         elle évite seulement qu'on tombe dessus par hasard. -->
+    <meta name="robots" content="noindex, nofollow, noarchive" />
     <!-- Pour les bornes iPad : Safari n'accorde pas le plein écran à une page
          entière. En revanche, « Partager > Ajouter à l'écran d'accueil » ouvre
          le site en application, sans barre d'adresse ni onglets — et sans
@@ -2287,6 +2292,9 @@
         // --- TABLE 4 : CONFIGURATION GLOBALE ---
         const [configGlobale, setConfigGlobale] = useEtatPartage("configGlobale", {
           codeAdmin: "26",
+          // Vide : le site s'ouvre à qui connaît l'adresse. Rempli : une
+          // porte d'entrée le précède.
+          motDePasseEntree: "",
           limitTop: 3,
           // Ce que le grand écran montre du joueur : son nom, ou son
           // identifiant si l'on préfère ne pas afficher les vrais noms.
@@ -6093,9 +6101,184 @@
             </div>
           ) : null;
 
+        /*
+         * La porte d'entrée.
+         *
+         * Un site publié sur GitHub Pages est ouvert à qui connaît son
+         * adresse. Ce mot de passe partagé n'est pas un coffre-fort — il vit
+         * dans les réglages de la partie, que la clé publique de la base
+         * laisse lire — mais il arrête le passant, et c'est tout ce qu'on lui
+         * demande.
+         *
+         * Une fois donné, l'appareil s'en souvient : les joueurs ne le
+         * retapent pas à chaque fois. Le changer dans l'admin referme la
+         * porte sur tout le monde, y compris sur les appareils déjà entrés.
+         */
+        const CLE_ENTREE = "casino-rp:entree";
+        const MARQUE_PORTE = "casino-rp:porte";
+        const lireLocal = (cle) => {
+          try {
+            return localStorage.getItem(cle) || "";
+          } catch (e) {
+            // Navigation privée, stockage refusé : on se passe de mémoire.
+            return "";
+          }
+        };
+        const ecrireLocal = (cle, valeur) => {
+          try {
+            if (valeur) localStorage.setItem(cle, valeur);
+            else localStorage.removeItem(cle);
+          } catch (e) {}
+        };
+
+        const motDePasseEntree = String(configGlobale.motDePasseEntree || "");
+        const [entreeDonnee, setEntreeDonnee] = React.useState(() =>
+          lireLocal(CLE_ENTREE)
+        );
+        const [saisieEntree, setSaisieEntree] = React.useState("");
+        const [refusEntree, setRefusEntree] = React.useState("");
+
+        // On retient qu'une porte existe. Sans ça, le temps que les réglages
+        // arrivent de la base, la page s'ouvrirait en grand une seconde — et
+        // une seconde suffit à lire par-dessus une épaule.
+        React.useEffect(() => {
+          ecrireLocal(MARQUE_PORTE, motDePasseEntree ? "1" : "");
+        }, [motDePasseEntree]);
+        const porteAnnoncee = React.useRef(null);
+        if (porteAnnoncee.current === null)
+          porteAnnoncee.current = !!lireLocal(MARQUE_PORTE);
+
+        const reglagesArrives = !!motDePasseEntree;
+        const porteFermee = reglagesArrives
+          ? entreeDonnee !== motDePasseEntree
+          : porteAnnoncee.current && !entreeDonnee;
+
+        const ouvrirLaPorte = () => {
+          const donne = saisieEntree.trim();
+          if (!donne) return;
+          if (!reglagesArrives) {
+            setRefusEntree(
+              "Les réglages de la soirée n'ont pas fini d'arriver. " +
+                "Réessayez dans un instant."
+            );
+            return;
+          }
+          // Le code de l'organisateur ouvre aussi : sans cette porte de
+          // service, changer le mot de passe depuis un autre appareil
+          // l'enfermerait dehors avec les autres.
+          const bon =
+            donne === motDePasseEntree ||
+            donne === String(configGlobale.codeAdmin || "");
+          if (!bon) {
+            setRefusEntree("Ce n'est pas le mot de passe.");
+            return;
+          }
+          ecrireLocal(CLE_ENTREE, motDePasseEntree);
+          setEntreeDonnee(motDePasseEntree);
+          setSaisieEntree("");
+          setRefusEntree("");
+        };
+
         // ========================================================
         // ================= RENDU DES INTERFACES =================
         // ========================================================
+
+        if (porteFermee) {
+          return (
+            <div
+              style={{
+                minHeight: "100vh",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "24px"
+              }}
+            >
+              <div
+                style={{
+                  background: "#222",
+                  border: "1px solid #FFC107",
+                  borderRadius: "16px",
+                  padding: "32px 28px",
+                  maxWidth: "380px",
+                  width: "100%",
+                  textAlign: "center"
+                }}
+              >
+                <div style={{ fontSize: "3rem", lineHeight: 1 }}>🎰</div>
+                <h1
+                  style={{
+                    color: "#FFD700",
+                    margin: "12px 0 6px",
+                    fontSize: "1.5rem"
+                  }}
+                >
+                  Casino RP
+                </h1>
+                <p
+                  style={{
+                    color: "#aaa",
+                    margin: "0 0 20px",
+                    fontSize: "0.9rem"
+                  }}
+                >
+                  Soirée privée. Le mot de passe est donné à l'entrée.
+                </p>
+                <input
+                  type="password"
+                  value={saisieEntree}
+                  autoFocus
+                  onChange={(e) => {
+                    setSaisieEntree(e.target.value);
+                    if (refusEntree) setRefusEntree("");
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") ouvrirLaPorte();
+                  }}
+                  placeholder="Mot de passe"
+                  aria-label="Mot de passe d'entrée"
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    fontSize: "1.1rem",
+                    textAlign: "center",
+                    background: "#333",
+                    color: "#fff",
+                    border: "1px solid #555",
+                    borderRadius: "8px",
+                    boxSizing: "border-box"
+                  }}
+                />
+                <p
+                  style={{
+                    color: "#EF5350",
+                    minHeight: "1.4em",
+                    margin: "10px 0",
+                    fontSize: "0.85rem"
+                  }}
+                >
+                  {refusEntree}
+                </p>
+                <button
+                  onClick={ouvrirLaPorte}
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    background: "#4CAF50",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "8px",
+                    fontWeight: "bold",
+                    fontSize: "1rem",
+                    cursor: "pointer"
+                  }}
+                >
+                  Entrer
+                </button>
+              </div>
+            </div>
+          );
+        }
 
         if (interfaceActive === "menu") {
           return (
@@ -6508,6 +6691,39 @@
                         }
                         style={{ width: "100%", padding: "5px" }}
                       />
+                    </label>
+                    <label>
+                      Mot de passe d'entrée du site :{" "}
+                      <ChampSaisie
+                        type="text"
+                        value={configGlobale.motDePasseEntree || ""}
+                        onChange={(e) => {
+                          const nouveau = e.target.value.trim();
+                          setConfigGlobale({
+                            ...configGlobale,
+                            motDePasseEntree: nouveau
+                          });
+                          // L'appareil qui pose la porte en garde la clé :
+                          // sinon l'organisateur se retrouverait dehors une
+                          // seconde après l'avoir posée, en pleine admin.
+                          ecrireLocal(CLE_ENTREE, nouveau);
+                          setEntreeDonnee(nouveau);
+                        }}
+                        placeholder="vide = pas de porte"
+                        style={{ width: "100%", padding: "5px" }}
+                      />
+                      <span
+                        style={{
+                          display: "block",
+                          color: "#888",
+                          fontSize: "0.75rem",
+                          marginTop: "3px"
+                        }}
+                      >
+                        Demandé à l'ouverture du site, une fois par appareil.
+                        Le changer referme la porte sur tout le monde. Le code
+                        admin ouvre aussi, pour ne jamais rester dehors.
+                      </span>
                     </label>
                     <label>
                       Taille du Top :{" "}
