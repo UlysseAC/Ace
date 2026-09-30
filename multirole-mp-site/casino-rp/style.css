@@ -175,3 +175,22 @@ body {
 .bouton-plein-ecran:focus {
   opacity: 1;
 }
+
+/* ---- Mode kiosque ----
+   Une tablette posée sur une table de jeu : un doigt qui traîne ne doit ni
+   surligner du texte, ni ouvrir le menu de l'appui long, ni faire rebondir
+   la page, ni la recharger d'un glissement vers le bas. Les champs de saisie
+   gardent évidemment le droit d'être sélectionnés. */
+body.kiosque {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+body.kiosque input,
+body.kiosque textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}

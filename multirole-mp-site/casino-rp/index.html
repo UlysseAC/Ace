@@ -362,6 +362,33 @@
       // l'utilisateur : impossible de le déclencher tout seul, d'où un bouton.
       // Safari a gardé ses préfixes, et l'iPhone ne le propose pas du tout
       // pour autre chose qu'une vidéo — sur ce matériel, le bouton le dit.
+      /*
+       * Ce que l'appareil retient pour lui seul.
+       *
+       * Rien de partagé ici : la porte d'entrée déjà franchie, le rôle de
+       * borne. Un navigateur en navigation privée, ou réglé pour refuser le
+       * stockage, fait lever ces appels — on s'en passe alors sans rien
+       * casser.
+       */
+      const lireLocal = (cle) => {
+        try {
+          return localStorage.getItem(cle) || "";
+        } catch (e) {
+          return "";
+        }
+      };
+
+      const ecrireLocal = (cle, valeur) => {
+        try {
+          if (valeur) localStorage.setItem(cle, valeur);
+          else localStorage.removeItem(cle);
+        } catch (e) {}
+      };
+
+      const CLE_ENTREE = "casino-rp:entree";
+      const MARQUE_PORTE = "casino-rp:porte";
+      const CLE_KIOSQUE = "casino-rp:kiosque";
+
       const enPleinEcran = () =>
         !!(document.fullscreenElement || document.webkitFullscreenElement);
 
@@ -2276,7 +2303,12 @@
       }
 
       function App() {
-        const [interfaceActive, setInterfaceActive] = React.useState("menu");
+        // Une borne en kiosque rouvre sur elle-même : une tablette qui
+        // redémarre, un onglet qui se recharge, et l'écran de service revient
+        // sans que personne n'ait à le retrouver dans le menu.
+        const [interfaceActive, setInterfaceActive] = React.useState(() =>
+          lireLocal(CLE_KIOSQUE) === "1" ? "banque" : "menu"
+        );
         const [supabaseConnected, setSupabaseConnected] = React.useState(false);
         const [codeManuel, setCodeManuel] = React.useState("");
 
@@ -2895,6 +2927,10 @@
             setErreurCodeAdmin("Code incorrect.");
             return;
           }
+          // Le code admin est la seule porte de sortie de la borne : il rend
+          // aussi l'appareil à lui-même, sinon le prochain rechargement le
+          // renverrait en kiosque.
+          fermerLeKiosque();
           setInterfaceActive("menu");
           setModalAdminOuvert(false);
           setSaisieCodeAdmin("");
@@ -3433,6 +3469,121 @@
               </div>
             </div>
           ) : null;
+
+        /*
+         * Le mode kiosque.
+         *
+         * Une tablette posée sur une table de jeu n'est pas un ordinateur :
+         * personne ne doit pouvoir en sortir, elle ne doit pas s'endormir au
+         * bout de trente secondes, et un doigt qui traîne ne doit ni
+         * sélectionner du texte, ni ouvrir un menu contextuel, ni recharger
+         * la page d'un glissement vers le bas.
+         *
+         * Le plein écran verrouillé s'occupait déjà de la sortie. Le kiosque
+         * ajoute les trois autres : l'appareil se souvient qu'il est une
+         * borne et rouvre dessus, il garde l'écran allumé, et il ferme les
+         * gestes du navigateur.
+         *
+         * Il ne remplace pas le vrai kiosque du système — « Accès guidé » sur
+         * iPad, « épinglage d'écran » sur Android — qui seul empêche de
+         * changer d'application. Il en fait le reste, sans rien installer.
+         */
+        const [kiosque, setKiosque] = React.useState(
+          () => lireLocal(CLE_KIOSQUE) === "1"
+        );
+        const veilleuse = React.useRef(null);
+
+        // L'écran reste allumé. Le verrou se perd dès que l'onglet passe en
+        // arrière-plan — une notification, un coup d'œil ailleurs — donc on le
+        // reprend à chaque retour.
+        React.useEffect(() => {
+          if (!kiosque) return;
+          let vivant = true;
+          const prendre = () => {
+            if (!vivant || document.visibilityState !== "visible") return;
+            if (!navigator.wakeLock || veilleuse.current) return;
+            navigator.wakeLock
+              .request("screen")
+              .then((v) => {
+                if (!vivant) {
+                  v.release().catch(() => {});
+                  return;
+                }
+                veilleuse.current = v;
+                v.addEventListener("release", () => {
+                  veilleuse.current = null;
+                });
+              })
+              // Refusée sur batterie faible, ou absente du navigateur : la
+              // borne marche quand même, l'écran s'éteindra comme d'habitude.
+              .catch(() => {});
+          };
+          prendre();
+          document.addEventListener("visibilitychange", prendre);
+          return () => {
+            vivant = false;
+            document.removeEventListener("visibilitychange", prendre);
+            if (veilleuse.current) {
+              veilleuse.current.release().catch(() => {});
+              veilleuse.current = null;
+            }
+          };
+        }, [kiosque]);
+
+        // Les gestes du navigateur : sélection, menu contextuel du appui
+        // long, rebond et glissement qui recharge. Le style vit dans la
+        // feuille, la classe suffit ici.
+        React.useEffect(() => {
+          if (!kiosque) return;
+          const sansMenu = (e) => e.preventDefault();
+          document.body.classList.add("kiosque");
+          document.addEventListener("contextmenu", sansMenu);
+          return () => {
+            document.body.classList.remove("kiosque");
+            document.removeEventListener("contextmenu", sansMenu);
+          };
+        }, [kiosque]);
+
+        // Entrer en kiosque : un geste de l'utilisateur, sans quoi aucun
+        // navigateur n'accorde le plein écran.
+        const ouvrirLeKiosque = () => {
+          ecrireLocal(CLE_KIOSQUE, "1");
+          setKiosque(true);
+          setInterfaceActive("banque");
+          fermerSessionJoueur();
+          if (enPleinEcran()) {
+            setVerrouEcran(true);
+            return;
+          }
+          passerEnPleinEcran()
+            .then(() => setVerrouEcran(true))
+            .catch(() => {
+              // Safari sur iPad ne donne pas le plein écran à une page. Le
+              // reste du kiosque tient quand même, et le raccourci sur
+              // l'écran d'accueil fait le travail à sa place.
+              alert(
+                "Mode kiosque en place.\n\n" +
+                  "Cet appareil ne donne pas le plein écran à une page web. " +
+                  "Sur iPad : bouton Partager, « Ajouter à l'écran d'accueil », " +
+                  "puis ouvrez la borne depuis l'icône — elle s'affichera sans " +
+                  "barre d'adresse.\n\n" +
+                  "Pensez aussi à l'Accès guidé (iPad) ou à l'épinglage " +
+                  "d'écran (Android) pour interdire de changer d'application."
+              );
+            });
+        };
+
+        const fermerLeKiosque = React.useCallback(() => {
+          ecrireLocal(CLE_KIOSQUE, "");
+          setKiosque(false);
+          setVerrouEcran(false);
+          quitterLePleinEcran();
+        }, []);
+
+        // Au rechargement, le plein écran est perdu : aucun navigateur ne le
+        // rend sans un geste. Un panneau attend donc le premier doigt — et il
+        // couvre tout, pour que la borne ne s'ouvre pas à moitié.
+        const kiosqueAReprendre = kiosque && !pleinEcran && !demandeSortie;
 
         const course = infosCourse(
           maintenant,
@@ -6114,23 +6265,6 @@
          * retapent pas à chaque fois. Le changer dans l'admin referme la
          * porte sur tout le monde, y compris sur les appareils déjà entrés.
          */
-        const CLE_ENTREE = "casino-rp:entree";
-        const MARQUE_PORTE = "casino-rp:porte";
-        const lireLocal = (cle) => {
-          try {
-            return localStorage.getItem(cle) || "";
-          } catch (e) {
-            // Navigation privée, stockage refusé : on se passe de mémoire.
-            return "";
-          }
-        };
-        const ecrireLocal = (cle, valeur) => {
-          try {
-            if (valeur) localStorage.setItem(cle, valeur);
-            else localStorage.removeItem(cle);
-          } catch (e) {}
-        };
-
         const motDePasseEntree = String(configGlobale.motDePasseEntree || "");
         const [entreeDonnee, setEntreeDonnee] = React.useState(() =>
           lireLocal(CLE_ENTREE)
@@ -6276,6 +6410,44 @@
                   Entrer
                 </button>
               </div>
+            </div>
+          );
+        }
+
+        if (kiosqueAReprendre) {
+          return (
+            <div
+              onClick={() => {
+                passerEnPleinEcran()
+                  .then(() => setVerrouEcran(true))
+                  // Sans plein écran — un iPad sous Safari — la borne s'ouvre
+                  // quand même : le panneau n'est pas une serrure, seulement
+                  // le geste qui manque au navigateur.
+                  .catch(() => setKiosque(true));
+              }}
+              style={{
+                position: "fixed",
+                inset: 0,
+                zIndex: 9998,
+                background: "#0b0b0b",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "18px",
+                padding: "24px",
+                textAlign: "center",
+                cursor: "pointer"
+              }}
+            >
+              <div style={{ fontSize: "3.5rem" }}>🏦</div>
+              <h2 style={{ margin: 0, color: "#4CAF50" }}>Borne de la banque</h2>
+              <p style={{ color: "#aaa", margin: 0, fontSize: "1.1rem" }}>
+                Touchez l'écran pour ouvrir.
+              </p>
+              <p style={{ color: "#555", margin: 0, fontSize: "0.8rem" }}>
+                Mode kiosque — le code administrateur en fait sortir.
+              </p>
             </div>
           );
         }
@@ -8820,6 +8992,41 @@
                     >
                       Connexion
                     </button>
+                  </div>
+
+                  {/* Poser la tablette sur la table de jeu et l'oublier : elle
+                      reste allumée, revient d'elle-même après un
+                      redémarrage, et ne se laisse plus quitter sans le code.
+                      Discret, parce que ça ne se règle qu'une fois. */}
+                  <button
+                    onClick={kiosque ? undefined : ouvrirLeKiosque}
+                    disabled={kiosque}
+                    style={{
+                      marginTop: "18px",
+                      padding: "8px 12px",
+                      background: "transparent",
+                      color: kiosque ? "#4CAF50" : "#777",
+                      border: "1px solid " + (kiosque ? "#2E5A31" : "#444"),
+                      borderRadius: "8px",
+                      fontSize: "0.8rem",
+                      cursor: kiosque ? "default" : "pointer"
+                    }}
+                  >
+                    {kiosque
+                      ? "🖥️ Mode kiosque en place"
+                      : "🖥️ Passer en mode kiosque"}
+                  </button>
+                  <div
+                    style={{
+                      color: "#555",
+                      fontSize: "0.72rem",
+                      marginTop: "6px",
+                      lineHeight: 1.5
+                    }}
+                  >
+                    {kiosque
+                      ? "L'écran reste allumé et la borne rouvre seule. Le code administrateur rend l'appareil."
+                      : "Plein écran verrouillé, écran qui ne s'éteint pas, et retour automatique sur la borne au redémarrage."}
                   </div>
                 </div>
               ) : (
