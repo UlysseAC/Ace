@@ -2702,6 +2702,8 @@
         // États Banque Joueur
         const [idSaisi, setIdSaisi] = React.useState("");
         const [codeSaisi, setCodeSaisi] = React.useState("");
+        // Pour qu'Entrée, dans le champ de l'identifiant, descende au code.
+        const champCodeBanque = React.useRef(null);
         const [joueurConnecteId, setJoueurConnecteId] = React.useState(null);
         const [sousMenuBanque, setSousMenuBanque] = React.useState("accueil");
         const [modalAdminOuvert, setModalAdminOuvert] = React.useState(false);
@@ -2936,6 +2938,29 @@
           setSaisieCodeAdmin("");
           setErreurCodeAdmin("");
           fermerSessionJoueur();
+        };
+
+        // Ouvre la session d'un joueur à la borne. Le bouton « Connexion »
+        // et la touche Entrée passent tous deux par ici : il n'y a qu'une
+        // façon d'entrer, donc qu'un seul comportement à vérifier.
+        const connecterLeJoueur = () => {
+          const saisi = idSaisi.trim();
+          const j = joueursActifs.find(
+            (item) =>
+              String(item.id).toLowerCase() === saisi.toLowerCase() &&
+              String(item.code) === codeSaisi.trim()
+          );
+          if (!j) {
+            // En cas d'erreur on laisse la saisie, pour corriger.
+            alert("Erreur identifiants.");
+            return;
+          }
+          setJoueurConnecteId(j.id);
+          setSousMenuBanque("accueil");
+          // Les identifiants sont effacés dès l'entrée : la borne est
+          // partagée, ils n'ont pas à survivre à la connexion.
+          setIdSaisi("");
+          setCodeSaisi("");
         };
 
         // Ferme la session du joueur et efface toute trace de sa saisie :
@@ -8938,6 +8963,15 @@
                         type="text"
                         value={idSaisi}
                         onChange={(e) => setIdSaisi(e.target.value)}
+                        // Entrée descend au code : la saisie se fait au
+                        // clavier d'un bout à l'autre, sans toucher l'écran.
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter") return;
+                          e.preventDefault();
+                          if (champCodeBanque.current)
+                            champCodeBanque.current.focus();
+                        }}
+                        autoComplete="off"
                         style={{
                           width: "100%",
                           padding: "10px",
@@ -8951,8 +8985,15 @@
                       Code :{" "}
                       <input
                         type="password"
+                        ref={champCodeBanque}
                         value={codeSaisi}
                         onChange={(e) => setCodeSaisi(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter") return;
+                          e.preventDefault();
+                          connecterLeJoueur();
+                        }}
+                        autoComplete="off"
                         style={{
                           width: "100%",
                           padding: "10px",
@@ -8963,25 +9004,7 @@
                       />
                     </label>
                     <button
-                      onClick={() => {
-                        const j = joueursActifs.find(
-                          (item) =>
-                            item.id.toLowerCase() === idSaisi.toLowerCase() &&
-                            item.code === codeSaisi
-                        );
-                        if (j) {
-                          setJoueurConnecteId(j.id);
-                          setSousMenuBanque("accueil");
-                          // Les identifiants sont effacés dès l'entrée : la
-                          // borne est partagée, ils n'ont pas à survivre à la
-                          // connexion.
-                          setIdSaisi("");
-                          setCodeSaisi("");
-                        } else {
-                          // En cas d'erreur on laisse la saisie, pour corriger.
-                          alert("Erreur identifiants.");
-                        }
-                      }}
+                      onClick={connecterLeJoueur}
                       style={{
                         padding: "12px",
                         background: "#4CAF50",
@@ -10295,8 +10318,10 @@
                             onChange={(e) =>
                               setCodeManuel(e.target.value.toUpperCase())
                             }
-                            onKeyPress={(e) => {
-                              if (e.key === "Enter") validerCode(codeManuel);
+                            onKeyDown={(e) => {
+                              if (e.key !== "Enter") return;
+                              e.preventDefault();
+                              validerCode(codeManuel);
                             }}
                             placeholder="Ex: 260167"
                             style={{
@@ -11892,13 +11917,13 @@
                   type="password"
                   value={codeBkSaisi}
                   onChange={(e) => setCodeBkSaisi(e.target.value)}
-                  onKeyPress={(e) => {
-                    if (e.key === "Enter") {
-                      if (codeBkSaisi === String(configBookmaker.codeBookmaker)) {
-                        setBookmakerOuvert(true);
-                        setCodeBkSaisi("");
-                      } else alert("Code incorrect.");
-                    }
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    if (codeBkSaisi === String(configBookmaker.codeBookmaker)) {
+                      setBookmakerOuvert(true);
+                      setCodeBkSaisi("");
+                    } else alert("Code incorrect.");
                   }}
                   style={{ width: "100%", padding: "12px", fontSize: "1.1rem" }}
                 />
