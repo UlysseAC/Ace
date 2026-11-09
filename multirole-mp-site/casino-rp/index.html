@@ -2940,6 +2940,40 @@
           fermerSessionJoueur();
         };
 
+        /*
+         * Chiffres seulement.
+         *
+         * Les bornes se tiennent au pavé numérique : un identifiant ou un
+         * code contenant une lettre serait intapable. Tout ce qui entre dans
+         * ces deux colonnes est donc filtré, et ce qui ne laisse aucun
+         * chiffre est refusé plutôt qu'effacé — on ne vide pas un identifiant
+         * sous les doigts de l'organisateur.
+         */
+        const chiffresSeuls = (v) => String(v === undefined ? "" : v).replace(/\D/g, "");
+        const estNumerique = (v) => /^\d+$/.test(String(v === undefined ? "" : v));
+
+        // Le plus petit numéro libre, pour ne pas créer de doublon.
+        const numeroLibre = (liste, pris) => {
+          let n = 1;
+          const occupes = new Set(
+            liste.map((j) => String(j.id)).concat([...(pris || [])])
+          );
+          while (occupes.has(String(n))) n++;
+          return String(n);
+        };
+
+        // Un code à quatre chiffres qui ne court pas déjà sur une autre fiche.
+        const codeLibre = (liste, pris) => {
+          const occupes = new Set(
+            liste.map((j) => String(j.code)).concat([...(pris || [])])
+          );
+          for (let essai = 0; essai < 500; essai++) {
+            const c = String(Math.floor(1000 + Math.random() * 9000));
+            if (!occupes.has(c)) return c;
+          }
+          return String(Math.floor(1000 + Math.random() * 9000));
+        };
+
         // Ouvre la session d'un joueur à la borne. Le bouton « Connexion »
         // et la touche Entrée passent tous deux par ici : il n'y a qu'une
         // façon d'entrer, donc qu'un seul comportement à vérifier.
@@ -7673,10 +7707,16 @@
                           />
                           <ChampSaisie
                             type="text"
+                            inputMode="numeric"
                             value={j.id}
-                            onChange={(e) =>
-                              majJoueur("id", e.target.value.trim())
-                            }
+                            onChange={(e) => {
+                              // Une saisie sans un seul chiffre ne remplace
+                              // rien : mieux vaut garder l'ancien identifiant
+                              // qu'en laisser un vide, que personne ne
+                              // pourrait taper.
+                              const propre = chiffresSeuls(e.target.value);
+                              if (propre) majJoueur("id", propre);
+                            }}
                             aria-label={"ID du joueur " + (idx + 1)}
                             style={{
                               ...champ,
@@ -7686,9 +7726,10 @@
                           />
                           <ChampSaisie
                             type="text"
+                            inputMode="numeric"
                             value={j.code}
                             onChange={(e) =>
-                              majJoueur("code", e.target.value.trim())
+                              majJoueur("code", chiffresSeuls(e.target.value))
                             }
                             aria-label={"Code du joueur " + (idx + 1)}
                             style={champ}
@@ -7772,16 +7813,100 @@
                     </p>
                   )}
 
+                  {(() => {
+                    const aCorriger = joueurs.filter(
+                      (j) => !estNumerique(j.id) || !estNumerique(j.code)
+                    );
+                    if (!aCorriger.length) return null;
+                    // Changer un identifiant en pleine partie laisserait
+                    // derrière lui des paris et des investissements qui
+                    // pointent vers un joueur qui n'existe plus. On ne le
+                    // propose donc que tant que rien n'est engagé.
+                    const enJeu =
+                      (parisJoueurs || []).length +
+                      (parisCourse || []).length +
+                      (investissements || []).length +
+                      (fioles || []).length;
+                    return (
+                      <div
+                        style={{
+                          background: "#3E2723",
+                          border: "1px solid #8D6E63",
+                          borderRadius: "8px",
+                          padding: "12px 14px",
+                          margin: "10px 0",
+                          fontSize: "0.85rem"
+                        }}
+                      >
+                        <strong style={{ color: "#FFCC80" }}>
+                          🔢 {aCorriger.length} joueur
+                          {aCorriger.length > 1 ? "s" : ""} ne peu
+                          {aCorriger.length > 1 ? "vent" : "t"} pas se
+                          connecter au pavé numérique
+                        </strong>
+                        <div style={{ color: "#bbb", margin: "5px 0 10px" }}>
+                          Leur identifiant ou leur code contient autre chose
+                          que des chiffres :{" "}
+                          {aCorriger
+                            .slice(0, 6)
+                            .map((j) => j.nom)
+                            .join(", ")}
+                          {aCorriger.length > 6 ? "…" : ""}
+                        </div>
+                        {enJeu ? (
+                          <div style={{ color: "#EF9A9A" }}>
+                            Des paris ou des investissements sont en cours :
+                            changer un identifiant maintenant les laisserait
+                            sans propriétaire. Corrigez-les à la main, ou
+                            attendez la fin de la partie.
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              const pris = new Set();
+                              const codesPris = new Set();
+                              setJoueurs(
+                                joueurs.map((j) => {
+                                  const suite = { ...j };
+                                  if (!estNumerique(j.id)) {
+                                    suite.id = numeroLibre(joueurs, pris);
+                                    pris.add(suite.id);
+                                  }
+                                  if (!estNumerique(j.code)) {
+                                    suite.code = codeLibre(joueurs, codesPris);
+                                    codesPris.add(suite.code);
+                                  }
+                                  return suite;
+                                })
+                              );
+                            }}
+                            style={{
+                              background: "#8D6E63",
+                              color: "#fff",
+                              border: "none",
+                              padding: "8px 14px",
+                              borderRadius: "6px",
+                              fontWeight: "bold",
+                              cursor: "pointer"
+                            }}
+                          >
+                            🔢 Leur donner des chiffres
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   <button
                     onClick={() => {
-                      // Un ID libre, pour ne pas créer de doublon d'emblée
-                      let n = joueurs.length + 1;
-                      while (joueurs.some((j) => j.id === String(n))) n++;
                       setJoueurs([
                         ...joueurs,
                         {
-                          id: String(n),
-                          code: "",
+                          // Tapables au pavé numérique dès la création :
+                          // le plus petit numéro libre, et un code à quatre
+                          // chiffres que personne d'autre n'a.
+                          id: numeroLibre(joueurs),
+                          code: codeLibre(joueurs),
                           nom: "Nouveau joueur",
                           solde: 0,
                           totalMissions: 0,
@@ -8961,6 +9086,7 @@
                       ID :{" "}
                       <input
                         type="text"
+                        inputMode="numeric"
                         value={idSaisi}
                         onChange={(e) => setIdSaisi(e.target.value)}
                         // Entrée descend au code : la saisie se fait au
@@ -8985,6 +9111,7 @@
                       Code :{" "}
                       <input
                         type="password"
+                        inputMode="numeric"
                         ref={champCodeBanque}
                         value={codeSaisi}
                         onChange={(e) => setCodeSaisi(e.target.value)}
