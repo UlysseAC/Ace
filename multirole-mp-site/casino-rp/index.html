@@ -5397,6 +5397,42 @@
           setCodesRegistre(nouveauRegistre);
         };
 
+        /*
+         * Les billets d'accès.
+         *
+         * Un par compte : son numéro, son code, et rien d'autre. Pas de nom —
+         * les joueurs changent d'une soirée à l'autre, les comptes non. Le
+         * billet reste donc valable d'une partie sur l'autre : on le
+         * redistribue à qui s'assoit à cette place, et l'organisateur met le
+         * nom en face du numéro dans l'admin.
+         *
+         * Rien n'est tiré au sort ici : on imprime les codes tels qu'ils sont
+         * dans la table des joueurs, à l'instant. Ce qui sort de l'imprimante
+         * est donc exactement ce que la borne attend.
+         */
+        const genererBilletsJoueurs = () => {
+          if (!joueurs.length) {
+            alert("Aucun joueur dans la partie.");
+            return;
+          }
+          const sansCode = joueurs.filter((j) => !String(j.code || "").trim());
+          if (sansCode.length) {
+            alert(
+              `${sansCode.length} compte${sansCode.length > 1 ? "s n'ont" : " n'a"} pas de code.\n\n` +
+                "Remplissez la colonne Code dans la Table 1 avant d'imprimer, " +
+                "sinon le billet sortira vide."
+            );
+            return;
+          }
+          setChequesImprimerie(
+            joueurs.map((j) => ({
+              genre: "joueur",
+              id: String(j.id),
+              code: String(j.code)
+            }))
+          );
+        };
+
         // ================= LOGIQUE SCANNER & DEFAUSSE =================
         // `parCode` distingue un code tapé d'un bouton cliqué. Masquer les
         // boutons de distribution ne doit pas condamner les codes : c'est
@@ -8296,6 +8332,47 @@
                     </button>
                   </div>
 
+                  {/* Les billets d'accès : un par compte, à garder d'une
+                      soirée sur l'autre. */}
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "10px",
+                      alignItems: "flex-end",
+                      marginTop: "14px",
+                      paddingTop: "14px",
+                      borderTop: "1px solid #444"
+                    }}
+                  >
+                    <div style={{ flex: 4, color: "#777", fontSize: "0.78rem" }}>
+                      <strong style={{ color: "#aaa" }}>
+                        Billets d'accès aux bornes
+                      </strong>
+                      <div style={{ marginTop: "3px" }}>
+                        Un billet par compte : son numéro et son code, sans
+                        nom. Les {joueurs.length} comptes de la Table 1, avec
+                        les codes qu'ils ont en ce moment. À redistribuer
+                        d'une soirée sur l'autre : « Nouvelle partie en
+                        gardant les joueurs » ne touche ni aux numéros ni aux
+                        codes.
+                      </div>
+                    </div>
+                    <button
+                      onClick={genererBilletsJoueurs}
+                      style={{
+                        padding: "8px 15px",
+                        background: "#00838F",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "6px",
+                        fontWeight: "bold",
+                        cursor: "pointer"
+                      }}
+                    >
+                      Générer les billets
+                    </button>
+                  </div>
+
                   <div
                     id="printable-area"
                     style={{
@@ -8334,7 +8411,93 @@
                           fontSize: "0.75rem"
                         }}
                       >
-                        {ch.genre === "carte" ? (
+                        {ch.genre === "joueur" ? (
+                          // Le billet d'accès : deux nombres, gros, et de quoi
+                          // savoir quoi en faire. Rien à écrire dessus, rien
+                          // qui se périme.
+                          <div
+                            style={{
+                              height: "100%",
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: "4px",
+                              padding: "8px",
+                              textAlign: "center"
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontSize: "0.68rem",
+                                letterSpacing: "1px",
+                                color: "#666"
+                              }}
+                            >
+                              ACCÈS À LA BORNE
+                            </div>
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: "14px",
+                                alignItems: "center",
+                                marginTop: "2px"
+                              }}
+                            >
+                              <div>
+                                <div
+                                  style={{ fontSize: "0.62rem", color: "#666" }}
+                                >
+                                  IDENTIFIANT
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: "1.9rem",
+                                    fontWeight: "bold",
+                                    lineHeight: 1.1,
+                                    letterSpacing: "2px"
+                                  }}
+                                >
+                                  {ch.id}
+                                </div>
+                              </div>
+                              <div
+                                style={{
+                                  width: "1px",
+                                  alignSelf: "stretch",
+                                  background: "#bbb"
+                                }}
+                              />
+                              <div>
+                                <div
+                                  style={{ fontSize: "0.62rem", color: "#666" }}
+                                >
+                                  CODE
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: "1.9rem",
+                                    fontWeight: "bold",
+                                    lineHeight: 1.1,
+                                    letterSpacing: "3px"
+                                  }}
+                                >
+                                  {ch.code}
+                                </div>
+                              </div>
+                            </div>
+                            <div
+                              style={{
+                                fontSize: "0.64rem",
+                                color: "#666",
+                                marginTop: "4px"
+                              }}
+                            >
+                              Gardez ce billet : il ouvre votre compte toute la
+                              soirée.
+                            </div>
+                          </div>
+                        ) : ch.genre === "carte" ? (
                           // Une étiquette de carte : le nom, le code, et de
                           // quoi le saisir. Pas de fond de chèque ici, il n'a
                           // rien à y faire.
@@ -8551,7 +8714,9 @@
                     ))}
                   </div>
                   {fondCheque &&
-                    chequesImprimerie.some((ch) => ch.genre !== "carte") && (
+                    chequesImprimerie.some(
+                      (ch) => ch.genre !== "carte" && ch.genre !== "joueur"
+                    ) && (
                     <div
                       className="no-print"
                       style={{
