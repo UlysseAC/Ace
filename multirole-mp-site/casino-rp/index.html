@@ -2778,6 +2778,30 @@
         // États Imprimerie (PDF)
         const [imprMissionId, setImprMissionId] = React.useState(1);
         const [imprCarteId, setImprCarteId] = React.useState("");
+        // Ce que la table des codes montre : tout, ou seulement ce qui vaut
+        // encore quelque chose.
+        const [filtreCodes, setFiltreCodes] = React.useState("valides");
+
+        // Ce qu'un code ouvre, en clair. « Mission » ou « Carte » tout court
+        // ne suffit plus dès qu'on a imprimé deux fournées : l'organisateur
+        // veut savoir laquelle il lui reste à distribuer.
+        const ceQuOuvreLeCode = (q) => {
+          if (!q) return "—";
+          if (q.type === "Carte") {
+            const c = (cartesJeu || []).find(
+              (x) => String(x.id) === String(q.carteId)
+            );
+            return `🃏 ${(c || {}).nom || q.nomCarte || "carte retirée du jeu"}`;
+          }
+          const m = (missions || []).find(
+            (x) => String(x.id) === String(q.missionId)
+          );
+          const montant = nombreSur(q.montant, (m || {}).montant);
+          return (
+            `💵 ${(m || {}).nom || "mission retirée du jeu"}` +
+            (montant ? ` — ${montant}$` : "")
+          );
+        };
         // Le fond a sa propre clé : rangé avec le reste de la configuration,
         // il repartirait vers la base à chaque frappe dans un champ voisin.
         const [fondCheque, setFondCheque] = useEtatPartage("fondCheque", null);
@@ -8989,28 +9013,142 @@
                 />
               </div>
 
-              <div style={cadre}>
-                <h3 style={{ color: "#2196F3", marginTop: 0 }}>
-                  Table 3 — Codes ({codesRegistre.length})
-                </h3>
-                <Table
-                  colonnes={["Code", "Type", "Statut"]}
-                  vide="Aucun code généré. Ils apparaissent après une impression de chèques."
-                  lignes={codesRegistre.map((q) => [
-                    q.code || q.hash,
-                    q.type,
-                    q.statut === "Encaissé"
-                      ? `Encaissé${q.parNom ? " — " + q.parNom : ""}${
-                          q.leQuand ? " à " + q.leQuand : ""
-                        }`
-                      : "Valide"
-                  ])}
-                />
-                <p style={{ color: "#777", fontSize: "0.8rem", margin: "8px 0 0" }}>
-                  Un chèque s'encaisse une fois pour toute la table : imprimez-en
-                  autant que de joueurs censés faire la mission.
-                </p>
-              </div>
+              {(() => {
+                const actif = (q) => q.statut !== "Encaissé";
+                const valides = codesRegistre.filter(actif);
+                const encaisses = codesRegistre.filter((q) => !actif(q));
+
+                // Combien il reste de chaque chose, dans l'ordre où les
+                // fournées ont été imprimées : c'est ce qu'on regarde avant
+                // d'aller en tirer d'autres.
+                const parSujet = [];
+                codesRegistre.forEach((q) => {
+                  const nom = ceQuOuvreLeCode(q);
+                  let ligne = parSujet.find((x) => x.nom === nom);
+                  if (!ligne) {
+                    ligne = { nom, total: 0, restants: 0 };
+                    parSujet.push(ligne);
+                  }
+                  ligne.total++;
+                  if (actif(q)) ligne.restants++;
+                });
+
+                const montre =
+                  filtreCodes === "valides"
+                    ? valides
+                    : filtreCodes === "encaisses"
+                      ? encaisses
+                      : codesRegistre;
+
+                const onglet = (cle, libelle, combien, couleur) => (
+                  <button
+                    key={cle}
+                    onClick={() => setFiltreCodes(cle)}
+                    style={{
+                      padding: "5px 12px",
+                      background: filtreCodes === cle ? couleur : "transparent",
+                      color: filtreCodes === cle ? "#fff" : "#999",
+                      border: "1px solid " + (filtreCodes === cle ? couleur : "#555"),
+                      borderRadius: "14px",
+                      fontSize: "0.8rem",
+                      fontWeight: filtreCodes === cle ? "bold" : "normal",
+                      cursor: "pointer"
+                    }}
+                  >
+                    {libelle} ({combien})
+                  </button>
+                );
+
+                return (
+                  <div style={cadre}>
+                    <h3 style={{ color: "#2196F3", marginTop: 0 }}>
+                      Table 3 — Codes ({codesRegistre.length})
+                    </h3>
+
+                    {/* Ce qui reste à distribuer, par mission et par carte. */}
+                    {parSujet.length > 0 && (
+                      <div
+                        style={{
+                          display: "flex",
+                          flexWrap: "wrap",
+                          gap: "8px",
+                          marginBottom: "14px"
+                        }}
+                      >
+                        {parSujet.map((x) => (
+                          <div
+                            key={x.nom}
+                            style={{
+                              background: "#1a1a1a",
+                              border:
+                                "1px solid " + (x.restants ? "#2E7D32" : "#444"),
+                              borderRadius: "10px",
+                              padding: "7px 12px",
+                              fontSize: "0.82rem",
+                              color: x.restants ? "#ddd" : "#777"
+                            }}
+                          >
+                            {x.nom}
+                            <strong
+                              style={{
+                                color: x.restants ? "#81C784" : "#777",
+                                marginLeft: "8px"
+                              }}
+                            >
+                              {x.restants} / {x.total}
+                            </strong>
+                            <span style={{ color: "#777" }}> encore valides</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: "8px",
+                        flexWrap: "wrap",
+                        marginBottom: "12px"
+                      }}
+                    >
+                      {onglet("valides", "✅ Encore valides", valides.length, "#2E7D32")}
+                      {onglet("encaisses", "✔️ Déjà encaissés", encaisses.length, "#555")}
+                      {onglet("tous", "Tous", codesRegistre.length, "#1565C0")}
+                    </div>
+
+                    <Table
+                      colonnes={["Code", "Ouvre", "Statut"]}
+                      vide={
+                        codesRegistre.length === 0
+                          ? "Aucun code généré. Ils apparaissent après une impression de chèques ou de cartes."
+                          : filtreCodes === "valides"
+                            ? "Plus aucun code valide : tout a été encaissé."
+                            : "Aucun code encaissé pour l'instant."
+                      }
+                      lignes={montre.map((q) => [
+                        q.code || q.hash,
+                        ceQuOuvreLeCode(q),
+                        actif(q) ? (
+                          <span style={{ color: "#81C784", fontWeight: "bold" }}>
+                            ● Valide
+                          </span>
+                        ) : (
+                          <span style={{ color: "#888" }}>
+                            ○ Encaissé
+                            {q.parNom ? " — " + q.parNom : ""}
+                            {q.leQuand ? " à " + q.leQuand : ""}
+                          </span>
+                        )
+                      ])}
+                    />
+                    <p style={{ color: "#777", fontSize: "0.8rem", margin: "8px 0 0" }}>
+                      Un code ne sert qu'une fois, pour toute la table :
+                      imprimez-en autant que de joueurs censés faire la mission
+                      ou recevoir la carte.
+                    </p>
+                  </div>
+                );
+              })()}
 
               <div style={cadre}>
                 <h3 style={{ color: "#FF9800", marginTop: 0 }}>
