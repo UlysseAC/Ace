@@ -908,10 +908,17 @@
        * appareil qui se connecte.
        */
       const LARGEUR_FOND_MAX = 1600;
+      /*
+       * Où se posent les trois valeurs sur le fond, en pourcentage du chèque.
+       * Ce sont les coordonnées des traits du modèle « Banque ACE » : le
+       * numéro en haut à droite, la mission puis le montant au milieu. Un
+       * autre fond se règle d'un glissement, ces chiffres ne sont qu'un point
+       * de départ — mais un point de départ juste pour le chèque livré.
+       */
       const CHAMPS_CHEQUE_DEFAUT = {
-        montant: { x: 70, y: 42, taille: 1.2 },
-        mission: { x: 24, y: 62, taille: 0.9 },
-        code: { x: 76, y: 84, taille: 1 }
+        montant: { x: 50.7, y: 73.1, taille: 1.2 },
+        mission: { x: 50.7, y: 54.3, taille: 0.9 },
+        code: { x: 87.3, y: 11.4, taille: 1 }
       };
       const LIBELLE_CHAMP_CHEQUE = {
         montant: "Montant",
