@@ -2468,7 +2468,7 @@
         // --- TABLE 1 : COMPTE DES JOUEURS ---
         const [joueurs, setJoueurs] = useEtatPartage("joueurs", [
           {
-            id: "steph",
+            id: "1",
             code: "1234",
             nom: "Steph",
             solde: 5000,
@@ -2491,7 +2491,7 @@
             penalitesSubies: []
           },
           {
-            id: "1",
+            id: "2",
             code: "1111",
             nom: "Alex",
             solde: 5400,
@@ -2514,7 +2514,7 @@
             penalitesSubies: []
           },
           {
-            id: "2",
+            id: "3",
             code: "2222",
             nom: "Sarah",
             solde: 3850,
@@ -2537,7 +2537,7 @@
             penalitesSubies: []
           },
           {
-            id: "3",
+            id: "4",
             code: "3333",
             nom: "Marc",
             solde: 2100,
@@ -3289,8 +3289,10 @@
             "Olivia", "Pierre", "Quentin", "Rania", "Samuel", "Théa",
             "Ulysse", "Vera", "Willem", "Xénia", "Yanis"
           ];
+          // Numéro et code à quatre chiffres : la table d'essai se tape au
+          // pavé numérique comme la vraie.
           return prenoms.map((nom, i) => ({
-            id: `test${i + 1}`,
+            id: String(i + 1),
             code: String(1000 + i + 1),
             nom,
             ordre: i + 1,
