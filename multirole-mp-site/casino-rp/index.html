@@ -87,7 +87,25 @@
         // Une carte ramassée avant ce réglage n'a pas d'horodatage : on ne va
         // pas la bloquer pour autant.
         if (!recu) return 0;
-        return Math.max(0, recu + attente - maintenant);
+        /*
+         * L'heure de ramassage est écrite par l'appareil qui a donné la
+         * carte ; l'attente se lit sur l'appareil qui la regarde. Deux
+         * horloges, donc — et une tablette sortie du carton peut en être à
+         * des semaines de la vérité. Le calcul brut annonçait alors « jouable
+         * dans 82543 min » : deux mois d'attente pour un quart d'heure réglé,
+         * et un décompte qui n'avançait jamais.
+         *
+         * Un horodatage venu du futur est celui d'un appareil mal réglé.
+         * Passé le temps de garde lui-même, il ne veut plus rien dire : on le
+         * tient pour inutilisable et la carte se joue, exactement comme une
+         * carte sans horodatage. Un décalage ne doit pas priver un joueur de
+         * sa carte toute la soirée.
+         */
+        if (recu - maintenant > attente) return 0;
+        // En deçà, c'est un décalage de rien du tout : le décompte le
+        // rattrape tout seul. On borne quand même l'affichage au temps de
+        // garde réglé, pour ne jamais annoncer plus que ce qui est promis.
+        return Math.min(attente, Math.max(0, recu + attente - maintenant));
       };
 
       /*
@@ -2788,7 +2806,7 @@
 
         // États Croupier
         const [tableCroupier, setTableCroupier] = React.useState("");
-        const [joueurCroupierId, setJoueurCroupierId] = React.useState("steph");
+        const [joueurCroupierId, setJoueurCroupierId] = React.useState("");
         const [saisieCroupierManuelle, setSaisieCroupierManuelle] =
           React.useState("");
         const [croupierStack, setCroupierStack] = React.useState([]);
@@ -5670,9 +5688,30 @@
         //    rien gagné ni perdu : aucune carte ne s'y applique ;
         //  - le retour des jetons révèle le résultat, et c'est là que
         //    Le Veinard adoucit la perte ou gonfle le gain.
+        /*
+         * Le compte servi à la table.
+         *
+         * L'état peut nommer quelqu'un qui n'est plus là : une partie
+         * rechargée, une fiche renumérotée, un joueur retiré. On retombe
+         * alors sur le premier de la liste — c'est aussi ce que la liste
+         * déroulante affiche — plutôt que sur personne, car « personne »
+         * faisait échouer l'opération sans le moindre message : le croupier
+         * appuyait, et rien ne se passait.
+         */
+        const idServiAuCroupier = joueurs.some(
+          (j) => String(j.id) === String(joueurCroupierId)
+        )
+          ? String(joueurCroupierId)
+          : String((joueurs[0] || {}).id || "");
+
         const actionCroupierCalcul = (typeOp) => {
-          const jC = joueurs.find((j) => j.id === joueurCroupierId);
-          if (!jC) return;
+          const jC = joueurs.find(
+            (j) => String(j.id) === String(idServiAuCroupier)
+          );
+          if (!jC) {
+            alert("Aucun joueur n'est servi à cette table.");
+            return;
+          }
           const montant = totalCroupier;
 
           if (montant <= 0) {
@@ -13718,7 +13757,9 @@
             );
           }
 
-          const jC = joueursActifs.find((j) => j.id === joueurCroupierId);
+          const jC = joueursActifs.find(
+            (j) => String(j.id) === String(idServiAuCroupier)
+          );
           // Les paris pris sur le joueur sélectionné : celui qui lui a vendu
           // ses jetons doit le savoir, et celui qui le sert aussi.
           const parisSurJC = jC ? parisOuvertsSur(jC.id) : [];
@@ -13860,7 +13901,7 @@
                 }}
               >
                 <select
-                  value={joueurCroupierId}
+                  value={idServiAuCroupier}
                   onChange={(e) => setJoueurCroupierId(e.target.value)}
                   style={{
                     padding: "12px",
