@@ -3458,21 +3458,14 @@
           : horloge;
 
         // ---- Plein écran ----
-        // Le verrou sert à la borne : Échap fait toujours sortir du plein
-        // écran — aucun navigateur ne laisse le bloquer, c'est une garantie
-        // faite à l'utilisateur. On rattrape donc la sortie : dès qu'elle
-        // arrive, un panneau couvre la borne tant que le code n'est pas donné.
+        // Un simple va-et-vient : on y entre, on en sort. Échap en fait
+        // toujours sortir — aucun navigateur ne laisse le bloquer, c'est une
+        // garantie faite à l'utilisateur, et il ne sert à rien de courir
+        // après.
         const [pleinEcran, setPleinEcran] = React.useState(false);
-        const [verrouEcran, setVerrouEcran] = React.useState(false);
-        const [demandeSortie, setDemandeSortie] = React.useState(false);
-        const [codeSortie, setCodeSortie] = React.useState("");
 
         React.useEffect(() => {
-          const suivre = () => {
-            const actif = enPleinEcran();
-            setPleinEcran(actif);
-            if (!actif && verrouEcran) setDemandeSortie(true);
-          };
+          const suivre = () => setPleinEcran(enPleinEcran());
           suivre();
           document.addEventListener("fullscreenchange", suivre);
           document.addEventListener("webkitfullscreenchange", suivre);
@@ -3480,14 +3473,11 @@
             document.removeEventListener("fullscreenchange", suivre);
             document.removeEventListener("webkitfullscreenchange", suivre);
           };
-        }, [verrouEcran]);
+        }, []);
 
-        const basculerPleinEcran = (verrouiller) => {
+        const basculerPleinEcran = () => {
           if (!enPleinEcran()) {
             passerEnPleinEcran()
-              .then(() => {
-                if (verrouiller) setVerrouEcran(true);
-              })
               .catch(() =>
                 alert(
                   "Cet appareil ne propose pas le plein écran.\n\n" +
@@ -3499,16 +3489,12 @@
               );
             return;
           }
-          if (verrouiller && verrouEcran) {
-            setDemandeSortie(true);
-            return;
-          }
           quitterLePleinEcran();
         };
 
-        const boutonPleinEcran = (verrouiller) => (
+        const boutonPleinEcran = () => (
           <button
-            onClick={() => basculerPleinEcran(verrouiller)}
+            onClick={basculerPleinEcran}
             className="bouton-plein-ecran no-print"
             title={pleinEcran ? "Quitter le plein écran" : "Passer en plein écran"}
             style={{
@@ -3526,95 +3512,6 @@
           </button>
         );
 
-        const validerSortie = () => {
-          if (String(codeSortie) !== String(configGlobale.codeAdmin)) {
-            alert("Code incorrect.");
-            return;
-          }
-          setVerrouEcran(false);
-          setDemandeSortie(false);
-          setCodeSortie("");
-          quitterLePleinEcran();
-        };
-
-        // Le panneau de déverrouillage de la borne. Il couvre tout : tant que
-        // le code n'est pas donné, il n'y a rien d'autre à faire que revenir
-        // en plein écran.
-        const panneauVerrou = () =>
-          demandeSortie ? (
-            <div
-              style={{
-                position: "fixed",
-                inset: 0,
-                zIndex: 9999,
-                background: "#0b0b0b",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "16px",
-                padding: "24px",
-                textAlign: "center"
-              }}
-            >
-              <div style={{ fontSize: "3rem" }}>🔒</div>
-              <h2 style={{ margin: 0, color: "#FFC107" }}>Borne verrouillée</h2>
-              <p style={{ color: "#aaa", maxWidth: "420px", margin: 0 }}>
-                Le code administrateur est demandé pour quitter le plein écran.
-              </p>
-              <input
-                type="password"
-                inputMode="numeric"
-                value={codeSortie}
-                onChange={(e) => setCodeSortie(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") validerSortie();
-                }}
-                placeholder="Code administrateur"
-                style={{
-                  padding: "12px",
-                  fontSize: "1.2rem",
-                  textAlign: "center",
-                  width: "220px",
-                  borderRadius: "8px",
-                  border: "1px solid #555"
-                }}
-              />
-              <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "center" }}>
-                <button
-                  onClick={validerSortie}
-                  style={{
-                    padding: "12px 18px",
-                    background: "#F44336",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: "8px",
-                    fontWeight: "bold",
-                    cursor: "pointer"
-                  }}
-                >
-                  Déverrouiller
-                </button>
-                <button
-                  onClick={() => {
-                    setDemandeSortie(false);
-                    setCodeSortie("");
-                    passerEnPleinEcran().catch(() => {});
-                  }}
-                  style={{
-                    padding: "12px 18px",
-                    background: "#333",
-                    color: "#ddd",
-                    border: "none",
-                    borderRadius: "8px",
-                    cursor: "pointer"
-                  }}
-                >
-                  Revenir en plein écran
-                </button>
-              </div>
-            </div>
-          ) : null;
 
 
         const course = infosCourse(
@@ -9244,7 +9141,6 @@
                 position: "relative"
               }}
             >
-              {panneauVerrou()}
               <div
                 style={{
                   position: "fixed",
@@ -9253,7 +9149,7 @@
                   zIndex: 40
                 }}
               >
-                {boutonPleinEcran(true)}
+                {boutonPleinEcran()}
               </div>
               {/* Superposition de l'animation globale pour synchronisation visuelle */}
               {animationActive && (
@@ -9430,7 +9326,7 @@
                       tablette posée pour la soirée, c'est la première chose
                       qu'on cherche. */}
                   <button
-                    onClick={() => basculerPleinEcran(true)}
+                    onClick={basculerPleinEcran}
                     style={{
                       marginTop: "18px",
                       padding: "8px 12px",
@@ -9454,7 +9350,7 @@
                       lineHeight: 1.5
                     }}
                   >
-                    Le code administrateur est demandé pour en sortir.
+                    L'écran de la borne occupe alors toute la tablette.
                   </div>
                 </div>
               ) : (
@@ -13295,7 +13191,7 @@
                   zIndex: 40
                 }}
               >
-                {boutonPleinEcran(false)}
+                {boutonPleinEcran()}
               </div>
               <div
                 style={{
@@ -14280,7 +14176,7 @@
                   zIndex: 40
                 }}
               >
-                {boutonPleinEcran(false)}
+                {boutonPleinEcran()}
               </div>
               {/* Décompte discret, dans un coin, seulement à l'approche. */}
               {course.active &&
