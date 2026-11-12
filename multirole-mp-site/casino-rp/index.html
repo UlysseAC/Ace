@@ -3639,6 +3639,8 @@
         const ouvrirLeKiosque = () => {
           ecrireLocal(CLE_KIOSQUE, "1");
           setKiosque(true);
+          // On y est déjà : le panneau d'attente n'a pas à s'interposer.
+          setKiosqueOuvert(true);
           setInterfaceActive("banque");
           fermerSessionJoueur();
           if (enPleinEcran()) {
@@ -3666,6 +3668,7 @@
         const fermerLeKiosque = React.useCallback(() => {
           ecrireLocal(CLE_KIOSQUE, "");
           setKiosque(false);
+          setKiosqueOuvert(false);
           setVerrouEcran(false);
           quitterLePleinEcran();
         }, []);
@@ -3673,7 +3676,14 @@
         // Au rechargement, le plein écran est perdu : aucun navigateur ne le
         // rend sans un geste. Un panneau attend donc le premier doigt — et il
         // couvre tout, pour que la borne ne s'ouvre pas à moitié.
-        const kiosqueAReprendre = kiosque && !pleinEcran && !demandeSortie;
+        //
+        // Ce doigt suffit à lever le panneau, que le plein écran ait été
+        // accordé ou non. Safari sur iPad le refuse à une page : s'en remettre
+        // au seul plein écran y laissait la tablette coincée sur le panneau,
+        // à répéter un geste qui ne pouvait rien changer.
+        const [kiosqueOuvert, setKiosqueOuvert] = React.useState(false);
+        const kiosqueAReprendre =
+          kiosque && !kiosqueOuvert && !pleinEcran && !demandeSortie;
 
         const course = infosCourse(
           maintenant,
@@ -6544,12 +6554,13 @@
           return (
             <div
               onClick={() => {
+                // Le panneau n'est pas une serrure, seulement le geste qui
+                // manque au navigateur : il se lève d'abord, et le plein
+                // écran se demande ensuite, s'il est à prendre.
+                setKiosqueOuvert(true);
                 passerEnPleinEcran()
                   .then(() => setVerrouEcran(true))
-                  // Sans plein écran — un iPad sous Safari — la borne s'ouvre
-                  // quand même : le panneau n'est pas une serrure, seulement
-                  // le geste qui manque au navigateur.
-                  .catch(() => setKiosque(true));
+                  .catch(() => {});
               }}
               style={{
                 position: "fixed",
