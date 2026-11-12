@@ -152,6 +152,52 @@
         return multiligne ? <textarea {...props} /> : <input {...props} />;
       }
 
+      /*
+       * Les quatre opérations, pour le clavier du croupier.
+       *
+       * La multiplication et la division d'abord, comme à l'école. Pas de
+       * parenthèses : le clavier n'en propose pas, et une table de jeu n'en
+       * a jamais eu besoin. Une saisie encore ouverte — « 250+ » — ne vaut
+       * rien tant qu'elle n'est pas finie : on renvoie null plutôt qu'un
+       * nombre faux, et l'écran dit qu'il attend la suite.
+       */
+      const calculer = (expression) => {
+        const t = String(expression === undefined || expression === null ? "" : expression)
+          .replace(/\s/g, "");
+        if (!t) return 0;
+        if (!/^[0-9.+\-*/]+$/.test(t)) return null;
+        // Un signe en tête se lit depuis zéro : « -50 », c'est « 0-50 ».
+        const norme = /^[+\-]/.test(t) ? "0" + t : t;
+        const jetons = norme.match(/\d+(?:\.\d*)?|\.\d+|[+\-*/]/g);
+        if (!jetons) return null;
+        // Les jetons alternent nombre, opérateur, nombre… et finissent par
+        // un nombre.
+        for (let i = 0; i < jetons.length; i++) {
+          const estOp = /^[+\-*/]$/.test(jetons[i]);
+          if (estOp !== (i % 2 === 1)) return null;
+        }
+        if (jetons.length % 2 === 0) return null;
+
+        const nombres = [];
+        const ops = [];
+        jetons.forEach((j, i) => (i % 2 === 0 ? nombres.push(parseFloat(j)) : ops.push(j)));
+
+        for (let i = 0; i < ops.length; ) {
+          if (ops[i] === "*" || ops[i] === "/") {
+            const a = nombres[i];
+            const b = nombres[i + 1];
+            if (ops[i] === "/" && b === 0) return null;
+            nombres.splice(i, 2, ops[i] === "*" ? a * b : a / b);
+            ops.splice(i, 1);
+          } else i++;
+        }
+        let total = nombres[0];
+        ops.forEach((o, i) => {
+          total = o === "+" ? total + nombres[i + 1] : total - nombres[i + 1];
+        });
+        return Number.isFinite(total) ? total : null;
+      };
+
       const compteARebours = (ms) => {
         const s = Math.ceil(Math.max(0, ms) / 1000);
         if (s < 60) return `${s} s`;
@@ -5566,9 +5612,56 @@
         // était une échappatoire, pas un coup.
 
         // ================= LOGIQUE CROUPIER =================
+        // La saisie manuelle n'est plus un simple nombre mais un petit calcul,
+        // tapé au clavier de l'écran. Tant qu'il est inachevé, il ne compte
+        // pas. Le total, lui, s'arrondit : une table de jeu ne rend pas la
+        // monnaie sur un tiers de dollar.
+        // Le calcul se garde en texte brut — « 250+3*50 » — et se montre
+        // avec les signes qu'on écrit à la main.
+        const affichageCalcul = (t) =>
+          String(t === undefined || t === null ? "" : t)
+            .replace(/\*/g, "×")
+            .replace(/\//g, "÷")
+            .replace(/-/g, "−")
+            .replace(/\./g, ",");
+
+        /*
+         * Une touche du clavier de la table.
+         *
+         * Trois précautions, pour qu'un doigt pressé ne produise jamais une
+         * saisie impossible : deux opérateurs de suite se remplacent plutôt
+         * que de s'empiler, une virgule ne peut pas revenir deux fois dans le
+         * même nombre, et « = » ne pose le résultat que si le calcul est fini.
+         */
+        const toucheCroupier = (touche) => {
+          setSaisieCroupierManuelle((prec) => {
+            const texte = String(prec || "");
+            if (touche === "⌫") return texte.slice(0, -1);
+            if (touche === "=") {
+              const v = calculer(texte);
+              if (v === null) return texte;
+              return String(Math.round(v * 100) / 100);
+            }
+            if ("+-*/".includes(touche)) {
+              if (!texte) return touche === "-" ? "-" : texte;
+              if ("+-*/".includes(texte.slice(-1)))
+                return texte.slice(0, -1) + touche;
+              return texte + touche;
+            }
+            if (touche === ".") {
+              const dernierNombre = texte.split(/[+\-*/]/).pop();
+              if (dernierNombre.includes(".")) return texte;
+              return texte + (dernierNombre === "" ? "0." : ".");
+            }
+            return texte + touche;
+          });
+        };
+
+        const calculSaisi = calculer(saisieCroupierManuelle);
+        const saisieEnCours = calculSaisi === null;
         const totalCroupier =
           croupierStack.reduce((a, b) => a + b, 0) +
-          Number(saisieCroupierManuelle || 0);
+          (saisieEnCours ? 0 : Math.round(calculSaisi));
 
         // Deux temps distincts à la table :
         //  - l'achat de jetons n'est qu'une conversion, le joueur n'a encore
@@ -13891,16 +13984,24 @@
                   >
                     {totalCroupier} $
                   </span>
-                  {croupierStack.length > 0 && (
+                  {(croupierStack.length > 0 || saisieCroupierManuelle) && (
                     <div
                       style={{
-                        color: "#aaa",
+                        color: saisieEnCours ? "#FFC107" : "#aaa",
                         fontSize: "0.9rem",
                         marginTop: "5px"
                       }}
                     >
-                      Détail : {croupierStack.join(" + ")}{" "}
-                      {saisieCroupierManuelle && `+ ${saisieCroupierManuelle}`}
+                      Détail :{" "}
+                      {[
+                        croupierStack.join(" + "),
+                        saisieCroupierManuelle
+                          ? affichageCalcul(saisieCroupierManuelle)
+                          : ""
+                      ]
+                        .filter(Boolean)
+                        .join(" + ")}
+                      {saisieEnCours && " — calcul en cours…"}
                     </div>
                   )}
                 </div>
@@ -13931,28 +14032,102 @@
                   ))}
                 </div>
 
-                <div style={{ display: "flex", gap: "10px" }}>
-                  <input
-                    type="number"
-                    placeholder="Saisie manuelle"
-                    value={saisieCroupierManuelle}
-                    onChange={(e) => setSaisieCroupierManuelle(e.target.value)}
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Saisie manuelle — ou le clavier ci-dessous"
+                  value={affichageCalcul(saisieCroupierManuelle)}
+                  onChange={(e) =>
+                    // Ce que l'on tape reste du texte brut : les jolis signes
+                    // × et ÷ ne servent qu'à l'affichage.
+                    setSaisieCroupierManuelle(
+                      e.target.value
+                        .replace(/×/g, "*")
+                        .replace(/÷/g, "/")
+                        .replace(/−/g, "-")
+                        .replace(/,/g, ".")
+                    )
+                  }
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    background: "#333",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "8px",
+                    fontSize: "1.3rem",
+                    textAlign: "right",
+                    boxSizing: "border-box"
+                  }}
+                />
+
+                {/* Le clavier de la table. Les croupiers n'ont pas de clavier
+                    physique devant eux : tout se tape ici, les quatre
+                    opérations comprises. */}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(4, 1fr)",
+                    gap: "8px"
+                  }}
+                >
+                  {[
+                    ["7", "7"], ["8", "8"], ["9", "9"], ["÷", "/"],
+                    ["4", "4"], ["5", "5"], ["6", "6"], ["×", "*"],
+                    ["1", "1"], ["2", "2"], ["3", "3"], ["−", "-"],
+                    ["0", "0"], [",", "."], ["⌫", "⌫"], ["+", "+"]
+                  ].map(([libelle, touche]) => {
+                    const operateur = "+-*/".includes(touche);
+                    return (
+                      <button
+                        key={libelle}
+                        onClick={() => toucheCroupier(touche)}
+                        style={{
+                          padding: "16px 0",
+                          background:
+                            touche === "⌫"
+                              ? "#5D4037"
+                              : operateur
+                                ? "#37474F"
+                                : "#444",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "8px",
+                          fontSize: "1.4rem",
+                          fontWeight: "bold",
+                          cursor: "pointer"
+                        }}
+                      >
+                        {libelle}
+                      </button>
+                    );
+                  })}
+                  <button
+                    onClick={() => toucheCroupier("=")}
                     style={{
-                      flex: 2,
-                      padding: "12px",
-                      background: "#333",
+                      gridColumn: "span 4",
+                      padding: "14px 0",
+                      background: "#2E7D32",
                       color: "#fff",
                       border: "none",
                       borderRadius: "8px",
-                      fontSize: "1.1rem"
+                      fontSize: "1.2rem",
+                      fontWeight: "bold",
+                      cursor: "pointer"
                     }}
-                  />
+                  >
+                    = poser le résultat
+                  </button>
+                </div>
+
+                <div style={{ display: "flex", gap: "10px" }}>
                   <button
                     onClick={() =>
                       setCroupierStack((prev) => prev.slice(0, -1))
                     }
                     style={{
                       flex: 1,
+                      padding: "12px",
                       background: "#FF9800",
                       color: "#fff",
                       border: "none",
@@ -13970,6 +14145,7 @@
                     }}
                     style={{
                       flex: 1,
+                      padding: "12px",
                       background: "#f44336",
                       color: "#fff",
                       border: "none",
