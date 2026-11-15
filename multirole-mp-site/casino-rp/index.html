@@ -452,6 +452,24 @@
       const CLE_ENTREE = "casino-rp:entree";
       const MARQUE_PORTE = "casino-rp:porte";
 
+      /*
+       * Cet appareil sait-il mettre une page en plein écran ?
+       *
+       * Safari sur iPad et iPhone le réserve aux vidéos : la demande est
+       * rejetée, quoi qu'on fasse. Plutôt que de proposer un bouton qui ne
+       * peut rien et d'expliquer l'échec aux joueurs en pleine soirée, on ne
+       * montre le bouton que là où il sert à quelque chose.
+       */
+      const pleinEcranPossible = () => {
+        if (typeof document === "undefined") return false;
+        const e = document.documentElement;
+        if (!e.requestFullscreen && !e.webkitRequestFullscreen) return false;
+        // Les navigateurs qui le refusent par politique le disent ici.
+        if (document.fullscreenEnabled === false) return false;
+        if (document.webkitFullscreenEnabled === false) return false;
+        return true;
+      };
+
       const enPleinEcran = () =>
         !!(document.fullscreenElement || document.webkitFullscreenElement);
 
@@ -3477,22 +3495,17 @@
 
         const basculerPleinEcran = () => {
           if (!enPleinEcran()) {
-            passerEnPleinEcran()
-              .catch(() =>
-                alert(
-                  "Cet appareil ne propose pas le plein écran.\n\n" +
-                    "Sur iPad et iPhone, Safari le réserve aux vidéos. La " +
-                    "solution : bouton Partager, puis « Ajouter à l'écran " +
-                    "d'accueil ». Le site s'ouvre alors en application, sans " +
-                    "barre d'adresse ni onglets — et sans touche Échap."
-                )
-              );
+            // Un refus ne se commente pas : le bouton n'est proposé que là où
+            // le plein écran marche, et si le navigateur dit non quand même,
+            // les joueurs n'ont pas à lire pourquoi au milieu de la soirée.
+            passerEnPleinEcran().catch(() => {});
             return;
           }
           quitterLePleinEcran();
         };
 
-        const boutonPleinEcran = () => (
+        const boutonPleinEcran = () =>
+          !pleinEcranPossible() ? null : (
           <button
             onClick={basculerPleinEcran}
             className="bouton-plein-ecran no-print"
@@ -9324,7 +9337,10 @@
 
                   {/* Le même geste que le ⛶ du coin, mais nommé : sur une
                       tablette posée pour la soirée, c'est la première chose
-                      qu'on cherche. */}
+                      qu'on cherche. Absent des appareils qui ne savent pas le
+                      faire — un iPad sous Safari — plutôt que de proposer un
+                      bouton mort. */}
+                  {pleinEcranPossible() && (
                   <button
                     onClick={basculerPleinEcran}
                     style={{
@@ -9342,16 +9358,7 @@
                       ? "⛶ En plein écran"
                       : "⛶ Passer en plein écran"}
                   </button>
-                  <div
-                    style={{
-                      color: "#555",
-                      fontSize: "0.72rem",
-                      marginTop: "6px",
-                      lineHeight: 1.5
-                    }}
-                  >
-                    L'écran de la borne occupe alors toute la tablette.
-                  </div>
+                  )}
                 </div>
               ) : (
                 <div>
